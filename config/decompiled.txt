@@ -134,6 +134,7 @@ xglCdStreamReadRingCore = 0x0021EA38, 0x28; // xglCd
 xglCdArcCheck = 0x0021FA30, 0x34; // xglCd
 xglPacketGetCurrent = 0x0022C450, 0x8; // xglPacket
 xglPacketInit = 0x0022C458, 0x5C; // xglPacket
+xglPacketMove = 0x0022C4B8, 0x64; // xglPacket
 xglPacketSend = 0x0022C520, 0x34; // xglPacket
 xglRenderVSyncCallback = 0x0022CB80, 0x5C; // xglRender
 xglRenderSyncInit = 0x0022CBE0, 0x24; // xglRender
