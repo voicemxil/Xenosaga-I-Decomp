@@ -316,6 +316,7 @@ SsdSetVagStreamVolume = 0x00241F70, 0x4C; // ssd
 SsdSetVagStreamPanpot = 0x00241FC0, 0x4C; // ssd
 SsdSetVagStreamParam = 0x00242010, 0x50; // ssd
 SsdClearStreamRingBuffer = 0x00242060, 0x44; // ssd
+SsdInitMemoryManager = 0x002420A8, 0x60; // ssd
 SsdNewMemoryPtr = 0x00242108, 0x48; // ssd
 SsdDisposeMemoryPtr = 0x00242380, 0x2C; // ssd
 SsdGetBlockMemorySize = 0x00242408, 0x10; // ssd

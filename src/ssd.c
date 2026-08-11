@@ -1104,6 +1104,39 @@ int SsdClearStreamRingBuffer(int nChannel)
     return RssdCallFunc(0xA8, &pkt, 0, 0);
 }
 
+/* Initialize the 64-byte-aligned sound heap and its first free block */
+void SsdInitMemoryManager(void *pAddr, int nSize)
+{
+    volatile RSSD_WORK *pWork;
+    volatile SSD_MEMBLOCK *pBlock;
+    register signed char nUsed;
+    register char *pBlockEnd;
+    char *pStart;
+    int nMagic;
+
+    pStart = pAddr;
+    nSize &= ~0x3F;
+    if ((unsigned int)pStart & 0x3F) {
+        pStart = (char *)(((unsigned int)pStart + 0x3F) & ~0x3F);
+        nSize -= 0x40;
+    }
+
+    pWork = &RssdWork;
+    pWork->nMemSize = nSize;
+    pWork->pMemEnd = pStart + nSize;
+    pWork->pMemStart = pStart;
+
+    pBlock = (SSD_MEMBLOCK *)pStart;
+    nUsed = -0x7F;
+    nMagic = 0x504F544D;
+    pBlockEnd = pStart + 0x40;
+    pBlock->nMagic = nMagic;
+    pBlock->pNext = 0;
+    pBlock->nUsed = nUsed;
+    pBlock->pEnd = pBlockEnd;
+    pBlock->nUnk09 = 0;
+}
+
 /* Allocate from the sound heap with interrupts disabled */
 void *SsdNewMemoryPtr(int nSize, int nAlign)
 {
