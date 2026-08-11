@@ -64,6 +64,7 @@ int xglCullingCheckSeparate(void *p1, void *p2)
     nRet = 0;
     i = nRet;
     i = nRet;
+    /* TODO: Find the natural source shape that schedules the ra save here. */
     __asm__("" ::: "$31", "memory");
 loop:
     if (i < s_inCulling.nCount) {

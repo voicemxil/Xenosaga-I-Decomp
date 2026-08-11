@@ -110,6 +110,7 @@ void xglRenderClearEnvMove(void)
 /* Rotate the display buffers and clear the per-frame swap state */
 void xglRenderSwapBase(void)
 {
+    /* TODO: Find the natural source shape for this register/store schedule. */
     register u_short nTmp __asm__("$7");
     register u_short nFront __asm__("$6");
     register u_short nDisp __asm__("$3");
