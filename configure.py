@@ -33,6 +33,25 @@ CC_ASFLAGS = "-march=r5900 -mabi=eabi -Iinclude --no-warn"
 CFLAGS = "-O2 -G0 -fno-schedule-insns"
 LDFLAGS = "--allow-multiple-definition -m elf32lr5900 --noinhibit-exec"
 
+# Game code was compiled with a newer compiler than the SDK libraries:
+# ee-gcc 2.96-ee-001003-1 (bundled in SquareMan/xenosaga under tools/cc/,
+# installed at /opt/ee-gcc2.96 in the dev container). Evidence: slti+movn
+# cmov shape, xori-before-movz equality artifacts, and jump-target
+# alignment nops that 2.9-ee-991111 cannot produce at any flag setting.
+CC96 = "/opt/ee-gcc2.96/bin/ee-gcc"
+
+# Per-file overrides. Game code accesses small globals through $gp
+# (%gp_rel), so it needs -G8 like the original build; -G0 would emit
+# lui/lw pairs that can't match.
+FILE_CC = {
+    "SCRIPT.c": CC96,
+}
+# Note: game code (2.96) matches with plain -O2 -G8; adding
+# -fno-schedule-insns perturbs its register allocation.
+FILE_CFLAGS = {
+    "SCRIPT.c": "-O2 -G8",
+}
+
 
 def clean():
     import shutil
@@ -96,8 +115,11 @@ def generate_ninja(asm_files, src_files, asset_files):
         f.write(f"  command = {AS} {ASFLAGS} -o $out $in\n")
         f.write(f"  description = AS $in\n\n")
 
+        f.write(f"cflags = {CFLAGS}\n")
+        f.write(f"cc = {CC}\n\n")
+
         f.write(f"rule cc\n")
-        f.write(f"  command = {CC} {CFLAGS} -S -o $out.s $in && sed -i 's/\\tmove\\t\\(\\$$[0-9]*\\),\\(\\$$[0-9]*\\)/\\tdaddu\\t\\1,\\2,$$0/' $out.s && {AS} {CC_ASFLAGS} -o $out $out.s\n")
+        f.write(f"  command = $cc $cflags -S -o $out.s $in && sed -i 's/\\tmove\\t\\(\\$$[0-9]*\\),\\(\\$$[0-9]*\\)/\\tdaddu\\t\\1,\\2,$$0/' $out.s && {AS} {CC_ASFLAGS} -o $out $out.s\n")
         f.write(f"  description = CC $in\n\n")
 
         f.write(f"rule ld\n")
@@ -119,6 +141,10 @@ def generate_ninja(asm_files, src_files, asset_files):
             obj = BUILD_DIR / src.with_suffix(".o")
             obj_files.append(str(obj))
             f.write(f"build {obj}: cc {src}\n")
+            if src.name in FILE_CFLAGS:
+                f.write(f"  cflags = {FILE_CFLAGS[src.name]}\n")
+            if src.name in FILE_CC:
+                f.write(f"  cc = {FILE_CC[src.name]}\n")
 
         for asset in asset_files:
             obj = BUILD_DIR / asset.with_suffix(".o")

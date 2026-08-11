@@ -10,14 +10,32 @@ CC_OBJDUMP = "/usr/local/ps2dev/ee/bin/mips64r5900el-ps2-elf-objdump"
 
 def get_words(cmd):
     """Extract instruction words from objdump output."""
+    words, _ = get_words_relocs(cmd)
+    return words
+
+
+def get_words_relocs(cmd):
+    """Extract instruction words and relocation indices from objdump output.
+
+    Returns (words, relocs) where relocs maps instruction index ->
+    relocation type (e.g. "GPREL16") for instructions that carry a
+    relocation in the object file. Requires -r in cmd to see relocs.
+    """
     result = subprocess.run(cmd, capture_output=True, text=True)
     words = []
+    relocs = {}
     for line in result.stdout.split('\n'):
         # Match lines like: "  20b1d8:    8c820000    lw v0,0(a0)"
         m = re.match(r'\s+[0-9a-f]+:\s+([0-9a-f]{8})\b', line)
         if m:
             words.append(m.group(1))
-    return words
+            continue
+        # Relocation lines interleaved by objdump -dr:
+        # "      14: R_MIPS_GPREL16    s_nScriptTalkLock"
+        r = re.match(r'\s+[0-9a-f]+:\s+R_MIPS_(\w+)', line)
+        if r and words:
+            relocs[len(words) - 1] = r.group(1)
+    return words, relocs
 
 
 # Read decompiled.txt
@@ -80,9 +98,9 @@ for name, addr, size in entries:
         continue
 
     func_end = func_addr + size
-    built = get_words([CC_OBJDUMP, "-d",
-                       f"--start-address=0x{func_addr:x}",
-                       f"--stop-address=0x{func_end:x}", obj])
+    built, built_relocs = get_words_relocs([CC_OBJDUMP, "-d", "-r",
+                                            f"--start-address=0x{func_addr:x}",
+                                            f"--stop-address=0x{func_end:x}", obj])
 
     if not orig:
         print(f"  SKIP {name} - no original bytes found")
@@ -102,6 +120,14 @@ for name, addr, size in entries:
 
     orig_masked = [mask_word(w) for w in orig]
     built_masked = [mask_word(w) for w in built]
+
+    # Mask 16-bit immediates resolved at link time (gp-relative and
+    # hi/lo address pairs) — unresolved in the .o, like jal targets.
+    for i, rtype in built_relocs.items():
+        if rtype in ("GPREL16", "HI16", "LO16", "16", "LITERAL"):
+            if i < len(orig_masked) and i < len(built_masked):
+                orig_masked[i] = orig_masked[i][:4] + "0000"
+                built_masked[i] = built_masked[i][:4] + "0000"
 
     if orig_masked == built_masked:
         print(f"  OK   {name}")
