@@ -143,6 +143,7 @@ xglRenderClearDepth = 0x0022D528, 0x14; // xglRender
 xglRenderClearFrame = 0x0022D540, 0x14; // xglRender
 xglRenderClearColor = 0x0022D558, 0x34; // xglRender
 xglRenderClearEnvMove = 0x0022D658, 0x3C; // xglRender
+xglRenderSwapBase = 0x0022D770, 0x44; // xglRender
 xglRenderDispOff = 0x0022D7B8, 0x1C; // xglRender
 xglRenderDispOn = 0x0022D7D8, 0x1C; // xglRender
 xglRenderGlobalFadeInit = 0x0022D940, 0x18; // xglRender

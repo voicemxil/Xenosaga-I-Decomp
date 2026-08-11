@@ -107,6 +107,38 @@ void xglRenderClearEnvMove(void)
     xglDmaDirectNormal(2, (u_int)&ClearEnv, 6);
 }
 
+/* Rotate the display buffers and clear the per-frame swap state */
+void xglRenderSwapBase(void)
+{
+    register u_short nTmp __asm__("$7");
+    register u_short nFront __asm__("$6");
+    register u_short nDisp __asm__("$3");
+    register int nSum __asm__("$4");
+    register int nDrop __asm__("$5");
+
+    nSum = sRender.nUnk50;
+    nDrop = sRender.nDrop;
+    nTmp = sRender.nUnk22;
+    __asm__("" ::: "memory");
+    nFront = sRender.nFrontFbp;
+    nSum += nDrop;
+    nDisp = sRender.nDispFbp;
+    __asm__("" : "+r"(nSum), "+r"(nDrop), "+r"(nTmp), "+r"(nFront), "+r"(nDisp) : : "memory");
+    sRender.nFrontFbp = nTmp;
+    __asm__("" ::: "memory");
+    sRender.nUnk12 = nDisp;
+    __asm__("" ::: "memory");
+    sRender.nUnk22 = nFront;
+    __asm__("" ::: "memory");
+    sRender.nUnk50 = nSum;
+    sRender.nUnk54 = 0;
+    __asm__("" ::: "memory");
+    sRender.nDispFbp = nTmp;
+    sRender.nUnk48 = 0;
+    __asm__("" ::: "memory");
+    sRender.nDrop = 0;
+}
+
 /* Hide the display circuit */
 void xglRenderDispOff(void)
 {
