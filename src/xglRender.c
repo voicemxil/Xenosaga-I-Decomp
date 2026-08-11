@@ -135,34 +135,29 @@ void xglRenderClearEnvMove(void)
 /* Rotate the display buffers and clear the per-frame swap state */
 void xglRenderSwapBase(void)
 {
-    /* TODO: Find the natural source shape for this register/store schedule. */
+    /* TODO: Find the natural source shape for this register allocation. */
     register u_short nTmp __asm__("$7");
     register u_short nFront __asm__("$6");
     register u_short nDisp __asm__("$3");
     register int nSum __asm__("$4");
     register int nDrop __asm__("$5");
+    volatile XGLRENDER *pRender;
 
-    nSum = sRender.nUnk50;
-    nDrop = sRender.nDrop;
-    nTmp = sRender.nUnk22;
-    __asm__("" ::: "memory");
-    nFront = sRender.nFrontFbp;
+    pRender = &sRender;
+    nSum = pRender->nUnk50;
+    nDrop = pRender->nDrop;
+    nTmp = pRender->nUnk22;
+    nFront = pRender->nFrontFbp;
     nSum += nDrop;
-    nDisp = sRender.nDispFbp;
-    __asm__("" : "+r"(nSum), "+r"(nDrop), "+r"(nTmp), "+r"(nFront), "+r"(nDisp) : : "memory");
-    sRender.nFrontFbp = nTmp;
-    __asm__("" ::: "memory");
-    sRender.nUnk12 = nDisp;
-    __asm__("" ::: "memory");
-    sRender.nUnk22 = nFront;
-    __asm__("" ::: "memory");
-    sRender.nUnk50 = nSum;
-    sRender.nUnk54 = 0;
-    __asm__("" ::: "memory");
-    sRender.nDispFbp = nTmp;
-    sRender.nUnk48 = 0;
-    __asm__("" ::: "memory");
-    sRender.nDrop = 0;
+    nDisp = pRender->nDispFbp;
+    pRender->nFrontFbp = nTmp;
+    pRender->nUnk12 = nDisp;
+    pRender->nUnk22 = nFront;
+    pRender->nUnk50 = nSum;
+    pRender->nUnk54 = 0;
+    pRender->nDispFbp = nTmp;
+    pRender->nUnk48 = 0;
+    pRender->nDrop = 0;
 }
 
 /* Hide the display circuit */

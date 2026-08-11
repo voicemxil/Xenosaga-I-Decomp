@@ -44,8 +44,6 @@ void xglFlagsInitial(void)
     int nCount;
 
     pFlag = SaveData;
-    /* TODO: Find the natural source shape that keeps this base address distinct. */
-    __asm__("" : "+r"(pFlag));
     pFlag += 0x74;
     nCount = 0x10000;
     do {
