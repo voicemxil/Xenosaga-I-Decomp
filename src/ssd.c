@@ -1244,6 +1244,59 @@ int SsdGetMemoryBlocks(void)
     return nBlocks;
 }
 
+/* Copy a sound-memory span in 16-byte, word and byte tails */
+void SsdCopyMemory(void *pDest, const void *pSource, int nSize)
+{
+    char *pDst;
+    const char *pSrc;
+    unsigned char *pDstByte;
+    const unsigned char *pSrcByte;
+    long long nCount;
+    unsigned long long nWord0;
+    unsigned long long nWord1;
+    unsigned long long nWord2;
+    unsigned long long nWord3;
+
+    pDst = pDest;
+    pSrc = pSource;
+    nCount = nSize >> 4;
+    if (nCount != 0) {
+        do {
+            nWord0 = ((const unsigned int *)pSrc)[0];
+            nWord1 = ((const unsigned int *)pSrc)[1];
+            nWord2 = ((const unsigned int *)pSrc)[2];
+            nWord3 = ((const unsigned int *)pSrc)[3];
+            pSrc += 0x10;
+            ((int *)pDst)[0] = nWord0;
+            ((int *)pDst)[1] = nWord1;
+            ((int *)pDst)[2] = nWord2;
+            ((int *)pDst)[3] = nWord3;
+            pDst += 0x10;
+            nCount--;
+        } while (nCount != 0);
+    }
+
+    nCount = (nSize >> 2) & 3;
+    if (nCount != 0) {
+        do {
+            *(int *)pDst = *(const int *)pSrc;
+            pSrc += 4;
+            pDst += 4;
+            nCount--;
+        } while (nCount != 0);
+    }
+
+    nCount = nSize & 3;
+    if (nCount != 0) {
+        pSrcByte = (const unsigned char *)pSrc;
+        pDstByte = (unsigned char *)pDst;
+        do {
+            *pDstByte++ = *pSrcByte++;
+            nCount--;
+        } while (nCount != 0);
+    }
+}
+
 /* Clear a sound-memory span in 32-byte, 16-byte and byte tails */
 void SsdClearMemory(void *pAddr, int nSize)
 {
