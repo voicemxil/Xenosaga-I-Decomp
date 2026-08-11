@@ -1183,6 +1183,58 @@ found:
     return pData;
 }
 
+/* TODO: Match the remaining control-flow scheduling in this reverse allocator. */
+/* Allocate backward from the upper edge of the last fitting heap gap */
+void *iSsdNewMemoryPtr2(int nSize, int nMagic)
+{
+    SSD_MEMBLOCK *pCurrent;
+    SSD_MEMBLOCK *pNext;
+    SSD_MEMBLOCK *pSelected;
+    SSD_MEMBLOCK *pBlock;
+    char *pEnd;
+    char *pLimit;
+    char *pData;
+    int nRequired;
+
+    pSelected = 0;
+    pLimit = 0;
+    nRequired = ((nSize + 0x3F) & ~0x3F) + 0x40;
+    pCurrent = (SSD_MEMBLOCK *)RssdWork.pMemStart;
+
+    for (;;) {
+        pNext = pCurrent->pNext;
+        pEnd = pCurrent->pEnd;
+        if (pNext == 0) {
+            if (RssdWork.pMemEnd - pEnd >= nRequired) {
+                pSelected = pCurrent;
+                pLimit = RssdWork.pMemEnd;
+            }
+            break;
+        }
+        if ((char *)pNext - pEnd >= nRequired) {
+            pSelected = pCurrent;
+            pLimit = (char *)pNext;
+        }
+        pCurrent = pNext;
+    }
+
+    if (pSelected == 0) {
+        return 0;
+    }
+
+    pBlock = (SSD_MEMBLOCK *)(((unsigned int)(pLimit - nRequired) + 0x3F) & ~0x3F);
+    pData = (char *)pBlock + 0x40;
+    pBlock->nUsed = 0x12;
+    pBlock->nMagic = nMagic;
+    pBlock->pEnd = pData + nSize;
+    pBlock->pNext = 0;
+    pBlock->nUnk09 = 0;
+    SsdClearMemory(pData, nSize);
+    pBlock->pNext = pSelected->pNext;
+    pSelected->pNext = pBlock;
+    return pData;
+}
+
 /* Allocate from the sound heap with interrupts disabled */
 void *SsdNewMemoryPtr(int nSize, int nAlign)
 {
