@@ -25,8 +25,10 @@ static XGLDMACHAN *tbl_00490D60[3] = {
     (XGLDMACHAN *)0x10009000,
     (XGLDMACHAN *)0x1000A000,
 };
+XGLDMACHAN *mfifo_drain;
 
 void xglDmaDirectSrcChain(u_int nCh, u_int nAddr);
+void sceGsSyncPath(int nMode, int nTimeout);
 
 /* Kick a normal-mode DMA transfer on the given channel */
 void xglDmaDirectNormal(u_int nCh, u_int nAddr, u_int nQwc)
@@ -137,6 +139,84 @@ void xglDmaBufferRequest(XGLDMABUFF *pBuff, u_int nCh)
     FlushCache(0);
     xglDmaDirectSrcChain(nCh, (u_int)pBuff->pBase);
     pBuff->pCur = pBuff->pBase;
+}
+
+/* Configure the DMA controller for memory FIFO transfers */
+/* TODO: Match the remaining MMIO pointer/value register rotation. */
+void xglDmaMFIFOSetup(u_int nAddr, u_int nSize, int nCh)
+{
+    XGLDMACHAN *pChan;
+    vu_int *pCtrl;
+    vu_int *pAddr;
+    vu_int *pSize;
+    vu_int *pRing;
+    u_int nCtrl;
+
+    if (nCh < 3) {
+        pChan = tbl_00490D60[nCh];
+        pCtrl = (vu_int *)0x1000E000;
+        pAddr = (vu_int *)0x1000E050;
+        pSize = (vu_int *)0x1000E040;
+        pRing = (vu_int *)0x1000D010;
+        nCtrl = *pCtrl | 0xC;
+        *pAddr = nAddr;
+        *pCtrl = nCtrl;
+        *pSize = nSize - 0x10;
+        mfifo_drain = pChan;
+        *pRing = nAddr;
+        pChan->tadr = nAddr;
+        pChan->qwc = 0;
+        pChan->chcr = 0x104;
+    }
+}
+
+/* Submit data to the memory FIFO and wait for drain space */
+/* TODO: Match the t0/t1 allocation and MMIO store scheduling. */
+u_int xglDmaMFIFOKick(u_int nTadr, u_int nQwc)
+{
+    u_int nSize;
+    u_int nMask;
+    u_int nSpace;
+    XGLDMACHAN *pChan;
+
+    nSize = *(vu_int *)0x1000E040 + 0x10;
+    while (*(vu_int *)0x1000D000 & 0x100) {
+    }
+    *(vu_int *)0x1000D080 = nTadr & 0x3FF0;
+    pChan = mfifo_drain;
+    *(vu_int *)0x1000D020 = nQwc;
+    nQwc <<= 4;
+    nMask = nSize - 0x10;
+    do {
+        nSpace = (pChan->tadr - *(vu_int *)0x1000D010 + nSize) & nMask;
+        nSpace = nSpace ? nSpace : nSize;
+    } while (nQwc >= nSpace);
+    *(vu_int *)0x1000D000 = 0x100;
+    return nSpace;
+}
+
+/* Stop memory FIFO mode after both DMA paths become idle */
+/* TODO: Find the natural source shape for the remaining two-instruction reorder. */
+void xglDmaMFIFOLeave(void)
+{
+    register u_int *pCtrl __asm__("$3");
+    register u_int nCtrl __asm__("$2");
+    register int nMask __asm__("$4");
+    vu_int *pWait;
+
+    sceGsSyncPath(0, 0);
+    pCtrl = (u_int *)0x1000E000;
+    nMask = ~0xC;
+    nMask = nMask;
+    nCtrl = *pCtrl;
+    pWait = (vu_int *)0x1000D000;
+    __asm__("" : "+r"(pCtrl), "+r"(nCtrl), "+r"(nMask), "+r"(pWait));
+    nCtrl &= nMask;
+    *pCtrl = nCtrl;
+    while (*pWait & 0x100) {
+    }
+    while (mfifo_drain->chcr & 0x100) {
+    }
 }
 
 /* Initialize the DMA subsystem (nothing to do) */
