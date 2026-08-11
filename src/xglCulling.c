@@ -28,10 +28,8 @@ int xglCullingCheck(void *p1, void *p2)
 
     nRet = 0;
     if (s_nIgnoreCulling == 0) {
-        /* NEARLY MATCHED: one dead delay-slot copy differs — the original
-         * fills the blez delay slot with `move s2,a0` (i = nRet as a
-         * register copy) where 2.96 constant-propagates `move s2,zero`.
-         * No source idiom found yet that suppresses the propagation. */
+        /* Repeated assignment preserves the original delay-slot register copy */
+        i = nRet;
         i = nRet;
         while (i < s_inCulling.nCount) {
             setup_occlusion(&s_inCulling.aCell[i], p1);
