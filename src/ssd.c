@@ -1178,6 +1178,47 @@ int SsdGetBlockMemorySize(void *pPtr)
     return pBlock->pEnd - (char *)pBlock;
 }
 
+/* Return the largest 64-byte-aligned free span in the sound heap */
+int SsdGetMemoryFreeSize(void)
+{
+    /* TODO: Find the natural source shape for this matched register/lifetime scaffold. */
+    register SSD_MEMBLOCK *pBlock __asm__("$6");
+    register SSD_MEMBLOCK *pNext __asm__("$5");
+    register SSD_MEMBLOCK *pNextNext __asm__("$3");
+    char *pEnd;
+    register int nDiff __asm__("$2");
+    int nFree;
+    int nMaxFree;
+
+    DIntr();
+    nMaxFree = 0;
+    pBlock = (SSD_MEMBLOCK *)RssdWork.pMemStart;
+    pNext = pBlock->pNext;
+    if (pNext != 0) {
+        do {
+            pEnd = pBlock->pEnd;
+            pBlock = pNext;
+            pNextNext = pBlock->pNext;
+            __asm__("" : "+r"(pNext), "+r"(pNextNext));
+            nDiff = (char *)pNext - pEnd;
+            nFree = nDiff & ~0x3F;
+            __asm__("" : "+r"(nFree), "+r"(pNextNext) : : "memory");
+            pNext = pNextNext;
+            __asm__("" : "+r"(pNext) : : "memory");
+            if (nMaxFree < nFree) {
+                nMaxFree = nFree;
+            }
+        } while (pNextNext != 0);
+    }
+
+    nFree = (RssdWork.pMemEnd - pBlock->pEnd) & ~0x3F;
+    if (nMaxFree < nFree) {
+        nMaxFree = nFree;
+    }
+    EIntr();
+    return nMaxFree;
+}
+
 /* Count allocated blocks in the sound heap */
 int SsdGetMemoryBlocks(void)
 {
