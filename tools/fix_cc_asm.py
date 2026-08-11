@@ -13,8 +13,8 @@ and assemble. Transformations:
 - do not add a fallthrough hazard nop after an FP load in a COP1 likely-
   branch delay slot; that delay slot is annulled on the fallthrough path
 """
+import argparse
 import re
-import sys
 
 MEM_OPS = ("sw", "sh", "sb", "swc1", "lw", "lh", "lb", "lbu", "lhu",
            "lwc1", "s.s", "l.s")
@@ -58,7 +58,7 @@ def previous_insn(lines, idx):
     return ""
 
 
-def main(path):
+def main(path, omitted_hazards):
     with open(path) as f:
         lines = f.read().split('\n')
 
@@ -66,8 +66,11 @@ def main(path):
     for i, line in enumerate(lines):
         line = RE_MOVE.sub(r'\tdaddu\t\1,\2,$0', line)
 
+        following = next_insn(lines, i)
+        omitted = any(following.startswith("\t" + op) for op in omitted_hazards)
         needs_hazard_nop = (RE_FPLOAD.match(line)
-                            and RE_FPCOMPUTE.match(next_insn(lines, i))
+                            and RE_FPCOMPUTE.match(following)
+                            and not omitted
                             and not RE_FP_BRANCH_LIKELY.match(previous_insn(lines, i)))
 
         if RE_LA.match(line) or RE_MEM.match(line) or RE_CVT.match(line):
@@ -100,4 +103,8 @@ def main(path):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("path")
+    parser.add_argument("--omit-hazard", action="append", default=[])
+    args = parser.parse_args()
+    main(args.path, set(args.omit_hazard))

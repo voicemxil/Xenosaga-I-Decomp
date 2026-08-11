@@ -65,6 +65,7 @@ FILE_CC = {
     "xglFlags.c": CC96,
     "xglMovie.c": CC96,
     "xglMath.c": CC96,
+    "xglVector.c": CC96,
 }
 # Note: game code (2.96) matches with plain -O2 -G8; adding
 # -fno-schedule-insns perturbs its register allocation.
@@ -90,6 +91,13 @@ FILE_CFLAGS = {
     "xglFlags.c": "-O2 -G8",
     "xglMovie.c": "-O2 -G8",
     "xglMath.c": "-O2 -G8",
+    "xglVector.c": "-O2 -G8",
+}
+
+# xglVector's original object omits load-delay nops before mul.s/sub.s,
+# unlike the other game objects compiled with the same compiler.
+FILE_FIX_FLAGS = {
+    "xglVector.c": "--omit-hazard mul.s --omit-hazard sub.s",
 }
 
 
@@ -157,13 +165,14 @@ def generate_ninja(asm_files, src_files, asset_files):
 
         f.write(f"cflags = {CFLAGS}\n")
         f.write(f"cc = {CC}\n\n")
+        f.write("fixflags =\n\n")
 
         f.write(f"rule cc\n")
         # tools/fix_cc_asm.py post-processes the compiler asm so the modern
         # assembler reproduces the original ee-as encodings (move->daddu,
         # .set mips1 wraps for la/mem-macros/FP conversions, conditional
         # li.s hazard nop).
-        f.write(f"  command = $cc $cflags -S -o $out.s $in && python3 tools/fix_cc_asm.py $out.s && {AS} {CC_ASFLAGS} -o $out $out.s\n")
+        f.write(f"  command = $cc $cflags -S -o $out.s $in && python3 tools/fix_cc_asm.py $out.s $fixflags && {AS} {CC_ASFLAGS} -o $out $out.s\n")
         f.write(f"  description = CC $in\n\n")
 
         f.write(f"rule ld\n")
@@ -189,6 +198,8 @@ def generate_ninja(asm_files, src_files, asset_files):
                 f.write(f"  cflags = {FILE_CFLAGS[src.name]}\n")
             if src.name in FILE_CC:
                 f.write(f"  cc = {FILE_CC[src.name]}\n")
+            if src.name in FILE_FIX_FLAGS:
+                f.write(f"  fixflags = {FILE_FIX_FLAGS[src.name]}\n")
 
         for asset in asset_files:
             obj = BUILD_DIR / asset.with_suffix(".o")
