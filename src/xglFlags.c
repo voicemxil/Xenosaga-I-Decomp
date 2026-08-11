@@ -2,6 +2,7 @@
 
 int xglFlagsSet(int, int, int);
 int xglFlagsGet(int, int);
+extern unsigned char SaveData[] __attribute__((section(".data")));
 
 int xglFlagsSet1(int nFlag, int nValue) { return xglFlagsSet(nFlag, 1, nValue); }
 int xglFlagsSet2(int nFlag, int nValue) { return xglFlagsSet(nFlag, 2, nValue); }
@@ -35,4 +36,20 @@ long long xglFlagsGet64(int nFlag)
     nLow = xglFlagsGet(nFlag, 0x20);
     nHigh = xglFlagsGet(nFlag + 0x20, 0x20);
     return (nHigh << 32) + nLow;
+}
+
+void xglFlagsInitial(void)
+{
+    unsigned char *pFlag;
+    int nCount;
+
+    pFlag = SaveData;
+    /* TODO: Find the natural source shape that keeps this base address distinct. */
+    __asm__("" : "+r"(pFlag));
+    pFlag += 0x74;
+    nCount = 0x10000;
+    do {
+        nCount--;
+        *pFlag++ = 0;
+    } while (nCount != 0);
 }
