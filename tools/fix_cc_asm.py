@@ -32,10 +32,19 @@ RE_FPCOMPUTE = re.compile(
     r'^\t(c\.[a-z]+\.s|mul\.s|div\.s|add\.s|sub\.s|mov\.s|abs\.s|neg\.s'
     r'|sqrt\.s|trunc\.w\.s|cvt\.[a-z.]+)[ \t]')
 RE_FP_BRANCH_LIKELY = re.compile(r'^\tbc1[ft]l[ \t]')
+# A leaf return: `j $31` or `jr $ra`/`jr $31`.
+RE_RETURN = re.compile(r'^\t(j\t\$31|jr\t\$(ra|31))\b')
 
 
 def wrap_mips1(text):
     return f"\t.set push\n\t.set mips1\n{text}\n\t.set pop"
+
+
+def wrap_mips1_noreorder(text):
+    # Same mips1 wrap, but also barriers reordering so the assembler cannot
+    # steal the macro's final expanded instruction into a following return's
+    # delay slot -- the original ee-as left a nop there instead.
+    return f"\t.set push\n\t.set mips1\n\t.set noreorder\n{text}\n\t.set pop"
 
 
 def next_insn(lines, idx):
@@ -74,6 +83,12 @@ def main(path, omitted_hazards):
                             and not RE_FP_BRANCH_LIKELY.match(previous_insn(lines, i)))
 
         if RE_LA.match(line) or RE_MEM.match(line) or RE_CVT.match(line):
+            # When an `la reg, sym(idx)` macro is the last computation before
+            # a leaf return, the modern assembler pulls its final addu into
+            # the jr delay slot; the original ee-as left a nop. Barrier it.
+            if RE_LA.match(line) and RE_RETURN.match(following):
+                out.append(wrap_mips1_noreorder(line))
+                continue
             wrapped = wrap_mips1(line)
             if needs_hazard_nop:
                 wrapped += "\n\tnop"
