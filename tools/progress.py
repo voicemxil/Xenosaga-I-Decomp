@@ -13,13 +13,24 @@ TOTAL_TEXT_SIZE = 1279344
 
 
 def get_words(cmd):
+    words, _ = get_words_relocs(cmd)
+    return words
+
+
+def get_words_relocs(cmd):
+    """Extract instruction words and relocation indices (needs -r for relocs)."""
     result = subprocess.run(cmd, capture_output=True, text=True)
     words = []
+    relocs = {}
     for line in result.stdout.split('\n'):
         m = re.match(r'\s+[0-9a-f]+:\s+([0-9a-f]{8})\b', line)
         if m:
             words.append(m.group(1))
-    return words
+            continue
+        r = re.match(r'\s+[0-9a-f]+:\s+R_MIPS_(\w+)', line)
+        if r and words:
+            relocs[len(words) - 1] = r.group(1)
+    return words, relocs
 
 
 def mask_word(w):
@@ -34,10 +45,13 @@ def mask_word(w):
 def verify_function(name, addr, size):
     """Returns True if function matches."""
     obj = None
-    for o in glob.glob(f"{BUILT}/*.o"):
+    for o in sorted(glob.glob(f"{BUILT}/*.o")):
         nm = subprocess.run([OBJDUMP, "-t", o], capture_output=True, text=True)
-        if f" {name}\n" in nm.stdout or nm.stdout.rstrip().endswith(f" {name}"):
-            obj = o
+        for nm_line in nm.stdout.split('\n'):
+            if nm_line.endswith(f" {name}") and " F .text" in nm_line:
+                obj = o
+                break
+        if obj:
             break
     if not obj:
         return False
@@ -50,7 +64,7 @@ def verify_function(name, addr, size):
     sym_result = subprocess.run([OBJDUMP, "-t", obj], capture_output=True, text=True)
     func_addr = None
     for line in sym_result.stdout.split('\n'):
-        if f" {name}\n" in line or line.endswith(f" {name}"):
+        if line.endswith(f" {name}") and " F .text" in line:
             m2 = re.match(r'([0-9a-f]+)', line)
             if m2:
                 func_addr = int(m2.group(1), 16)
@@ -59,15 +73,27 @@ def verify_function(name, addr, size):
         return False
 
     func_end = func_addr + size
-    built = get_words([OBJDUMP, "-d",
-                       f"--start-address=0x{func_addr:x}",
-                       f"--stop-address=0x{func_end:x}", obj])
+    built, built_relocs = get_words_relocs([OBJDUMP, "-d", "-r",
+                                            f"--start-address=0x{func_addr:x}",
+                                            f"--stop-address=0x{func_end:x}", obj])
 
     if not orig:
         return False
 
     orig_masked = [mask_word(w) for w in orig]
     built_masked = [mask_word(w) for w in built]
+
+    # Mask link-time-resolved immediates, same as verify.py.
+    for i, rtype in built_relocs.items():
+        if i >= len(orig_masked) or i >= len(built_masked):
+            continue
+        if rtype in ("GPREL16", "HI16", "LO16", "16", "LITERAL"):
+            orig_masked[i] = orig_masked[i][:4] + "0000"
+            built_masked[i] = built_masked[i][:4] + "0000"
+        elif rtype == "26":
+            orig_masked[i] = f"{int(orig_masked[i], 16) & 0xFC000000:08x}"
+            built_masked[i] = f"{int(built_masked[i], 16) & 0xFC000000:08x}"
+
     return orig_masked == built_masked
 
 

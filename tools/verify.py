@@ -62,12 +62,17 @@ failed = 0
 for name, addr, size in entries:
     # Find which .o file contains this function
     obj = None
-    for o in glob.glob(f"{BUILT}/*.o"):
+    for o in sorted(glob.glob(f"{BUILT}/*.o")):
         nm = subprocess.run(
             [CC_OBJDUMP, "-t", o], capture_output=True, text=True
         )
-        if f" {name}\n" in nm.stdout:
-            obj = o
+        # Only a defined function symbol counts — other objects may
+        # reference the same name as *UND* (callers) at address 0.
+        for nm_line in nm.stdout.split('\n'):
+            if nm_line.endswith(f" {name}") and " F .text" in nm_line:
+                obj = o
+                break
+        if obj:
             break
 
     if not obj:
@@ -87,7 +92,7 @@ for name, addr, size in entries:
     )
     func_addr = None
     for line in sym_result.stdout.split('\n'):
-        if f" {name}\n" in line or line.endswith(f" {name}"):
+        if line.endswith(f" {name}") and " F .text" in line:
             m2 = re.match(r'([0-9a-f]+)', line)
             if m2:
                 func_addr = int(m2.group(1), 16)
