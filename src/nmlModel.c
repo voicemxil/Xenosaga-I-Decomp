@@ -296,6 +296,19 @@ void nmlModelSetFadeInDispose(void)
     s_inFadeIn.nDispose = 1;
 }
 
+/* Return whether none of the four fade controllers is currently active */
+int nmlModelGetFadeLevel(void)
+{
+    int level;
+
+    level = 0;
+    level = (s_inFadeIn.nTime < 0) ? level : 1;
+    level = (s_inFadeOut.nTime < 0) ? level : 1;
+    level = (s_inActiveFadeIn.nTime < 0) ? level : 1;
+    level = (s_inActiveFadeOut.nTime < 0) ? level : 1;
+    return level;
+}
+
 /* Configure the back buffer for a battle transition */
 void nmlModelSetBackBufferToBattle(int time)
 {
