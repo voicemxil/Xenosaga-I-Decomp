@@ -146,9 +146,7 @@ xglRenderDispOn = 0x0022D7D8, 0x1C; // xglRender
 xglRenderGlobalFadeInit = 0x0022D940, 0x18; // xglRender
 xglRenderClearOn = 0x0022DBF8, 0xC; // xglRender
 xglRenderClearOff = 0x0022DC08, 0x8; // xglRender
-# xglCullingCheck: MATCHES with the double-assignment idiom (verified) —
-# entry parked only until the in-flight xglCulling agent lands its work.
-# xglCullingCheck = 0x0023E970, 0xAC; // xglCulling
+xglCullingCheck = 0x0023E970, 0xAC; // xglCulling
 xglCullingCheckSeparateInit = 0x0023EA20, 0x7C; // xglCulling
 xglCullingExist = 0x0023EB38, 0xC; // xglCulling
 xglCullingMapLastCheck = 0x0023EB48, 0x74; // xglCulling
