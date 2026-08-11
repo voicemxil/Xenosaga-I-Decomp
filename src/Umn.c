@@ -100,9 +100,14 @@ void UmnMailBoxSet(int nNo)
 }
 
 /* Look up one mail table entry by index */
+/* TODO: Find the natural source shape for this matched return-delay scaffold. */
 short *UmnMailDataGet(int nNo)
 {
-    return &D_004A1AB4[nNo];
+    short *pData;
+
+    pData = &D_004A1AB4[nNo];
+    __asm__("nop" : "+r"(pData));
+    return pData;
 }
 
 /* Mark a monster as registered in the encyclopedia */
