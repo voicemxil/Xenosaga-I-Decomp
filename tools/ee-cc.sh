@@ -30,8 +30,8 @@ unset 'ARGS[-1]'
 # Step 1: compile to assembly
 $GCC "${ARGS[@]}" -S -o "${OUTPUT}.s" "$INPUT" || exit 1
 
-# Step 2: fix move -> daddu
-sed -i 's/\tmove\t\(\$[0-9]*\),\(\$[0-9]*\)/\tdaddu\t\1,\2,$0/' "${OUTPUT}.s"
+# Step 2: fix move -> daddu (registers may be numeric or named, e.g. $sp)
+sed -i 's/\tmove\t\(\$[0-9a-z]\{1,\}\),\(\$[0-9a-z]\{1,\}\)/\tdaddu\t\1,\2,$0/' "${OUTPUT}.s"
 
 # Step 3: assemble with eabi flags
 $AS $CC_ASFLAGS -o "$OUTPUT" "${OUTPUT}.s" || exit 1

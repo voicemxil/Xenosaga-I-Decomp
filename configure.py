@@ -119,7 +119,10 @@ def generate_ninja(asm_files, src_files, asset_files):
         f.write(f"cc = {CC}\n\n")
 
         f.write(f"rule cc\n")
-        f.write(f"  command = $cc $cflags -S -o $out.s $in && sed -i 's/\\tmove\\t\\(\\$$[0-9]*\\),\\(\\$$[0-9]*\\)/\\tdaddu\\t\\1,\\2,$$0/' $out.s && {AS} {CC_ASFLAGS} -o $out $out.s\n")
+        # Post-process compiler asm: move -> daddu (original encoding), and
+        # wrap `la` pseudo-ops in .set mips1 so the assembler expands them
+        # with 32-bit addiu (like the original ee-as) instead of daddiu.
+        f.write(f"  command = $cc $cflags -S -o $out.s $in && sed -i -e 's/\\tmove\\t\\(\\$$[0-9a-z]\\{{1,\\}}\\),\\(\\$$[0-9a-z]\\{{1,\\}}\\)/\\tdaddu\\t\\1,\\2,$$0/' -e 's/^\\tla[ \\t]\\(.*\\)$$/\\t.set push\\n\\t.set mips1\\n\\tla\\t\\1\\n\\t.set pop/' $out.s && {AS} {CC_ASFLAGS} -o $out $out.s\n")
         f.write(f"  description = CC $in\n\n")
 
         f.write(f"rule ld\n")

@@ -124,10 +124,16 @@ for name, addr, size in entries:
     # Mask 16-bit immediates resolved at link time (gp-relative and
     # hi/lo address pairs) — unresolved in the .o, like jal targets.
     for i, rtype in built_relocs.items():
+        if i >= len(orig_masked) or i >= len(built_masked):
+            continue
         if rtype in ("GPREL16", "HI16", "LO16", "16", "LITERAL"):
-            if i < len(orig_masked) and i < len(built_masked):
-                orig_masked[i] = orig_masked[i][:4] + "0000"
-                built_masked[i] = built_masked[i][:4] + "0000"
+            orig_masked[i] = orig_masked[i][:4] + "0000"
+            built_masked[i] = built_masked[i][:4] + "0000"
+        elif rtype == "26":
+            # j/jal targets: mask the 26-bit field (jal is also handled
+            # opcode-wise by mask_word, but plain j tail calls are not)
+            orig_masked[i] = f"{int(orig_masked[i], 16) & 0xFC000000:08x}"
+            built_masked[i] = f"{int(built_masked[i], 16) & 0xFC000000:08x}"
 
     if orig_masked == built_masked:
         print(f"  OK   {name}")

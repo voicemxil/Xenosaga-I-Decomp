@@ -8,6 +8,64 @@ int s_nScriptSequenceReset;
 int s_nScriptFadeRequest;
 int s_nScriptFadeOutTime;
 int s_nScriptCfTime;
+int s_nScriptFrameLockEntry;
+int stageVM;
+int defaultVM;
+int evtVM[2];
+int UseVMFlag;
+int currentScriptDB;
+int classJava_xeno_Chr;
+int classJava_xeno_Stage;
+
+extern unsigned short D_0033868C[];
+
+typedef struct ScriptObj {
+    int unk0[4];
+    int field_10;
+} ScriptObj;
+
+typedef struct {
+    int field_0;
+    int field_4;
+    int field_8;
+    int field_C;
+    ScriptObj *field_10;
+    int field_14;
+    int field_18;
+} SCRIPTDB;
+
+extern SCRIPTDB scriptDB[];
+
+typedef struct {
+    int unk0[0x130];
+    int field_4C0;
+    int unk4C4[(0x9F4 - 0x4C4) / 4];
+    int field_9F4;
+    int field_9F8;
+} CHR_WORK;
+
+int JNI_initThread(int);
+int JNI_callMethod(int, int, int *, int);
+int JNI_createThread(int, int, int);
+int JNI_pushFrame(void);
+int JNI_loadNativeClass(void);
+int JNI_isInstanceOf(int, int);
+int initVM(void);
+int loadScriptCD(SCRIPTDB *, int);
+int loadScriptCD2(SCRIPTDB *, int);
+void createTalkTask(CHR_WORK *, int);
+
+/* Call a script method on the stage VM with a single argument */
+void SCRIPT_test(int arg0, int method)
+{
+    int args[4];
+
+    JNI_initThread(stageVM);
+    if (method != 0) {
+        args[0] = arg0;
+        JNI_callMethod(stageVM, method, args, 0);
+    }
+}
 
 /* Block talk interactions while a script runs */
 void SCRIPT_talkIgnoreSet(void)
@@ -52,6 +110,14 @@ void SCRIPT_sceneChangeTimeDec(void)
         s_nScriptChangeTime--;
     } else {
         s_nScriptChangeTime = 0;
+    }
+}
+
+/* Finish the current event if a skippable movie is playing */
+void SCRIPT_sendMovieSkipSignal(void)
+{
+    if (D_0033868C[0] == 3) {
+        s_nScriptEventFin = 1;
     }
 }
 
@@ -120,4 +186,85 @@ int SCRIPT_fadeGet(void)
 int SCRIPT_getCfTime(void)
 {
     return s_nScriptCfTime;
+}
+
+/* Increment the cf timer */
+void SCRIPT_incCfTime(void)
+{
+    s_nScriptCfTime++;
+}
+
+/* Request a frame lock on battle entry */
+void SCRIPT_frameLock2Battle(void)
+{
+    s_nScriptFrameLockEntry = 1;
+}
+
+/* Reinitialize the script VMs and reload the native class table */
+int SCRIPT_reset(void)
+{
+    int i;
+
+    initVM();
+    defaultVM = JNI_createThread(0, 8, 0x80);
+    stageVM = JNI_createThread(0, 8, 0x46);
+    for (i = 0; i < 2; i++) {
+        evtVM[i] = JNI_createThread(0, 8, 0x40);
+    }
+    UseVMFlag = 0;
+    JNI_pushFrame();
+    JNI_pushFrame();
+    return JNI_loadNativeClass();
+}
+
+/* Start the talk-to script task for a character if the stage allows it */
+void SCRIPT_execTalkto(CHR_WORK *chr)
+{
+    SCRIPTDB *db = &scriptDB[currentScriptDB];
+
+    if (chr->field_9F4 != 0) {
+        if (db->field_C != 0) {
+            if (s_nScriptTalkLock != 0) {
+                return;
+            }
+            if (JNI_isInstanceOf(chr->field_4C0, classJava_xeno_Chr) == 0) {
+                return;
+            }
+            if (JNI_isInstanceOf(db->field_10->field_10, classJava_xeno_Stage) != 0) {
+                createTalkTask(chr, chr->field_9F4);
+            }
+        }
+    }
+}
+
+/* Start the touch-to script task for a character if the stage allows it */
+void SCRIPT_execTouchto(CHR_WORK *chr)
+{
+    SCRIPTDB *db = &scriptDB[currentScriptDB];
+
+    if (chr->field_9F4 != 0) {
+        if (db->field_C != 0) {
+            if (s_nScriptTalkLock != 0) {
+                return;
+            }
+            if (JNI_isInstanceOf(chr->field_4C0, classJava_xeno_Chr) == 0) {
+                return;
+            }
+            if (JNI_isInstanceOf(db->field_10->field_10, classJava_xeno_Stage) != 0) {
+                createTalkTask(chr, chr->field_9F8);
+            }
+        }
+    }
+}
+
+/* Load the next script database entry from CD */
+int SCRIPT_load(int arg)
+{
+    return loadScriptCD(&scriptDB[(currentScriptDB + 1) & 1], arg);
+}
+
+/* Load the next script database entry from CD (variant 2) */
+int SCRIPT_load2(int arg)
+{
+    return loadScriptCD2(&scriptDB[(currentScriptDB + 1) & 1], arg);
 }
