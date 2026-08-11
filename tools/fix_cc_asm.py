@@ -27,7 +27,7 @@ RE_LIS = re.compile(r'^\tli\.s[ \t](.*)$')
 RE_CVT = re.compile(r'^\t(cvt\.[a-z.]+|trunc\.w\.s)[ \t](.*)$')
 # FP loads whose result feeds a COP1 compute need the hazard nop the
 # original ee-as inserted (modern gas does not).
-RE_FPLOAD = re.compile(r'^\t(li\.s|l\.s|lwc1)[ \t]')
+RE_FPLOAD = re.compile(r'^\t(li\.s|l\.s|lwc1|mtc1)[ \t]')
 RE_FPCOMPUTE = re.compile(
     r'^\t(c\.[a-z]+\.s|mul\.s|div\.s|add\.s|sub\.s|mov\.s|abs\.s|neg\.s'
     r'|sqrt\.s|trunc\.w\.s|cvt\.[a-z.]+)[ \t]')
@@ -73,6 +73,11 @@ def main(path):
         if RE_LA.match(line) or RE_MEM.match(line) or RE_CVT.match(line):
             wrapped = wrap_mips1(line)
             if needs_hazard_nop:
+                wrapped += "\n\tnop"
+            # Modern gas otherwise moves a conversion fed by mtc1 into a
+            # following return delay slot; the original assembler kept it
+            # in place after the mtc1 hazard nop.
+            if RE_CVT.match(line) and re.match(r'^\tmtc1[ \t]', previous_insn(lines, i)):
                 wrapped += "\n\tnop"
             out.append(wrapped)
             continue
