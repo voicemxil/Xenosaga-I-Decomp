@@ -58,12 +58,14 @@ typedef struct SSD_MEMBLOCK {
 
 extern RSSD_WORK RssdWork;
 extern int D_004AA20C[4];
+extern SSD_MEMBLOCK *D_004AA240 __attribute__((section(".data")));
 extern void *D_004AA284[4];
 extern void *D_004AA294[4];
 
 int RssdCallFunc(int, RSSD_PACKET *, void *, int);
 void SsdSpuDmaCompleted(int);
 void *iSsdNewMemoryPtr(int, int);
+void *iSsdNewMemoryPtr2(int, int);
 void iSsdDisposeMemoryPtr(void *);
 void DIntr(void);
 void EIntr(void);
@@ -1148,6 +1150,17 @@ void *SsdNewMemoryPtr(int nSize, int nAlign)
     return pPtr;
 }
 
+/* Allocate from the alternate sound heap path with interrupts disabled */
+void *SsdNewMemoryPtr2(int nSize, int nAlign)
+{
+    void *pPtr;
+
+    DIntr();
+    pPtr = iSsdNewMemoryPtr2(nSize, nAlign);
+    EIntr();
+    return pPtr;
+}
+
 /* Return a sound heap block with interrupts disabled */
 void SsdDisposeMemoryPtr(void *pPtr)
 {
@@ -1163,4 +1176,28 @@ int SsdGetBlockMemorySize(void *pPtr)
 
     pBlock = (SSD_MEMBLOCK *)((char *)pPtr - 0x40);
     return pBlock->pEnd - (char *)pBlock;
+}
+
+/* Count allocated blocks in the sound heap */
+int SsdGetMemoryBlocks(void)
+{
+    /* TODO: Find the natural source shape for these matched pointer registers. */
+    register SSD_MEMBLOCK *pRoot __asm__("$2");
+    register SSD_MEMBLOCK *pBlock __asm__("$3");
+    SSD_MEMBLOCK *pNext;
+    int nBlocks;
+
+    DIntr();
+    nBlocks = 0;
+    pRoot = D_004AA240;
+    pBlock = pRoot->pNext;
+    if (pBlock != 0) {
+        do {
+            pNext = pBlock->pNext;
+            nBlocks++;
+            pBlock = pNext;
+        } while (pNext != 0);
+    }
+    EIntr();
+    return nBlocks;
 }
