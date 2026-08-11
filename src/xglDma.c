@@ -146,24 +146,18 @@ void xglDmaBufferRequest(XGLDMABUFF *pBuff, u_int nCh)
 void xglDmaMFIFOSetup(u_int nAddr, u_int nSize, int nCh)
 {
     XGLDMACHAN *pChan;
-    vu_int *pCtrl;
-    vu_int *pAddr;
-    vu_int *pSize;
-    vu_int *pRing;
+    int nRingReg;
     u_int nCtrl;
 
     if (nCh < 3) {
         pChan = tbl_00490D60[nCh];
-        pCtrl = (vu_int *)0x1000E000;
-        pAddr = (vu_int *)0x1000E050;
-        pSize = (vu_int *)0x1000E040;
-        pRing = (vu_int *)0x1000D010;
-        nCtrl = *pCtrl | 0xC;
-        *pAddr = nAddr;
-        *pCtrl = nCtrl;
-        *pSize = nSize - 0x10;
+        nCtrl = *(vu_int *)0x1000E000;
+        nRingReg = 0x1000D010;
+        *(vu_int *)0x1000E050 = nAddr;
+        *(vu_int *)0x1000E000 = nCtrl | 0xC;
+        *(vu_int *)0x1000E040 = nSize - 0x10;
         mfifo_drain = pChan;
-        *pRing = nAddr;
+        *(vu_int *)nRingReg = nAddr;
         pChan->tadr = nAddr;
         pChan->qwc = 0;
         pChan->chcr = 0x104;
@@ -196,7 +190,7 @@ u_int xglDmaMFIFOKick(u_int nTadr, u_int nQwc)
 }
 
 /* Stop memory FIFO mode after both DMA paths become idle */
-/* TODO: Find the natural source shape for the remaining two-instruction reorder. */
+/* TODO: Find the natural source shape for this matched scheduling scaffold. */
 void xglDmaMFIFOLeave(void)
 {
     register u_int *pCtrl __asm__("$3");
@@ -207,8 +201,9 @@ void xglDmaMFIFOLeave(void)
     sceGsSyncPath(0, 0);
     pCtrl = (u_int *)0x1000E000;
     nMask = ~0xC;
-    nMask = nMask;
+    __asm__("" : "+r"(nMask) :: "memory");
     nCtrl = *pCtrl;
+    __asm__("" ::: "$5", "memory");
     pWait = (vu_int *)0x1000D000;
     __asm__("" : "+r"(pCtrl), "+r"(nCtrl), "+r"(nMask), "+r"(pWait));
     nCtrl &= nMask;

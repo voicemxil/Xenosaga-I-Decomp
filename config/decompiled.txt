@@ -122,6 +122,7 @@ xglDmaBufferCnt = 0x0021B7C0, 0x58; // xglDma
 xglDmaBufferRef = 0x0021B818, 0x28; // xglDma
 xglDmaBufferCall = 0x0021B840, 0x24; // xglDma
 xglDmaBufferRequest = 0x0021B868, 0x60; // xglDma
+xglDmaMFIFOLeave = 0x0021B9E0, 0x7C; // xglDma
 xglDmaInitial = 0x0021BA60, 0x8; // xglDma
 xglCdDefaultCallback = 0x0021D690, 0x8; // xglCd
 xglCdDummyCallback = 0x0021D698, 0x8; // xglCd
