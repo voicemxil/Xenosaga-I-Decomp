@@ -51,6 +51,8 @@ FILE_CC = {
     "xglPacket.c": CC96,
     "xglRender.c": CC96,
     "xglCulling.c": CC96,
+    "MSG.c": CC96,
+    "MBUF.c": CC96,
 }
 # Note: game code (2.96) matches with plain -O2 -G8; adding
 # -fno-schedule-insns perturbs its register allocation.
@@ -62,6 +64,8 @@ FILE_CFLAGS = {
     "xglPacket.c": "-O2 -G8",
     "xglRender.c": "-O2 -G8",
     "xglCulling.c": "-O2 -G8",
+    "MSG.c": "-O2 -G8",
+    "MBUF.c": "-O2 -G8",
 }
 
 
