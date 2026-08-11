@@ -23,6 +23,7 @@ typedef struct {
 extern void *rsrcDefaultPath;
 extern int infoIndex;
 extern int infoLength;
+extern u_int RSRC_loadFileSub(RSRC *pResource, void *pPath, void *pFile);
 
 void RSRC_inactiveSource(RSRC *pResource, u_int pSource)
 {
@@ -107,4 +108,14 @@ RSRCITEM *RSRC_getItem2(RSRC *pResource, u_int pSource)
         pItem++;
     }
     return 0;
+}
+
+u_int RSRC_loadFile2(RSRC *pResource, void *pPath, void *pFile)
+{
+    return RSRC_loadFileSub(pResource, pPath, pFile);
+}
+
+u_int RSRC_loadFile(RSRC *pResource, void *pFile)
+{
+    return RSRC_loadFile2(pResource, rsrcDefaultPath, pFile);
 }
