@@ -178,3 +178,28 @@ void xglVectorOuter(float *pDest, const float *pLeft, const float *pRight)
     pDest[2] = pLeft[0] * pRight[1] - pLeft[1] * pRight[0];
     pDest[3] = pLeft[3];
 }
+
+void xglVectorClamp(float *pDest, const float *pSource,
+                    float fMinimum, float fMaximum)
+{
+    pDest[0] = pSource[0] < fMinimum ? fMinimum
+             : fMaximum < pSource[0] ? fMaximum : pSource[0];
+    pDest[1] = pSource[1] < fMinimum ? fMinimum
+             : fMaximum < pSource[1] ? fMaximum : pSource[1];
+    pDest[2] = pSource[2] < fMinimum ? fMinimum
+             : fMaximum < pSource[2] ? fMaximum : pSource[2];
+    pDest[3] = pSource[3] < fMinimum ? fMinimum
+             : fMaximum < pSource[3] ? fMaximum : pSource[3];
+}
+
+void xglVectorClampXYZ(float *pDest, const float *pSource,
+                       float fMinimum, float fMaximum)
+{
+    pDest[0] = pSource[0] < fMinimum ? fMinimum
+             : fMaximum < pSource[0] ? fMaximum : pSource[0];
+    pDest[1] = pSource[1] < fMinimum ? fMinimum
+             : fMaximum < pSource[1] ? fMaximum : pSource[1];
+    pDest[2] = pSource[2] < fMinimum ? fMinimum
+             : fMaximum < pSource[2] ? fMaximum : pSource[2];
+    pDest[3] = pSource[3];
+}

@@ -94,10 +94,11 @@ FILE_CFLAGS = {
     "xglVector.c": "-O2 -G8",
 }
 
-# xglVector's original object omits load-delay nops before mul.s/sub.s,
-# unlike the other game objects compiled with the same compiler.
+# xglVector's original object omits some load-delay nops that are present
+# in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
-    "xglVector.c": "--omit-hazard mul.s --omit-hazard sub.s",
+    "xglVector.c": ("--omit-hazard mul.s --omit-hazard sub.s "
+                    "--omit-hazard c.lt.s --omit-hazard mov.s"),
 }
 
 
