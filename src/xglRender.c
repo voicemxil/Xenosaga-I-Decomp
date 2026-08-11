@@ -55,10 +55,13 @@ int s_nClearFrame;
 int s_nGblFadeInit;
 int s_nGblFade;
 volatile u_int VSyncCount;
+char FLAG_FRAME_60;
+int D_004A912C __attribute__((section(".data")));
 
 void SyncDCache(void *pStart, void *pEnd);
 void xglDmaDirectNormal(u_int nCh, u_int nAddr, u_int nQwc);
 void sceGsSyncVCallback(int (*pFunc)(int));
+int sceGsSyncV(int nMode);
 
 /* Vertical-sync interrupt callback: count syncs and check DMA activity */
 int xglRenderVSyncCallback(int nId)
@@ -76,6 +79,28 @@ int xglRenderVSyncCallback(int nId)
 void xglRenderSyncInit(void)
 {
     sceGsSyncVCallback(xglRenderVSyncCallback);
+    VSyncCount = 0;
+}
+
+/* Synchronize rendering to the current vertical-refresh mode */
+void xglRenderSyncMove(void)
+{
+    if (FLAG_FRAME_60 == 1) {
+        sceGsSyncV(0);
+        return;
+    }
+    while (sceGsSyncV(0) != 0) {
+    }
+    /* TODO: Confirm the original source form of this polling delay. */
+    while (({
+        int waiting = VSyncCount < 2;
+        __asm__("nop\n\tnop\n\tnop");
+        waiting;
+    })) {
+    }
+    if (VSyncCount >= 3) {
+        D_004A912C = 1;
+    }
     VSyncCount = 0;
 }
 
