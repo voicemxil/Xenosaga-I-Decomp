@@ -67,6 +67,7 @@ FILE_CC = {
     "xglMath.c": CC96,
     "xglVector.c": CC96,
     "RSRC.c": CC96,
+    "XTK.c": CC96,
 }
 # Note: game code (2.96) matches with plain -O2 -G8; adding
 # -fno-schedule-insns perturbs its register allocation.
@@ -94,6 +95,7 @@ FILE_CFLAGS = {
     "xglMath.c": "-O2 -G8",
     "xglVector.c": "-O2 -G8",
     "RSRC.c": "-O2 -G8",
+    "XTK.c": "-O2 -G8",
 }
 
 # xglVector's original object omits some load-delay nops that are present
