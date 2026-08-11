@@ -320,6 +320,7 @@ SsdInitMemoryManager = 0x002420A8, 0x60; // ssd
 SsdNewMemoryPtr = 0x00242108, 0x48; // ssd
 SsdNewMemoryPtr2 = 0x00242230, 0x48; // ssd
 SsdDisposeMemoryPtr = 0x00242380, 0x2C; // ssd
+iSsdDisposeMemoryPtr = 0x002423B0, 0x54; // ssd
 SsdGetBlockMemorySize = 0x00242408, 0x10; // ssd
 SsdGetMemoryFreeSize = 0x00242418, 0x8C; // ssd
 SsdGetMemoryBlocks = 0x002424A8, 0x60; // ssd

@@ -1140,6 +1140,49 @@ void SsdInitMemoryManager(void *pAddr, int nSize)
     pBlock->nUnk09 = 0;
 }
 
+/* TODO: Match the remaining control-flow scheduling in this first-fit allocator. */
+/* Allocate the first sound-heap gap large enough for one aligned block */
+void *iSsdNewMemoryPtr(int nSize, int nMagic)
+{
+    register int nAllocSize __asm__("$8");
+    SSD_MEMBLOCK *pPrev;
+    SSD_MEMBLOCK *pNext;
+    SSD_MEMBLOCK *pBlock;
+    char *pFree;
+    char *pData;
+    int nRequired;
+
+    nAllocSize = nSize;
+    nRequired = ((nAllocSize + 0x3F) & ~0x3F) + 0x40;
+    pPrev = (SSD_MEMBLOCK *)RssdWork.pMemStart;
+
+    while ((pNext = pPrev->pNext) != 0) {
+        pFree = pPrev->pEnd;
+        if ((char *)pNext - pFree >= nRequired) {
+            goto found;
+        }
+        pPrev = pNext;
+    }
+
+    pFree = pPrev->pEnd;
+    if (RssdWork.pMemEnd - pFree < nRequired) {
+        return 0;
+    }
+
+found:
+    pBlock = (SSD_MEMBLOCK *)(((unsigned int)pFree + 0x3F) & ~0x3F);
+    pData = (char *)pBlock + 0x40;
+    pBlock->nMagic = nMagic;
+    pBlock->nUsed = 2;
+    pBlock->pEnd = pData + nAllocSize;
+    pBlock->pNext = 0;
+    pBlock->nUnk09 = 0;
+    SsdClearMemory(pData, nAllocSize);
+    pBlock->pNext = pPrev->pNext;
+    pPrev->pNext = pBlock;
+    return pData;
+}
+
 /* Allocate from the sound heap with interrupts disabled */
 void *SsdNewMemoryPtr(int nSize, int nAlign)
 {
@@ -1160,6 +1203,28 @@ void *SsdNewMemoryPtr2(int nSize, int nAlign)
     pPtr = iSsdNewMemoryPtr2(nSize, nAlign);
     EIntr();
     return pPtr;
+}
+
+/* Unlink one allocation header from the sound heap */
+void iSsdDisposeMemoryPtr(void *pPtr)
+{
+    SSD_MEMBLOCK *pBlock;
+    SSD_MEMBLOCK *pPrev;
+    SSD_MEMBLOCK *pCurrent;
+
+    pBlock = (SSD_MEMBLOCK *)((char *)pPtr - 0x40);
+    pPrev = D_004AA240;
+    pCurrent = pPrev->pNext;
+    while (pCurrent != pBlock) {
+        if (pCurrent == 0) {
+            return;
+        }
+        pPrev = pCurrent;
+        pCurrent = pCurrent->pNext;
+        /* TODO: Find the natural source shape for the two extra load-delay nops. */
+        __asm__("nop\nnop\nnop");
+    }
+    pPrev->pNext = pBlock->pNext;
 }
 
 /* Return a sound heap block with interrupts disabled */
