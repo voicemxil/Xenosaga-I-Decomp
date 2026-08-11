@@ -323,6 +323,7 @@ SsdDisposeMemoryPtr = 0x00242380, 0x2C; // ssd
 SsdGetBlockMemorySize = 0x00242408, 0x10; // ssd
 SsdGetMemoryFreeSize = 0x00242418, 0x8C; // ssd
 SsdGetMemoryBlocks = 0x002424A8, 0x60; // ssd
+SsdClearMemory = 0x002425D8, 0x8C; // ssd
 GameCFSoundPurgeSub = 0x00242668, 0x64; // Game
 GameStateSaveCameraLight = 0x00243188, 0x74; // Game
 GameStateRestoreCameraLight = 0x00243200, 0x74; // Game

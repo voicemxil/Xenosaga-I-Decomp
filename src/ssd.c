@@ -64,6 +64,7 @@ extern void *D_004AA294[4];
 
 int RssdCallFunc(int, RSSD_PACKET *, void *, int);
 void SsdSpuDmaCompleted(int);
+void SsdClearMemory(void *, int);
 void *iSsdNewMemoryPtr(int, int);
 void *iSsdNewMemoryPtr2(int, int);
 void iSsdDisposeMemoryPtr(void *);
@@ -1241,4 +1242,44 @@ int SsdGetMemoryBlocks(void)
     }
     EIntr();
     return nBlocks;
+}
+
+/* Clear a sound-memory span in 32-byte, 16-byte and byte tails */
+void SsdClearMemory(void *pAddr, int nSize)
+{
+    char *pDst;
+    long long nCount;
+
+    pDst = pAddr;
+    nCount = nSize >> 5;
+    if (nCount != 0) {
+        do {
+            nCount--;
+            ((long long *)pDst)[3] = 0;
+            ((long long *)pDst)[2] = 0;
+            ((long long *)pDst)[1] = 0;
+            ((long long *)pDst)[0] = 0;
+            pDst += 0x20;
+        } while (nCount != 0);
+    }
+
+    nCount = (nSize >> 4) & 1;
+    if (nCount != 0) {
+        do {
+            nCount--;
+            ((int *)pDst)[3] = 0;
+            ((int *)pDst)[2] = 0;
+            ((int *)pDst)[1] = 0;
+            ((int *)pDst)[0] = 0;
+            pDst += 0x10;
+        } while (nCount != 0);
+    }
+
+    nCount = nSize & 0xF;
+    if (nCount != 0) {
+        do {
+            nCount--;
+            *pDst++ = 0;
+        } while (nCount != 0);
+    }
 }
