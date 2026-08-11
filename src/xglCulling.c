@@ -55,6 +55,27 @@ void xglCullingCheckSeparateInit(void *p)
     }
 }
 
+/* Test the prepared culling cells until one occludes the given object */
+int xglCullingCheckSeparate(void *p1, void *p2)
+{
+    int nRet;
+    int i;
+
+    nRet = 0;
+    i = nRet;
+    i = nRet;
+    __asm__("" ::: "$31", "memory");
+loop:
+    if (i < s_inCulling.nCount) {
+        nRet = check_occlusion(&s_inCulling.aCell[i], p1, p2);
+        i++;
+        if (nRet == 0) {
+            goto loop;
+        }
+    }
+    return nRet;
+}
+
 /* Return the number of active culling cells */
 int xglCullingExist(void)
 {
