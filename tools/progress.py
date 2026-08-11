@@ -42,17 +42,27 @@ def mask_word(w):
     return w
 
 
+_symbol_map = None
+
+
+def get_symbol_map():
+    """Scan every object's symbol table once: name -> (obj, offset)."""
+    global _symbol_map
+    if _symbol_map is None:
+        _symbol_map = {}
+        for o in sorted(glob.glob(f"{BUILT}/*.o")):
+            nm = subprocess.run([OBJDUMP, "-t", o], capture_output=True, text=True)
+            for nm_line in nm.stdout.split('\n'):
+                if " F .text" in nm_line:
+                    parts = nm_line.split()
+                    if parts:
+                        _symbol_map.setdefault(parts[-1], (o, int(parts[0], 16)))
+    return _symbol_map
+
+
 def verify_function(name, addr, size):
     """Returns True if function matches."""
-    obj = None
-    for o in sorted(glob.glob(f"{BUILT}/*.o")):
-        nm = subprocess.run([OBJDUMP, "-t", o], capture_output=True, text=True)
-        for nm_line in nm.stdout.split('\n'):
-            if nm_line.endswith(f" {name}") and " F .text" in nm_line:
-                obj = o
-                break
-        if obj:
-            break
+    obj, func_addr = get_symbol_map().get(name, (None, None))
     if not obj:
         return False
 
@@ -60,17 +70,6 @@ def verify_function(name, addr, size):
     orig = get_words([OBJDUMP, "-d", "-j", ".text",
                       f"--start-address=0x{addr:x}",
                       f"--stop-address=0x{end:x}", ELF])
-
-    sym_result = subprocess.run([OBJDUMP, "-t", obj], capture_output=True, text=True)
-    func_addr = None
-    for line in sym_result.stdout.split('\n'):
-        if line.endswith(f" {name}") and " F .text" in line:
-            m2 = re.match(r'([0-9a-f]+)', line)
-            if m2:
-                func_addr = int(m2.group(1), 16)
-                break
-    if func_addr is None:
-        return False
 
     func_end = func_addr + size
     built, built_relocs = get_words_relocs([OBJDUMP, "-d", "-r",

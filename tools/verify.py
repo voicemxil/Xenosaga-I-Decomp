@@ -59,21 +59,22 @@ with open("config/decompiled.txt") as f:
 passed = 0
 failed = 0
 
+# Scan every object's symbol table once up front: name -> (obj, offset).
+# Only defined function symbols count — other objects may reference the
+# same name as *UND* (callers) at address 0.
+symbol_map = {}
+for o in sorted(glob.glob(f"{BUILT}/*.o")):
+    nm = subprocess.run(
+        [CC_OBJDUMP, "-t", o], capture_output=True, text=True
+    )
+    for nm_line in nm.stdout.split('\n'):
+        if " F .text" in nm_line:
+            parts = nm_line.split()
+            if parts:
+                symbol_map.setdefault(parts[-1], (o, int(parts[0], 16)))
+
 for name, addr, size in entries:
-    # Find which .o file contains this function
-    obj = None
-    for o in sorted(glob.glob(f"{BUILT}/*.o")):
-        nm = subprocess.run(
-            [CC_OBJDUMP, "-t", o], capture_output=True, text=True
-        )
-        # Only a defined function symbol counts — other objects may
-        # reference the same name as *UND* (callers) at address 0.
-        for nm_line in nm.stdout.split('\n'):
-            if nm_line.endswith(f" {name}") and " F .text" in nm_line:
-                obj = o
-                break
-        if obj:
-            break
+    obj, sym_offset = symbol_map.get(name, (None, None))
 
     if not obj:
         print(f"  SKIP {name} - no object file found")
@@ -85,22 +86,7 @@ for name, addr, size in entries:
                       f"--start-address=0x{addr:x}",
                       f"--stop-address=0x{end:x}", ELF])
 
-    # For the C object, we need to find the function's offset
-    # Get the symbol's offset in the .o file
-    sym_result = subprocess.run(
-        [CC_OBJDUMP, "-t", obj], capture_output=True, text=True
-    )
-    func_addr = None
-    for line in sym_result.stdout.split('\n'):
-        if line.endswith(f" {name}") and " F .text" in line:
-            m2 = re.match(r'([0-9a-f]+)', line)
-            if m2:
-                func_addr = int(m2.group(1), 16)
-                break
-
-    if func_addr is None:
-        print(f"  SKIP {name} - can't find symbol offset")
-        continue
+    func_addr = sym_offset
 
     func_end = func_addr + size
     built, built_relocs = get_words_relocs([CC_OBJDUMP, "-d", "-r",
