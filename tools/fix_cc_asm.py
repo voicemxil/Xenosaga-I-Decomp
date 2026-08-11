@@ -10,6 +10,8 @@ and assemble. Transformations:
 - li.s: wrap in .set mips1, and add the mtc1 hazard nop the original
   ee-as inserted -- but only when the next instruction is an FP compare
   (c.*.s), matching the original's hazard rule
+- do not add a fallthrough hazard nop after an FP load in a COP1 likely-
+  branch delay slot; that delay slot is annulled on the fallthrough path
 """
 import re
 import sys
@@ -29,6 +31,7 @@ RE_FPLOAD = re.compile(r'^\t(li\.s|l\.s|lwc1)[ \t]')
 RE_FPCOMPUTE = re.compile(
     r'^\t(c\.[a-z]+\.s|mul\.s|div\.s|add\.s|sub\.s|mov\.s|abs\.s|neg\.s'
     r'|sqrt\.s|trunc\.w\.s|cvt\.[a-z.]+)[ \t]')
+RE_FP_BRANCH_LIKELY = re.compile(r'^\tbc1[ft]l[ \t]')
 
 
 def wrap_mips1(text):
@@ -45,6 +48,16 @@ def next_insn(lines, idx):
     return ""
 
 
+def previous_insn(lines, idx):
+    """Return the previous non-blank, non-directive, non-label line."""
+    for j in range(idx - 1, -1, -1):
+        s = lines[j]
+        if not s.strip() or s.lstrip().startswith(('.', '#')) or s.rstrip().endswith(':'):
+            continue
+        return s
+    return ""
+
+
 def main(path):
     with open(path) as f:
         lines = f.read().split('\n')
@@ -54,7 +67,8 @@ def main(path):
         line = RE_MOVE.sub(r'\tdaddu\t\1,\2,$0', line)
 
         needs_hazard_nop = (RE_FPLOAD.match(line)
-                            and RE_FPCOMPUTE.match(next_insn(lines, i)))
+                            and RE_FPCOMPUTE.match(next_insn(lines, i))
+                            and not RE_FP_BRANCH_LIKELY.match(previous_insn(lines, i)))
 
         if RE_LA.match(line) or RE_MEM.match(line) or RE_CVT.match(line):
             wrapped = wrap_mips1(line)

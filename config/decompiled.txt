@@ -191,10 +191,7 @@ nmlPacketAddGsScissor = 0x239E50, 0x30; // nmlPacket
 nmlPacketAddGsScissor1 = 0x239E80, 0x30; // nmlPacket
 nmlPacketAddGsFBA = 0x239EB0, 0x3C; // nmlPacket
 nmlPacketAddGsFBA1 = 0x239EF0, 0x3C; // nmlPacket
-# nmlPacketAddGsFogCol: matches except one hazard-nop placement across a
-# bc1fl delay-slot boundary (fix_cc_asm.py inserts one the original
-# assembler omitted there). Parked pending smarter hazard modeling.
-# nmlPacketAddGsFogCol = 0x239F30, 0x114; // nmlPacket
+nmlPacketAddGsFogCol = 0x239F30, 0x114; // nmlPacket
 nmlPacketAddGsFrame = 0x23A048, 0x6C; // nmlPacket
 nmlPacketAddGsFrame1 = 0x23A0B8, 0x6C; // nmlPacket
 nmlPacketAddGsPAbe = 0x23A128, 0x30; // nmlPacket
