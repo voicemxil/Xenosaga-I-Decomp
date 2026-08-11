@@ -62,6 +62,7 @@ FILE_CC = {
     "xglMenu.c": CC96,
     "xglStudio.c": CC96,
     "nmlPacket.c": CC96,
+    "xglFlags.c": CC96,
 }
 # Note: game code (2.96) matches with plain -O2 -G8; adding
 # -fno-schedule-insns perturbs its register allocation.
@@ -84,6 +85,7 @@ FILE_CFLAGS = {
     "xglMenu.c": "-O2 -G8",
     "xglStudio.c": "-O2 -G8",
     "nmlPacket.c": "-O2 -G8",
+    "xglFlags.c": "-O2 -G8",
 }
 
 
