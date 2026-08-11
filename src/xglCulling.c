@@ -64,14 +64,10 @@ int xglCullingCheckSeparate(void *p1, void *p2)
     nRet = 0;
     i = nRet;
     i = nRet;
-    /* TODO: Find the natural source shape that schedules the ra save here. */
-    __asm__("" ::: "$31", "memory");
-loop:
-    if (i < s_inCulling.nCount) {
+    for (; i < s_inCulling.nCount; i++) {
         nRet = check_occlusion(&s_inCulling.aCell[i], p1, p2);
-        i++;
-        if (nRet == 0) {
-            goto loop;
+        if (nRet != 0) {
+            break;
         }
     }
     return nRet;
