@@ -326,7 +326,6 @@ UmnkosmosSpecialInit = 0x00275DF8, 0x20; // Umn
 UmnkosmosSpecialSet = 0x00275E18, 0x5C; // Umn
 UmnMailMain = 0x002760F0, 0x90; // Umn
 UmnMailBoxSet = 0x00276180, 0x54; // Umn
-UmnMailDataGet = 0x002761D8, 0x18; // Umn
 UmnDataBaseMonsterSet = 0x002761F0, 0x54; // Umn
 UmnDataBaseMonsterCheck = 0x00276248, 0x4C; // Umn
 UmnDataBaseAnalisisSet = 0x00276298, 0x54; // Umn
