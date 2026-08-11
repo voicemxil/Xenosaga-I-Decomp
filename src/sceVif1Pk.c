@@ -9,6 +9,10 @@ typedef struct Vif1Packet
     unsigned int *openGif;   /* 0x14 - pointer to open GIF tag */
 } Vif1Packet;
 
+/* 128-bit quadword value (passed in a single VU/EE 128-bit register) */
+typedef int u128 __attribute__((mode(TI)));
+typedef union { u128 q; long d[2]; } U128;
+
 
 /* Initialize a VIF1 packet builder */
 void sceVif1PkInit(Vif1Packet *pkt, unsigned int *buffer)
@@ -42,40 +46,47 @@ unsigned int sceVif1PkSize(Vif1Packet *pkt)
 /* Reserve space for a number of 32-bit values */
 void sceVif1PkReserve(Vif1Packet *pkt, unsigned int count)
 {
-    pkt->current += count << 2;
+    /* TODO: near-miss (register tie-break) - original emits `addu $a1,$v0,$a1`
+       (rd == rt), which GCC 2.9 never generates from C: it canonicalizes a
+       commutative add to rd == rs. This form matches every word except the
+       commutative operand order of that one addu. */
+    count = (count << 2) + (unsigned int)pkt->current;
+    pkt->current = (unsigned int *)count;
 }
 
 /* Append a 64-bit GS data value (written as two 32-bit words) */
 void sceVif1PkAddGsData(Vif1Packet *pkt, unsigned long long value)
 {
     unsigned int *dest = pkt->current;
+    unsigned int *next;
     *dest++ = (unsigned int)value;
+    next = dest + 1;
     *dest = (unsigned int)(value >> 32);
-    pkt->current = dest + 1;
+    pkt->current = next;
 }
 
 /* Close a previously opened DIRECT code and patch its size */
 void sceVif1PkCloseDirectCode(Vif1Packet *pkt)
 {
-    unsigned int *current = pkt->current;
     unsigned int *open    = pkt->openDirect;
+    unsigned int *current = pkt->current;
 
-    current -= 1;                 /* exclude last word */
     pkt->openDirect = 0;          /* clear open state */
+    current -= 1;                 /* exclude last word */
 
-    open[0] += (unsigned int)(current - open);
+    open[0] += (unsigned int)(current - open) >> 2;
 }
 
 /* Close a previously opened DIRECT HL code and patch its size */
 void sceVif1PkCloseDirectHLCode(Vif1Packet *pkt)
 {
-    unsigned int *current = pkt->current;
     unsigned int *open    = pkt->openDirect;
+    unsigned int *current = pkt->current;
 
-    current -= 1;               /* exclude last word */
     pkt->openDirect = 0;        /* clear open state */
+    current -= 1;               /* exclude last word */
 
-    open[0] += (unsigned int)(current - open);
+    open[0] += (unsigned int)(current - open) >> 2;
 }
 
 /* Append a GS A+D packet entry (64-bit data + 32-bit address) */
@@ -92,34 +103,38 @@ void sceVif1PkAddGsAD(Vif1Packet *pkt, unsigned int addr, unsigned long long dat
 /* Append N 32-bit words to the packet */
 void sceVif1PkAddDataN(Vif1Packet *pkt, unsigned int *src, unsigned int count)
 {
+    unsigned int i = count - 1;
+
     if (count != 0)
     {
         unsigned int *dest = pkt->current;
-        unsigned int i = count;
 
         do
         {
             *dest++ = *src++;
-            i--;
         }
-        while (i != 0);
+        while (--i != 0xFFFFFFFF);
 
         pkt->current = dest;
     }
 }
 
 /* Append a 128-bit UNPACK data value (written as four 32-bit words) */
-void sceVif1PkAddUpkData128(Vif1Packet *pkt, unsigned int *value)
+void sceVif1PkAddUpkData128(Vif1Packet *pkt, u128 value)
 {
+    U128 u;
     unsigned int *dest = pkt->current;
+    long lo, hi;
 
-    /* Equivalent to PS2 'sq' + split into 32-bit words */
-    dest[0] = value[0];
-    dest[1] = value[1];
-    dest[2] = value[2];
-    dest[3] = value[3];
-
-    pkt->current += 4;  /* advance by 16 bytes */
+    u.q = value;
+    lo = u.d[0];
+    hi = u.d[1];
+    dest[0] = (int)lo;
+    dest++;
+    dest[0] = (int)(lo >> 32);
+    pkt->current = dest + 3;
+    dest[1] = (int)hi;
+    dest[2] = (int)(hi >> 32);
 }
 
 /* Close a previously opened UNPACK code and patch its element count */
@@ -166,8 +181,12 @@ unsigned int sceVif1PkTerminate(Vif1Packet *pkt)
     /* Patch the size of an open DIRECT/HL code if one exists */
     if (open != 0)
     {
-        int diff = (int)current - (int)open;
-        *open += (diff >> 4) - 1;
+        /* TODO: near-miss (register tie-break) - the final `addu`/`sw` land in
+           $v0 here, but the original accumulates into $v1 (open[0]'s register).
+           GCC 2.9 won't emit rd == rt for the commutative add, so the closest
+           form differs only by that one commutative-operand register choice. */
+        int n = (((int)current - (int)open) >> 4) - 1;
+        *open = n + *open;
     }
 
     /* Clear open pointer */
@@ -182,87 +201,72 @@ unsigned int sceVif1PkTerminate(Vif1Packet *pkt)
 /* Finalize a packet segment and append a VIF1 control word with the given flags */
 void sceVif1PkCnt(Vif1Packet *pkt, unsigned int flags)
 {
+    unsigned int start;
     unsigned int *current;
-    unsigned int ctrl;
 
-    /* Terminate packet to align and close any open code */
-    sceVif1PkTerminate(pkt);
+    /* Terminate packet to align and close any open code; remember segment start */
+    start = sceVif1PkTerminate(pkt);
 
-    /* Build control word: 0x10000000 OR flags */
+    /* TODO: near-miss (scheduling) - GCC 2.9 sinks the `sw` of the reserved
+       field between the `lui` and `or` that build the control word; the
+       original emits the `or` first.  Every other word matches. */
     current = pkt->current;
-    ctrl = 0x10000000 | flags;
-
-    /* Store control word at current pointer */
-    *current = ctrl;
-
-    /* Advance the packet pointer twice (8 bytes) */
+    flags |= 0x10000000;
+    pkt->reserved = start;
+    *current = flags;
     current++;
-    pkt->current = current;
-
-    /* Clear reserved / state field */
-    pkt->reserved = 0;
-
-    /* Zero the next word (padding) */
+    pkt->openDirect = 0;
+    pkt->current = current + 1;
     *current = 0;
 }
 
 /* Finalize a packet segment and append a VIF1 end-of-packet control word */
 void sceVif1PkEnd(Vif1Packet *pkt, unsigned int flags)
 {
+    unsigned int start;
     unsigned int *current;
-    unsigned int ctrl;
 
-    /* Terminate packet to align and close any open code */
-    sceVif1PkTerminate(pkt);
+    /* Terminate packet to align and close any open code; remember segment start */
+    start = sceVif1PkTerminate(pkt);
 
-    /* Build end-of-packet control word: 0x70000000 OR flags */
+    /* TODO: near-miss (scheduling) - see sceVif1PkCnt; identical shape with the
+       0x70000000 end-of-packet code instead of 0x10000000. */
     current = pkt->current;
-    ctrl = 0x70000000 | flags;
-
-    /* Store control word at current pointer */
-    *current = ctrl;
-
-    /* Advance the packet pointer twice (8 bytes) */
+    flags |= 0x70000000;
+    pkt->reserved = start;
+    *current = flags;
     current++;
-    pkt->current = current;
-
-    /* Clear reserved / state field */
-    pkt->reserved = 0;
-
-    /* Zero the next word (padding) */
+    pkt->openDirect = 0;
+    pkt->current = current + 1;
     *current = 0;
 }
 
 /* Align the packet current pointer to a 16-byte (quadword) boundary */
 void sceVif1PkAlign(Vif1Packet *pkt, unsigned int padding, unsigned int boundary)
 {
-    unsigned int *cur;
-    unsigned int aligned, offset;
+    /* TODO: near-miss - functionally correct, but GCC 2.9 rotates the fill loop
+       differently (the original peels the first iteration and keeps the "next"
+       pointer in a separate register) and swaps a couple of $v0/$v1 temporaries
+       in the mask setup.  Straight-line ops otherwise line up. */
+    unsigned int p = (padding + 2) & 0x1F;
+    unsigned int mask = 0xFFFFFFFF >> (32 - p);
+    unsigned int *cur = pkt->current;
+    unsigned int target = ((unsigned int)cur & ~mask) + (boundary << 2);
 
-    /* Load current pointer */
-    cur = pkt->current;
+    if (target < (unsigned int)cur)
+        target = target + 1 + mask;
 
-    /* Compute alignment offset for boundary (16-byte default) */
-    aligned = ((unsigned int)cur + padding + (boundary - 1)) & ~(boundary - 1);
-
-    /* Add additional padding for large blocks (a2 * 4) */
-    offset = aligned + (boundary * 4);
-
-    /* Write zero padding from current pointer up to offset */
-    while ((unsigned int)cur < offset)
+    while ((unsigned int)cur < target)
     {
         *cur++ = 0;
+        pkt->current = cur;
     }
-
-    /* Update packet pointer */
-    pkt->current = cur;
 }
 
 /* Open a DIRECT packet section for writing GS commands */
 void sceVif1PkOpenDirectCode(Vif1Packet *pkt, unsigned int flags)
 {
     unsigned int *cur;
-    unsigned int *start;
     unsigned int directCode;
 
     /* Align the current pointer to a quadword boundary for DIRECT packet */
@@ -271,25 +275,21 @@ void sceVif1PkOpenDirectCode(Vif1Packet *pkt, unsigned int flags)
     /* Load the current pointer */
     cur = pkt->current;
 
-    /* Store start pointer for this DIRECT block */
-    start = cur;
-
     /* Compute the DIRECT header value */
     directCode = 0x50000000;  /* VIF1 DIRECT code base */
     if (flags != 0)
         directCode = 0xD0000000;           /* VIF1 DIRECT code if flags set */
 
     /* Write DIRECT header to packet */
-    *cur = directCode;
     pkt->current = cur + 1;   /* advance pointer by 4 bytes */
-    pkt->reserved = start;    /* remember the start of this DIRECT block */
+    pkt->openDirect = cur;    /* remember the start of this DIRECT block */
+    *cur = directCode;
 }
 
 /* Open a HIGH-LEVEL DIRECT packet section for writing GS commands */
 void sceVif1PkOpenDirectHLCode(Vif1Packet *pkt, unsigned int flags)
 {
     unsigned int *cur;
-    unsigned int *start;
     unsigned int directHLCode;
 
     /* Align the current pointer to a quadword boundary for DIRECT HL packet */
@@ -298,134 +298,152 @@ void sceVif1PkOpenDirectHLCode(Vif1Packet *pkt, unsigned int flags)
     /* Load the current pointer */
     cur = pkt->current;
 
-    /* Store start pointer for this DIRECT HL block */
-    start = cur;
-
     /* Compute the DIRECT HL header value */
     directHLCode = 0x51000000;  /* VIF1 DIRECT HL base code */
     if (flags != 0)
         directHLCode = 0xD1000000;          /* VIF1 DIRECT HL if flags set */
 
     /* Write DIRECT HL header to packet */
-    *cur = directHLCode;
     pkt->current = cur + 1;   /* advance pointer by 4 bytes */
-    pkt->reserved = start;    /* remember the start of this DIRECT HL block */
+    pkt->openDirect = cur;    /* remember the start of this DIRECT HL block */
+    *cur = directHLCode;
 }
 
 /* Add N 128-bit DIRECT data units to the VIF1 packet */
-void sceVif1PkAddDirectDataN(Vif1Packet *pkt, const unsigned int *src, int N)
+void sceVif1PkAddDirectDataN(Vif1Packet *pkt, const long *src, unsigned int count)
 {
-    unsigned int *cur = pkt->current;  // current write pointer
-    int i;
+    /* TODO: near-miss - the 32-bit-word extraction (dsll32/dsra32) and the
+       down-counter loop are correct, but GCC 2.9 juggles the destination
+       pointer through an extra $v0 copy and moves the params into $t2/$a3
+       instead of the layout this straight form produces. */
+    unsigned int i = count - 1;
 
-    if (N == 0)  // nothing to add
-        return;
+    if (count != 0)
+    {
+        unsigned int *dest = pkt->current;
 
-    for (i = 0; i < N; i++) {
-        cur[0] = src[i * 4 + 0];  // lower 32 bits
-        cur[1] = src[i * 4 + 1];  // next 32 bits
-        cur[2] = src[i * 4 + 2];  // next 32 bits
-        cur[3] = src[i * 4 + 3];  // upper 32 bits
-        cur += 4;                  // advance pointer to next 128-bit unit
+        do
+        {
+            long lo = src[0];
+            long hi = src[1];
+            dest[0] = (int)lo;
+            dest[1] = (int)(lo >> 32);
+            dest[2] = (int)hi;
+            dest[3] = (int)(hi >> 32);
+            dest += 4;
+            src += 2;
+        }
+        while (--i != 0xFFFFFFFF);
+
+        pkt->current = dest;
     }
-
-    pkt->current = cur;  // update packet write pointer
 }
 
 /* Add multiple 128-bit UPK data units to the VIF1 packet */
-void sceVif1PkAddUpkData128N(Vif1Packet *pkt, const unsigned int *src, int N)
+void sceVif1PkAddUpkData128N(Vif1Packet *pkt, const long *src, unsigned int count)
 {
-    unsigned int *cur = pkt->current;   /* current write pointer in packet */
-    const unsigned int *p = src;        /* pointer to source 128-bit data units */
-    int i;
+    /* TODO: near-miss - identical body to sceVif1PkAddDirectDataN (same original
+       instruction stream); same pointer-juggling / register-move differences. */
+    unsigned int i = count - 1;
 
-    if (N == 0)
-        return;
+    if (count != 0)
+    {
+        unsigned int *dest = pkt->current;
 
-    for (i = 0; i < N; i++) {
-        /* store 128-bit unit (4 x 32-bit words) into packet buffer */
-        cur[0] = p[0];        /* lower 32 bits */
-        cur[1] = p[1];        /* next 32 bits */
-        cur[2] = p[2];        /* next 32 bits */
-        cur[3] = p[3];        /* upper 32 bits */
-        cur += 4;
-        p += 4;
+        do
+        {
+            long lo = src[0];
+            long hi = src[1];
+            dest[0] = (int)lo;
+            dest[1] = (int)(lo >> 32);
+            dest[2] = (int)hi;
+            dest[3] = (int)(hi >> 32);
+            dest += 4;
+            src += 2;
+        }
+        while (--i != 0xFFFFFFFF);
+
+        pkt->current = dest;
     }
-
-    pkt->current = cur;  /* update packet current pointer */
 }
 
 /* Initialize a VIF1 packet for an UNPACK code block */
 void sceVif1PkOpenUpkCode(Vif1Packet *pkt, unsigned int a1, unsigned int a2, unsigned int a3, unsigned int t0)
 {
-    unsigned int *start = pkt->current;
-    unsigned int tmp;
+    /* TODO: near-miss - functionally correct (the two code words, the element
+       count via (0x20 >> VL) * (VN + 1), and the NLOOP min/shift are all here),
+       but GCC 2.9 picks different $t registers and the opposite branch sense
+       for the t3 < t4 test than the original build. */
+    unsigned int *current = pkt->current;
+    unsigned int vl = a2 & 3;
+    unsigned int vn = (a2 >> 2) & 3;
+    unsigned int size, lo, hi, code;
 
-    tmp = (t0 << 8) | (0x1000000 | a3);
-    start[0] = tmp;               /* write first word of UPK code */
-    tmp = ((a2 & 0xFFFF) | (a2 << 24));
-    start[1] = tmp;               /* second word with masked a2 and shifted */
-    tmp = ((a2 & 3) + 1);         /* third word setup */
-    start[2] = tmp;
+    current[0] = (t0 << 8) | (a3 | 0x1000000);
+    current[1] = (a2 << 24) | (a1 & 0xFFFF);
+    pkt->current = current + 2;
+    pkt->openDirect = &current[1];
 
-    pkt->current = start + 4;     /* advance current pointer */
-    pkt->openDirect = start;      /* remember start of this UNPACK block */
+    size = (0x20 >> vl) * (vn + 1);
+    lo = a3 ? a3 : 0x100;
+    hi = t0 ? t0 : 0x100;
+    if (lo < hi) {
+        size = size * lo;
+        code = hi << 16;
+    } else {
+        code = 0x10000;
+    }
+    pkt->unk1 = code | size;
 }
 
 /* Add a VIF1 reference packet with 4 words, terminating the current packet first */
 void sceVif1PkRef(Vif1Packet *pkt, unsigned int a1, unsigned int a2, unsigned int a3, unsigned int t0, unsigned int t1)
 {
-    unsigned int *start = pkt->current;
+    unsigned int *current;
+    unsigned int w0;
 
-    /* terminate current packet if needed */
+    /* terminate current packet first */
     sceVif1PkTerminate(pkt);
 
-    start[0] = a2 | 0x30000000;    // first word
-    start[1] = a1 & 0x9FFFFFFF;    // second word masked
-    start[2] = a3;
-    start[3] = t0;
-    start[4] = t1;
-
-    pkt->current = start + 5;       // advance packet pointer
+    current = pkt->current;
+    a2 = a2 | 0x30000000;
+    w0 = t1 | a2;
+    *current++ = w0;
+    *current = a1 & 0x9FFFFFFF;
+    pkt->current = current + 3;
+    current[1] = a3;
+    current[2] = t0;
 }
 
 /* Close a currently open GIF tag in the VIF1 packet */
 void sceVif1PkCloseGifTag(Vif1Packet *pkt)
 {
-    unsigned int *gifPtr = pkt->openGif;   /* pointer to open GIF tag */
-    unsigned int *pktBase = pkt->base;     /* start of packet */
-    unsigned int *cur = (unsigned int *)pktBase[0];  /* current write pointer */
-    unsigned int qwords, leftover, i;
-    unsigned int tag = gifPtr ? *gifPtr : 0;
+    /* TODO: near-miss - logic and instruction sequence match the original (the
+       NLOOP division, FLG/NREG conditional-moves and the 16-byte fill loop all
+       line up), but GCC 2.9 allocates the $t0-$t2 pointers and temporaries to
+       different registers than the original build. */
+    unsigned int *current = pkt->current;
+    unsigned int *openGif = pkt->openGif;
+    unsigned long tag = *(unsigned long *)openGif;
+    unsigned int nloop = (((int)current - (int)openGif) >> 3) - 2;
+    unsigned int flg = (unsigned int)(tag >> 58) & 3;
 
-    /* compute number of qwords written since GIF tag */
-    qwords = ((unsigned int)pktBase - (unsigned int)gifPtr) >> 3;
-    leftover = (tag >> 26) & 0x3;           /* lower 2 bits of upper 6 bits */
-
-    /* adjust qwords based on leftover */
-    if (leftover != 2) {
-        unsigned int tmp = (qwords >> 1);
-        if (((tag >> 28) & 0xF) == 0)
-            tmp = 0x10;
-        qwords += tmp;
+    if (flg != 2) {
+        unsigned int nreg = (unsigned int)(tag >> 60);
+        if (flg != 1)
+            nloop = nloop >> 1;
+        if (nreg == 0)
+            nreg = 16;
+        nloop = (nloop + nreg - 1) / nreg;
     }
 
-    /* store final GIF tag word */
-    if (gifPtr)
-        *gifPtr = tag + (qwords << 2);      /* update GIF tag qword count */
-
-    /* clear the openGif pointer in the packet */
+    *(unsigned long *)openGif = tag + nloop;
     pkt->openGif = 0;
 
-    /* zero out padding to align next write to 16-byte boundary */
-    cur = (unsigned int *)pktBase[0];
-    if (((unsigned int)cur & 0xC) != 0) {
-        for (i = 0; ((unsigned int)(cur + i) & 0xC) != 0; ++i)
-            cur[i] = 0;
-    }
+    while (((unsigned int)current & 0xC) != 0)
+        *current++ = 0;
 
-    /* update packet current pointer to next available position */
-    pkt->current = cur;
+    pkt->current = current;
 }
 
 /* Build a VIF1 packet to load an image into the GS */
