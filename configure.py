@@ -53,6 +53,11 @@ FILE_CC = {
     "xglCulling.c": CC96,
     "MSG.c": CC96,
     "MBUF.c": CC96,
+    "ssd.c": CC96,
+    "xglHdd.c": CC96,
+    "xglMenu.c": CC96,
+    "xglStudio.c": CC96,
+    "nmlPacket.c": CC96,
 }
 # Note: game code (2.96) matches with plain -O2 -G8; adding
 # -fno-schedule-insns perturbs its register allocation.
@@ -66,6 +71,11 @@ FILE_CFLAGS = {
     "xglCulling.c": "-O2 -G8",
     "MSG.c": "-O2 -G8",
     "MBUF.c": "-O2 -G8",
+    "ssd.c": "-O2 -G8",
+    "xglHdd.c": "-O2 -G8",
+    "xglMenu.c": "-O2 -G8",
+    "xglStudio.c": "-O2 -G8",
+    "nmlPacket.c": "-O2 -G8",
 }
 
 
@@ -135,18 +145,11 @@ def generate_ninja(asm_files, src_files, asset_files):
         f.write(f"cc = {CC}\n\n")
 
         f.write(f"rule cc\n")
-        # Post-process compiler asm: move -> daddu (original encoding), and
-        # wrap address/immediate pseudo-ops in .set mips1 so the assembler
-        # expands them like the original ee-as: `la` and symbol-operand
-        # load/store macros with 32-bit addiu/addu (not daddiu/daddu), and
-        # `li.s` with the mtc1 hazard nop the original build has.
-        sed_move = "-e 's/\\tmove\\t\\(\\$$[0-9a-z]\\{1,\\}\\),\\(\\$$[0-9a-z]\\{1,\\}\\)/\\tdaddu\\t\\1,\\2,$$0/'"
-        sed_la = "-e 's/^\\tla[ \\t]\\(.*\\)$$/\\t.set push\\n\\t.set mips1\\n\\tla\\t\\1\\n\\t.set pop/'"
-        sed_mem = "-e 's/^\\t\\(sw\\|sh\\|sb\\|swc1\\|lw\\|lh\\|lb\\|lbu\\|lhu\\|lwc1\\|s\\.s\\|l\\.s\\)[ \\t]\\([^,]*\\),\\([A-Za-z_.].*\\)$$/\\t.set push\\n\\t.set mips1\\n\\t\\1\\t\\2,\\3\\n\\t.set pop/'"
-        # li.s: the original ee-as inserted a hazard nop after the macro's
-        # internal mtc1; modern gas does not, so append it explicitly.
-        sed_lis = "-e 's/^\\tli\\.s[ \\t]\\(.*\\)$$/\\t.set push\\n\\t.set mips1\\n\\tli.s\\t\\1\\n\\t.set pop\\n\\tnop/'"
-        f.write(f"  command = $cc $cflags -S -o $out.s $in && sed -i {sed_move} {sed_la} {sed_mem} {sed_lis} $out.s && {AS} {CC_ASFLAGS} -o $out $out.s\n")
+        # tools/fix_cc_asm.py post-processes the compiler asm so the modern
+        # assembler reproduces the original ee-as encodings (move->daddu,
+        # .set mips1 wraps for la/mem-macros/FP conversions, conditional
+        # li.s hazard nop).
+        f.write(f"  command = $cc $cflags -S -o $out.s $in && python3 tools/fix_cc_asm.py $out.s && {AS} {CC_ASFLAGS} -o $out $out.s\n")
         f.write(f"  description = CC $in\n\n")
 
         f.write(f"rule ld\n")
