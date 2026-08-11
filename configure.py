@@ -46,12 +46,22 @@ CC96 = "/opt/ee-gcc2.96/bin/ee-gcc"
 FILE_CC = {
     "SCRIPT.c": CC96,
     "nmlModel.c": CC96,
+    "xglDma.c": CC96,
+    "xglCd.c": CC96,
+    "xglPacket.c": CC96,
+    "xglRender.c": CC96,
+    "xglCulling.c": CC96,
 }
 # Note: game code (2.96) matches with plain -O2 -G8; adding
 # -fno-schedule-insns perturbs its register allocation.
 FILE_CFLAGS = {
     "SCRIPT.c": "-O2 -G8",
     "nmlModel.c": "-O2 -G8",
+    "xglDma.c": "-O2 -G8",
+    "xglCd.c": "-O2 -G8",
+    "xglPacket.c": "-O2 -G8",
+    "xglRender.c": "-O2 -G8",
+    "xglCulling.c": "-O2 -G8",
 }
 
 
