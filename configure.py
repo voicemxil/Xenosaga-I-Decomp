@@ -54,6 +54,7 @@ FILE_CC = {
     "MSG.c": CC96,
     "MBUF.c": CC96,
     "JNI.c": CC96,
+    "Java_Unit.c": CC96,
     "Java_Camera.c": CC96,
     "Java_util.c": CC96,
     "DataBuffer.c": CC96,
@@ -91,6 +92,7 @@ FILE_CFLAGS = {
     "MSG.c": "-O2 -G8",
     "MBUF.c": "-O2 -G8",
     "JNI.c": "-O2 -G8",
+    "Java_Unit.c": "-O2 -G8",
     "Java_Camera.c": "-O2 -G8",
     "Java_util.c": "-O2 -G8",
     "DataBuffer.c": "-O2 -G8",
@@ -119,6 +121,8 @@ FILE_CFLAGS = {
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    # many util natives do lwc1->cvt.s.w with no hazard nop in the original
+    "Java_util.c": "--omit-hazard cvt.s.w",
     "xglVector.c": ("--omit-hazard mul.s --omit-hazard sub.s "
                     "--omit-hazard c.lt.s --omit-hazard mov.s"),
 }
