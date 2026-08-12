@@ -23,6 +23,11 @@ RE_MOVE = re.compile(r'\tmove\t(\$[0-9a-z]+),(\$[0-9a-z]+)')
 RE_LA = re.compile(r'^\tla[ \t](.*)$')
 RE_MEM = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS) +
                     r')[ \t]([^,]*),([A-Za-z_.].*)$')
+# Same load/store macro, but against a numeric absolute address (e.g.
+# `sw $4,1879048248` from `((S *)0x70000038)->f = x`). No parentheses, so
+# it is a macro to expand rather than a plain register-offset access.
+RE_MEM_ABS = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS) +
+                        r')[ \t]([^,]*),(-?[0-9]+)[ \t]*$')
 RE_LIS = re.compile(r'^\tli\.s[ \t](.*)$')
 RE_CVT = re.compile(r'^\t(cvt\.[a-z.]+|trunc\.w\.s)[ \t](.*)$')
 # FP loads whose result feeds a COP1 compute need the hazard nop the
@@ -81,6 +86,13 @@ def main(path, omitted_hazards):
                             and RE_FPCOMPUTE.match(following)
                             and not omitted
                             and not RE_FP_BRANCH_LIKELY.match(previous_insn(lines, i)))
+
+        # A numeric-absolute load/store macro immediately before a leaf
+        # return: gas steals its expanded access into the jr delay slot,
+        # where the original ee-as left a nop. Barrier just this case.
+        if RE_MEM_ABS.match(line) and RE_RETURN.match(following):
+            out.append(wrap_mips1_noreorder(line))
+            continue
 
         if RE_LA.match(line) or RE_MEM.match(line) or RE_CVT.match(line):
             # When an `la reg, sym(idx)` macro is the last computation before
