@@ -160,6 +160,7 @@ FILE_FIX_FLAGS = {
     # EXM's original object schedules independent FP work into load-delay
     # slots before comparisons and additions.
     "EXM.c": "--omit-hazard c.lt.s --omit-hazard add.s",
+    "MATRIX.c": "--omit-hazard mul.s --omit-hazard add.s",
 }
 
 

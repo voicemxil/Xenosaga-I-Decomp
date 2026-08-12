@@ -17,6 +17,7 @@ typedef struct {
 extern TCAMERA_WORK tcamera[];
 
 void SPL_getValueXYZ(float *pValue);
+float SPL_getValue(void *pSpline, int nComponent);
 
 TCAMERA_WORK *TCAMERA_get(int nCamera)
 {
@@ -50,9 +51,46 @@ void TCAMERA_setRoll(TCAMERA_XGL_CAMERA *pCamera, float degrees)
     pCamera->rotate[2] = degrees / 180.0f * 3.141592741f;
 }
 
+void TCAMERA_setRotate(TCAMERA_XGL_CAMERA *pCamera,
+                       float x, float y, float z)
+{
+    float *pRotate;
+
+    pCamera = (TCAMERA_XGL_CAMERA *)((char *)pCamera + 0xA0);
+    pRotate = (float *)pCamera;
+    pRotate[0] = x / 180.0f * 3.141592741f;
+    pRotate[1] = y / 180.0f * 3.141592741f;
+    pRotate[2] = z / 180.0f * 3.141592741f;
+}
+
 void TCAMERA_transSPL(TCAMERA_XGL_CAMERA *pCamera)
 {
     SPL_getValueXYZ(pCamera->translate);
+}
+
+void TCAMERA_rotateSPL(TCAMERA_XGL_CAMERA *pCamera)
+{
+    float value[4];
+    float *pRotate = pCamera->rotate;
+
+    SPL_getValueXYZ(value);
+    pRotate[0] = value[0] / 180.0f * 3.141592741f;
+    pRotate[1] = value[1] / 180.0f * 3.141592741f;
+    pRotate[2] = value[2] / 180.0f * 3.141592741f;
+}
+
+void TCAMERA_rollSPL(TCAMERA_XGL_CAMERA *pCamera, void *pSpline)
+{
+    float *pRotate;
+
+    pCamera = (TCAMERA_XGL_CAMERA *)((char *)pCamera + 0xA0);
+    pRotate = (float *)pCamera;
+    pRotate[2] = SPL_getValue(pSpline, 0) / 180.0f * 3.141592741f;
+}
+
+void TCAMERA_fovSPL(TCAMERA_XGL_CAMERA *pCamera, void *pSpline)
+{
+    pCamera->fov = SPL_getValue(pSpline, 0) / 180.0f * 3.141592741f;
 }
 
 /* This hook was retained by the camera API but is empty in the shipped game. */
