@@ -13,7 +13,9 @@ typedef struct {
     short nResultCode;              /* 0x080 */
     char pad082[0x6];               /* 0x082 */
     int nResultValue;               /* 0x088 */
-    char pad08C[0x134];             /* 0x08C */
+    char pad08C[0x120];             /* 0x08C */
+    int nWakeupThreadId;            /* 0x1AC */
+    char pad1B0[0x10];              /* 0x1B0 */
     char *pMemStart;                /* 0x1C0 */
     char *pMemEnd;                  /* 0x1C4 */
     int nMemSize;                   /* 0x1C8 */
@@ -73,6 +75,9 @@ void EIntr(void);
 void *sceSifGetNextRequest(void *);
 void sceSifExecRequest(void *);
 int printf(const char *, ...);
+void SsdCopyMemory(void *, const void *, int);
+void SignalSema(int);
+int WakeupThread(int);
 
 /* Fetch the scalar result of the last completed sound-driver request */
 int SsdGetResultValue(int *pValue)
@@ -1451,5 +1456,35 @@ void SsdClearMemory(void *pAddr, int nSize)
             nCount--;
             *pDst++ = 0;
         } while (nCount != 0);
+    }
+}
+
+/* Fetch the completion flag of the last posted driver function call */
+int RssdGetCallCompletedCode(void)
+{
+    return (RssdWork.nFlags >> 3) & 1;
+}
+
+/* Copy a completed SPU read result into the DMA staging area */
+void RssdSpuRead(RSSD_PACKET *pPkt)
+{
+    int nSize;
+    int nFlag;
+
+    nSize = pPkt->nArg[1];
+    nFlag = pPkt->nArg[2];
+    SsdCopyMemory((char *)RssdWork.pDmaAddr, (char *)pPkt + 0x20, nSize);
+    RssdWork.pDmaAddr = (char *)RssdWork.pDmaAddr + nSize;
+    if (nFlag == 0) {
+        RssdWork.nFlags &= ~4;
+    }
+}
+
+/* Wake the background-wave thread once its data has arrived */
+void RssdBackgroundNextWave(RSSD_PACKET *pPkt)
+{
+    RssdWork.nFlags &= ~4;
+    if (pPkt->nArg[0] >= 0) {
+        WakeupThread(RssdWork.nWakeupThreadId);
     }
 }

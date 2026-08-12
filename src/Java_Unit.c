@@ -73,7 +73,10 @@ typedef struct {
 typedef struct {
     int field_000;          /* 0x000 */
     int nState;             /* 0x004 */
-    char pad008[0x238];     /* 0x008 */
+    char pad008[0x1C];      /* 0x008 */
+    void (*pFunc)(void);    /* 0x024 */
+    void (*pFunc2)(void);   /* 0x028 */
+    char pad02C[0x214];     /* 0x02C */
     float aPivot[3];        /* 0x240 */
     char pad24C[0x4];       /* 0x24C */
     float aAxis[4];         /* 0x250 */
@@ -85,7 +88,12 @@ JCLASS *classJava_xeno_util_Vector4f;
 
 extern UNITSEQ unitSequence[];
 extern char D_004DC1D0[];
+extern char D_004DC1D8[];
+extern char D_004DC1E0[];
+extern char D_004DC1E8[];
+extern char D_004DC1F0[];
 extern char D_004DC1F8[];
+extern char D_004DC200[];
 
 int loadConstString(char *pName, int nLength);
 JFIELD *lookupClassField(int nClass, int nName, int nFlags);
@@ -106,10 +114,73 @@ void copyArgs_00303EC8(void *pDst, void *pSrc, int nSize);
 int ACT_jointGetAccessories(void *pParent, int nJoint);
 void UNIT_setUpdate(void *pObject, void *pParent);
 void tyaElevatorTask(UNITWORK *pUnit);
+void SEQ_transCNSUnitChr(void);
+void SEQ_rotYCNSUnitChr(void);
 
 /* Resolve the native work block a script Unit object points at */
 #define UNIT_WORK(pObj) (*(UNITWORK **)((char *)(pObj) + \
     lookupClassField(classJava_xeno_Unit, loadConstString(D_004DC1D0, -1), 0)->nOffset))
+
+/* Resolve the native peer a script Chr object points at, by the shared field name */
+#define CHR_PEER_OF(pObj) (*(void **)((char *)(pObj) + \
+    lookupClassField(classJava_xeno_Chr, loadConstString(D_004DC1D0, -1), 0)->nOffset))
+
+/* Byte offset of a named field within a xeno.Unit script object */
+#define UNIT_FIELD(name) \
+    (lookupClassField(classJava_xeno_Unit, loadConstString(name, -1), 0)->nOffset)
+
+/* Constrain the unit's Y rotation to track another actor */
+void Java_xeno_Unit_rotYCNS__Ljava_lang_Object_IFFF(void *pEnv, JVAL *pArgs, JVAL *pRet)
+{
+    void *pObj = pArgs[0].p;
+    UNITWORK *pUnit;
+    UNITSEQ *pSeq;
+    char *p;
+
+    pUnit = UNIT_WORK(pObj);
+    UNIT_setUpdate(pObj, pUnit);
+    pSeq = &unitSequence[pUnit->nSerial];
+    p = (char *)pSeq + 0xB8;
+    pSeq->pFunc2 = SEQ_rotYCNSUnitChr;
+    pSeq->nState |= 4;
+    *(void **)(p + 0x00) = CHR_PEER_OF(pArgs[1].p);
+    *(int *)(p + 0x14) = pArgs[2].i;
+    *(float *)(p + 0x30) = pArgs[3].f;
+    *(float *)(p + 0x34) = pArgs[4].f;
+    *(float *)(p + 0x38) = pArgs[5].f;
+}
+
+/* Constrain the unit's position to track another actor */
+void Java_xeno_Unit_transCNS__Ljava_lang_Object_IFFF(void *pEnv, JVAL *pArgs, JVAL *pRet)
+{
+    void *pObj = pArgs[0].p;
+    UNITWORK *pUnit;
+    UNITSEQ *pSeq;
+    char *p;
+
+    pUnit = UNIT_WORK(pObj);
+    UNIT_setUpdate(pObj, pUnit);
+    pSeq = &unitSequence[pUnit->nSerial];
+    p = (char *)pSeq + 0x38;
+    pSeq->pFunc = SEQ_transCNSUnitChr;
+    pSeq->nState |= 1;
+    *(void **)(p + 0x00) = CHR_PEER_OF(pArgs[1].p);
+    *(int *)(p + 0x40) = pArgs[2].i;
+    *(float *)(p + 0x10) = pArgs[3].f;
+    *(float *)(p + 0x14) = pArgs[4].f;
+    *(float *)(p + 0x18) = pArgs[5].f;
+}
+
+/* Copy the unit's rotation back into the script object (radians to degrees) */
+void Java_xeno_Unit_getRotate__(void *pEnv, JVAL *pArgs, JVAL *pRet)
+{
+    char *pObj = (char *)pArgs[0].p;
+    float *pRot = (float *)((char *)UNIT_WORK(pObj) + 0x20);
+
+    *(float *)(pObj + UNIT_FIELD(D_004DC1D8)) = pRot[0] / 3.1415927f * 180.0f;
+    *(float *)(pObj + UNIT_FIELD(D_004DC1E0)) = pRot[1] / 3.1415927f * 180.0f;
+    *(float *)(pObj + UNIT_FIELD(D_004DC1E8)) = pRot[2] / 3.1415927f * 180.0f;
+}
 
 /* Read the unit's pending signal number back into the script */
 void Java_xeno_Unit_getSignal__(void *pEnv, JVAL *pArgs, JVAL *pRet)
@@ -122,6 +193,17 @@ void Java_xeno_Unit_getSignal__(void *pEnv, JVAL *pArgs, JVAL *pRet)
     } else {
         pRet->i = UNIT_WORK(pObj)->nSignal;
     }
+}
+
+/* Copy the unit's position back into the script object */
+void Java_xeno_Unit_getTranslate__(void *pEnv, JVAL *pArgs, JVAL *pRet)
+{
+    char *pObj = (char *)pArgs[0].p;
+    float *pPos = (float *)((char *)UNIT_WORK(pObj) + 0x10);
+
+    *(float *)(pObj + UNIT_FIELD(D_004DC1F0)) = pPos[0];
+    *(float *)(pObj + UNIT_FIELD(D_004DC1F8)) = pPos[1];
+    *(float *)(pObj + UNIT_FIELD(D_004DC200)) = pPos[2];
 }
 
 /* Script hook with no native side effect */
@@ -278,6 +360,28 @@ void Java_xeno_Unit_setCollision__Z(void *pEnv, JVAL *pArgs, JVAL *pRet)
     } else {
         pUnit->nFlags &= ~0x100;
     }
+}
+
+/* Copy the script object's rotation into the unit (degrees to radians) */
+void Java_xeno_Unit_setRotate__(void *pEnv, JVAL *pArgs, JVAL *pRet)
+{
+    char *pObj = (char *)pArgs[0].p;
+    float *pRot = (float *)((char *)UNIT_WORK(pObj) + 0x20);
+
+    pRot[0] = *(float *)(pObj + UNIT_FIELD(D_004DC1D8)) / 180.0f * 3.1415927f;
+    pRot[1] = *(float *)(pObj + UNIT_FIELD(D_004DC1E0)) / 180.0f * 3.1415927f;
+    pRot[2] = *(float *)(pObj + UNIT_FIELD(D_004DC1E8)) / 180.0f * 3.1415927f;
+}
+
+/* Copy the script object's position into the unit */
+void Java_xeno_Unit_setTranslate__(void *pEnv, JVAL *pArgs, JVAL *pRet)
+{
+    char *pObj = (char *)pArgs[0].p;
+    float *pPos = (float *)((char *)UNIT_WORK(pObj) + 0x10);
+
+    pPos[0] = *(float *)(pObj + UNIT_FIELD(D_004DC1F0));
+    pPos[1] = *(float *)(pObj + UNIT_FIELD(D_004DC1F8));
+    pPos[2] = *(float *)(pObj + UNIT_FIELD(D_004DC200));
 }
 
 /* Show or hide one part of the unit's model */

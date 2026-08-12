@@ -115,6 +115,9 @@ JClass *classJava_xeno_util_Layout;
 JClass *classJava_xeno_util_Window;
 JClass *classJava_xeno_util_Menu;
 JClass *classJava_xeno_Effect;
+JClass *classJava_xeno_Enepc;
+JClass *classJava_xeno_Uwamono;
+JClass *classJava_xeno_Stage;
 int defaultLayout;
 int D_004DC6B4;
 int s_nMpeg2ReserveCrossFade;
@@ -125,6 +128,8 @@ void (*jthreadResetFunc)(void);
 extern char D_004DC098[];
 extern char D_004DC0A0[];
 extern char D_004DC0A8[];
+extern char D_004DC110[];
+extern char D_004D16B0[];
 extern PadWork D_00490DB8[];
 extern GameLoop GameLoopState;
 extern int VMRegister[32];
@@ -229,6 +234,24 @@ void TMENU_addQuery2(void *, char **, int);
 void TMENU_addItem(void *, char *);
 char *getPartyDataOfs(unsigned int);
 int XTK_findFile(char *);
+int XTK_getResourceID(void *);
+int getPeer_Chr(void *);
+int getPeer_Enepc(void *);
+int getPeer_Unit(void *);
+int getPeer_Uwamono(void *);
+int getPeer_Effect(void *);
+int getPeer_Stage(void *);
+void ACT_loadResource(void *, int);
+void ACT_loadMotion(void *, int, int);
+void MAP_loadUnitResource(void *, int);
+int RES_loadFile(int, int, int, int);
+void xglSleep(void);
+void GameCfPlayerLoadResource(int);
+extern char *D_00338684[];
+
+/* Byte offset of a named field within a script object of the given class */
+#define TK_FIELD(cls, name) \
+    (lookupClassField(cls, loadConstString(name, -1), 0)->nOffset)
 
 /* Allocate the native side of a Spline object */
 void Java_xeno_util_Spline_create__(JThread *thread, JValue *args, JValue *ret)
@@ -744,6 +767,49 @@ void Java_xeno_util_Runtime_getPartyData__I(JThread *thread, JValue *args, JValu
     }
 }
 
+/* Write one party-data field, sized by the key's type tag */
+/* TODO: near-miss - the switch tree and everything up to the reload now match; the
+   tail keeps the actor pointer in $s1 and the saved slot in $s0 where the original
+   has them the other way round, costing one extra instruction in the epilogue. */
+void Java_xeno_util_Runtime_setPartyData__II(JThread *thread, JValue *args, JValue *ret)
+{
+    char *chr;
+    char *p;
+    int nType;
+    int nSave;
+    int nId;
+
+    nType = args[0].u >> 24;
+    p = getPartyDataOfs(args[0].u);
+    switch (nType) {
+    case 0:
+    default:
+        *(char *)p = args[1].z;
+        break;
+    case 1:
+        *(short *)p = args[1].h;
+        break;
+    case 2:
+        *(int *)p = args[1].i;
+        break;
+    case 3:
+        *(long long *)p = args[1].i;
+        break;
+    }
+    if (args[0].i == 0x100002C) {
+        nId = args[1].i;
+        chr = D_00338684[0];
+        if (*(short *)(chr + 0x86) != nId) {
+            nSave = *(int *)(chr + 0x8D0);
+            *(int *)(chr + 0x8D0) = 0;
+            xglSleep();
+            xglSleep();
+            *(int *)(chr + 0x8D0) = nSave;
+            GameCfPlayerLoadResource(1);
+        }
+    }
+}
+
 /* Add a character to the party */
 void Java_xeno_util_Runtime_setFriend__I(JThread *thread, JValue *args, JValue *ret)
 {
@@ -1209,9 +1275,58 @@ void Java_xeno_util_Menu_setCursor__I(JThread *thread, JValue *args, JValue *ret
     }
 }
 
+/* Resolve the native peer of any script object the toolkit knows about */
+void Java_xeno_util_Toolkit_getPeer__Ljava_lang_Object_(JThread *thread, JValue *args, JValue *ret)
+{
+    void *obj = args[0].p;
+
+    if (JNI_isInstanceOf(obj, classJava_xeno_Chr) == 1) {
+        if (JNI_isInstanceOf(obj, classJava_xeno_Enepc) == 1) {
+            ret->i = getPeer_Enepc(obj);
+        } else {
+            ret->i = getPeer_Chr(obj);
+        }
+    } else if (JNI_isInstanceOf(obj, classJava_xeno_Unit) == 1) {
+        if (JNI_isInstanceOf(obj, classJava_xeno_Uwamono) == 1) {
+            ret->i = getPeer_Uwamono(obj);
+        } else {
+            ret->i = getPeer_Unit(obj);
+        }
+    } else if (JNI_isInstanceOf(obj, classJava_xeno_Effect) == 1) {
+        ret->i = getPeer_Effect(obj);
+    } else if (JNI_isInstanceOf(obj, classJava_xeno_Stage) == 1) {
+        ret->i = getPeer_Stage(obj);
+    } else {
+        ret->i = 0;
+    }
+}
+
 /* Toolkit.call is not implemented */
 void Java_xeno_util_Toolkit_call__Ljava_lang_Object_Ljava_lang_String_(JThread *thread, JValue *args, JValue *ret)
 {
+}
+
+/* Load a character's model plus motion set, or a unit's resource */
+void Java_xeno_util_Toolkit_loadResource__Ljava_lang_Object_I(JThread *thread, JValue *args, JValue *ret)
+{
+    int nRes;
+    char *obj;
+    int nNo;
+    void *peer;
+
+    nRes = XTK_getResourceID(thread);
+    obj = (char *)args[0].p;
+    nNo = args[1].i;
+    if (JNI_isInstanceOf(obj, classJava_xeno_Chr) != 0) {
+        peer = *(void **)(obj + TK_FIELD(classJava_xeno_Chr, D_004DC110));
+        ACT_loadResource(peer, nNo);
+        ACT_loadMotion(peer, nNo, nRes);
+    } else if (JNI_isInstanceOf(obj, classJava_xeno_Unit) != 0) {
+        peer = *(void **)(obj + TK_FIELD(classJava_xeno_Unit, D_004DC110));
+        if ((*(int *)(obj + TK_FIELD(classJava_xeno_Unit, D_004D16B0)) & 0xF00) == 0) {
+            MAP_loadUnitResource(peer, nNo);
+        }
+    }
 }
 
 /* Look up a resource file by name */
@@ -1221,6 +1336,61 @@ void Java_xeno_util_Toolkit_loadResource__Ljava_lang_String_(JThread *thread, JV
 
     str = (JString *)args[0].p;
     ret->i = XTK_findFile(str->pArray->pData);
+}
+
+/* Attach a loaded resource object to one of the peer's resource slots */
+void Java_xeno_util_Toolkit_loadResource__Ljava_lang_Object_Ljava_lang_Object_I(JThread *thread, JValue *args, JValue *ret)
+{
+    char *obj;
+    int nIdx;
+    int nRes;
+    char *peer;
+
+    obj = (char *)args[0].p;
+    nRes = args[1].i;
+    nIdx = args[2].i;
+    if (JNI_isInstanceOf(obj, classJava_xeno_Chr) != 0) {
+        peer = *(char **)(obj + TK_FIELD(classJava_xeno_Chr, D_004DC110));
+        if (nIdx < 11) {
+            *(int *)(peer + nIdx * 4 + 0x8D0) = nRes;
+        }
+    } else if (JNI_isInstanceOf(obj, classJava_xeno_Unit) != 0) {
+        obj = *(char **)(obj + TK_FIELD(classJava_xeno_Unit, D_004DC110));
+        TK_FIELD(classJava_xeno_Unit, D_004D16B0);
+        if (nIdx == 0) {
+            *(int *)(obj + 0xD4) = nRes;
+        } else {
+            nIdx--;
+            if (nIdx < 2) {
+                *(int *)(obj + nIdx * 4 + 0xD8) = nRes;
+            }
+        }
+    }
+}
+
+/* Load a resource and, for units, its extra streamed file */
+void Java_xeno_util_Toolkit_loadResource__Ljava_lang_Object_II(JThread *thread, JValue *args, JValue *ret)
+{
+    char *obj;
+    int nNo;
+    int nMot;
+    char *peer;
+
+    XTK_getResourceID(thread);
+    obj = (char *)args[0].p;
+    nNo = args[1].i;
+    nMot = args[2].i;
+    if (JNI_isInstanceOf(obj, classJava_xeno_Chr) != 0) {
+        peer = *(char **)(obj + TK_FIELD(classJava_xeno_Chr, D_004DC110));
+        ACT_loadResource(peer, nNo);
+        ACT_loadMotion(peer, nMot, 3);
+    } else if (JNI_isInstanceOf(obj, classJava_xeno_Unit) != 0) {
+        peer = *(char **)(obj + TK_FIELD(classJava_xeno_Unit, D_004DC110));
+        if ((*(int *)(obj + TK_FIELD(classJava_xeno_Unit, D_004D16B0)) & 0xF00) == 0) {
+            MAP_loadUnitResource(peer, nNo);
+            *(int *)(peer + 0xDC) = RES_loadFile(-1, 2, 0x3000000 + nMot, 0);
+        }
+    }
 }
 
 /* Assign a peer to a resource group */

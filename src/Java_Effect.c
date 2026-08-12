@@ -195,19 +195,16 @@ void Java_xeno_Effect_getRotate__(void *pEnv, JVAL *pArgs, JVAL *pRet)
 }
 
 /* Copy the script object's rotation in, converting degrees to radians */
-/* TODO: not matching - $f20/$f21 swap; gcc ties the callee-saved FP pair to
-   first use in the expression, so the divisor takes $f20 here */
 void Java_xeno_Effect_setRotate__(void *pEnv, JVAL *pArgs, JVAL *pRet)
 {
     char *obj = (char *)pArgs[0].p;
 
     if (obj != 0) {
-        float fPi = D_004D83C0;
         float *pR = EFFECT_PEER(obj)->aRotate;
 
-        pR[0] = *(float *)(obj + EFFECT_FIELD(D_004DC160)) / 180.0f * fPi;
-        pR[1] = *(float *)(obj + EFFECT_FIELD(D_004DC168)) / 180.0f * fPi;
-        pR[2] = *(float *)(obj + EFFECT_FIELD(D_004DC170)) / 180.0f * fPi;
+        pR[0] = *(float *)(obj + EFFECT_FIELD(D_004DC160)) / 180.0f * 3.1415927f;
+        pR[1] = *(float *)(obj + EFFECT_FIELD(D_004DC168)) / 180.0f * 3.1415927f;
+        pR[2] = *(float *)(obj + EFFECT_FIELD(D_004DC170)) / 180.0f * 3.1415927f;
     }
 }
 

@@ -277,6 +277,40 @@ void Java_xeno_Camera_create__I(void *pEnv, JVAL *pArgs, JVAL *pRet)
     pRet->p = pObj;
 }
 
+/* Constrain the camera position to an actor with an XYZ offset */
+/* TODO: near-miss - the original schedules the third argument's `lwc1` ahead of the
+   first two and interleaves the `ld` epilogue with the closing float stores; the
+   argument-order and declaration-order sweeps all keep the loads in source order. */
+void Java_xeno_Camera_transCNS__Ljava_lang_Object_FFF(void *pEnv, JVAL *pArgs, JVAL *pRet)
+{
+    float aPos[3];
+    TCAMERA *pObj;
+    void *pTarget;
+    int nOfs;
+
+    pObj = (TCAMERA *)pArgs[0].p;
+    aPos[0] = pArgs[2].f;
+    aPos[1] = pArgs[3].f;
+    aPos[2] = pArgs[4].f;
+    pTarget = pArgs[1].p;
+    xglStudioGetCamera2(pObj->nIndex);
+    pObj->nTransMode = 0x14;
+    if (JNI_isInstanceOf(pTarget, classJava_xeno_Chr) == 1) {
+        nOfs = lookupClassField(classJava_xeno_Chr,
+            loadConstString(D_004DC178, -1), 0)->nOffset;
+    } else if (JNI_isInstanceOf(pTarget, classJava_xeno_Unit) == 1) {
+        nOfs = lookupClassField(classJava_xeno_Unit,
+            loadConstString(D_004DC178, -1), 0)->nOffset;
+    } else {
+        return;
+    }
+    pObj->trans.cns.nTarget = *(int *)((char *)pTarget + nOfs) + 0x10;
+    pObj->trans.cns.nBind = 1;
+    pObj->trans.cns.fX = aPos[0];
+    pObj->trans.cns.fY = aPos[1];
+    pObj->trans.cns.fZ = aPos[2];
+}
+
 /* Drive the camera's position from a spline */
 void Java_xeno_Camera_transSPL__aFI(void *pEnv, JVAL *pArgs, JVAL *pRet)
 {

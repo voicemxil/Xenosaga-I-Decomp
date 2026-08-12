@@ -15,7 +15,13 @@ and assemble. Transformations:
 """
 import argparse
 import re
+import struct
 
+# Loads among MEM_OPS: wrapping these in .set mips1 (to control address
+# expansion) also makes gas honour mips1 LOAD DELAY slots and insert a nop
+# the R5900 never needed. Add .set noreorder for loads so only the address
+# expansion is affected, not the delay behaviour.
+LOAD_OPS = ("lw", "lh", "lb", "lbu", "lhu", "lwc1", "l.s")
 MEM_OPS = ("sw", "sh", "sb", "swc1", "lw", "lh", "lb", "lbu", "lhu",
            "lwc1", "s.s", "l.s")
 
@@ -45,6 +51,42 @@ RE_CVT = re.compile(r'^\t(cvt\.[a-z.]+|trunc\.w\.s)[ \t](.*)$')
 # (the 0.0f constant) has no nop after it in the original, and an
 # mtc1 feeding a conversion is already handled by the RE_CVT rule below.
 RE_FPLOAD = re.compile(r'^\t(li\.s)[ \t]')
+
+
+def fp_hazard_dest(line):
+    """FP register written by an mtc1-class instruction, or None.
+
+    The COP1 move hazard is REGISTER-dependent, not opcode-dependent: the
+    original pads only when the next FP instruction READS the register the
+    mtc1 just wrote. (CheckSlope has `mtc1 $zero,$f5` followed directly by
+    `mul.s $f1,$f1,$f0` with no nop; SEQ_motion has `mtc1 $v1,$f1` + nop +
+    `mul.s $f1,$f1,$f20`.) A li.s whose constant has non-zero low 16 bits
+    is expanded by gas as a .lit4 LOAD, not lui+mtc1, so it carries no
+    hazard at all.
+    """
+    m = re.match(r'^\tmtc1\t\$\w+,(\$f\d+)', line)
+    if m:
+        return m.group(1)
+    m = re.match(r'^\tli\.s\t(\$f\d+),\s*(\S+)', line)
+    if m:
+        try:
+            bits = struct.unpack('<I', struct.pack('<f', float(m.group(2))))[0]
+        except ValueError:
+            return m.group(1)
+        return m.group(1) if (bits & 0xFFFF) == 0 else None
+    return None
+
+
+def reads_fp_reg(insn, reg):
+    """True if `insn` reads `reg` as a source operand."""
+    m = re.match(r'^\t([a-z0-9.]+)\t(.*)$', insn)
+    if not m:
+        return False
+    mnem = m.group(1)
+    ops = [o.strip() for o in m.group(2).split(',')]
+    # every operand of a compare is a source; otherwise operand 0 is the dest
+    sources = ops if mnem.startswith('c.') else ops[1:]
+    return reg in sources
 RE_FPCOMPUTE = re.compile(
     r'^\t(c\.[a-z]+\.s|mul\.s|div\.s|add\.s|sub\.s|mov\.s|abs\.s|neg\.s'
     r'|sqrt\.s|trunc\.w\.s|cvt\.[a-z.]+)[ \t]')
@@ -99,8 +141,10 @@ def main(path, omitted_hazards):
 
         following = next_insn(lines, i)
         omitted = any(following.startswith("\t" + op) for op in omitted_hazards)
-        needs_hazard_nop = (RE_FPLOAD.match(line)
+        hazard_dest = fp_hazard_dest(line)
+        needs_hazard_nop = (hazard_dest is not None
                             and RE_FPCOMPUTE.match(following)
+                            and reads_fp_reg(following, hazard_dest)
                             and not omitted
                             and not RE_FP_BRANCH_LIKELY.match(previous_insn(lines, i)))
 
@@ -130,7 +174,16 @@ def main(path, omitted_hazards):
             if RE_LA.match(line) and RE_RETURN.match(following):
                 out.append(wrap_mips1_noreorder(line))
                 continue
-            wrapped = wrap_mips1(line)
+            # gas also steals a conversion into a following CALL's delay
+            # slot; the original ee-as left the nop there.
+            if RE_CVT.match(line) and re.match(r'^\t(jal|j)\t[A-Za-z_]', following):
+                out.append(wrap_mips1_noreorder(line))
+                continue
+            m_mem = RE_MEM.match(line)
+            if m_mem and m_mem.group(1) in LOAD_OPS:
+                wrapped = wrap_mips1_noreorder(line)
+            else:
+                wrapped = wrap_mips1(line)
             if needs_hazard_nop:
                 wrapped += "\n\tnop"
             # Modern gas otherwise moves a conversion fed by mtc1 into a

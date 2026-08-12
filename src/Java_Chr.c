@@ -25,9 +25,11 @@ typedef struct {
     float w;                            /* 0x0C */
 } CHR_LIGHT;
 
-typedef struct {
+typedef struct CHR_ {
     int nFlags;                         /* 0x000 */
-    char pad004[0xC];                   /* 0x004 */
+    void *pUpdate;                      /* 0x004 */
+    void *pFilter;                      /* 0x008 */
+    char pad00C[0x4];                   /* 0x00C */
     float fTranslate[3];                /* 0x010 */
     char pad01C[0x34];                  /* 0x01C */
     float fRotate[3];                   /* 0x050 */
@@ -36,10 +38,15 @@ typedef struct {
     char pad070[0x10];                  /* 0x070 */
     unsigned char nSerial;              /* 0x080 */
     unsigned char nSignal;              /* 0x081 */
-    char pad082[0xE];                   /* 0x082 */
+    unsigned char nKind;                /* 0x082 */
+    char pad083[0x5];                   /* 0x083 */
+    short n088;                         /* 0x088 */
+    char pad08A[0x6];                   /* 0x08A */
     unsigned char nShadowType;          /* 0x090 */
     unsigned char nShadowSize;          /* 0x091 */
-    char pad092[0x43E];                 /* 0x092 */
+    char pad092[0x42E];                 /* 0x092 */
+    void *pObject;                      /* 0x4C0 */
+    char pad4C4[0xC];                   /* 0x4C4 */
     unsigned short nModeFlags;          /* 0x4D0 */
     char pad4D2[0xA];                   /* 0x4D2 */
     float fTranslateY;                  /* 0x4DC */
@@ -63,7 +70,9 @@ typedef struct {
     char pad6F4[0x60];                  /* 0x6F4 */
     int nHairStop0;                     /* 0x754 */
     int nHairStop1;                     /* 0x758 */
-    char pad75C[0x214];                 /* 0x75C */
+    char pad75C[0x1A4];                 /* 0x75C */
+    int nChildNum;                      /* 0x900 */
+    struct CHR_ *aChild[27];            /* 0x904 */
     CHR_LIGHT light[3];                 /* 0x970 */
     int nFlags2;                        /* 0x9A0 */
     int nRenderCommand;                 /* 0x9A4 */
@@ -94,6 +103,25 @@ extern char D_004DC1B0[];
 extern char D_004DC1B8[];
 extern char D_004DC1C0[];
 extern char D_004DC1C8[];
+typedef struct {
+    int field_00;                       /* 0x00 */
+    int nFlags;                         /* 0x04 */
+    int field_08;                       /* 0x08 */
+    int field_0C;                       /* 0x0C */
+    int field_10;                       /* 0x10 */
+    int field_14;                       /* 0x14 */
+    int field_18;                       /* 0x18 */
+    int field_1C;                       /* 0x1C */
+    int field_20;                       /* 0x20 */
+    void *pFunc;                        /* 0x24 */
+    int field_28;                       /* 0x28 */
+    int field_2C;                       /* 0x2C */
+    int field_30;                       /* 0x30 */
+    char pad034[0x22C];                 /* 0x34 */
+} ACTSEQ;
+
+extern ACTSEQ actSequence[];
+extern void ACT_updateSequence(void);
 extern CHR *D_00338684[];
 extern int D_0046F464[];
 
@@ -268,17 +296,14 @@ void Java_xeno_Chr_getSignal__(void *env, int *args, int *ret)
 }
 
 /* Copy the script object's rotation fields into the actor (degrees to radians) */
-/* TODO: not matching - $f20/$f21 assignment for the 180.0f constant vs the gp float is swapped */
 void Java_xeno_Chr_setRotate__(void *env, int *args, int *ret)
 {
     char *obj = (char *)args[0];
-    float fFull = 180.0f;
-    float fRad = D_004D8414;
     float *pRot = (float *)((char *)CHR_PEER(obj) + 0x50);
 
-    pRot[0] = *(float *)(obj + CHR_FIELD(D_004DC1B8)) / fFull * fRad;
-    pRot[1] = *(float *)(obj + CHR_FIELD(D_004DC1C0)) / fFull * fRad;
-    pRot[2] = *(float *)(obj + CHR_FIELD(D_004DC1C8)) / fFull * fRad;
+    pRot[0] = *(float *)(obj + CHR_FIELD(D_004DC1B8)) / 180.0f * 3.1415927f;
+    pRot[1] = *(float *)(obj + CHR_FIELD(D_004DC1C0)) / 180.0f * 3.1415927f;
+    pRot[2] = *(float *)(obj + CHR_FIELD(D_004DC1C8)) / 180.0f * 3.1415927f;
 }
 
 /* Copy the script object's position fields into the actor */
@@ -301,17 +326,14 @@ void Java_xeno_Chr_setTranslate__(void *env, int *args, int *ret)
 }
 
 /* Copy the actor's rotation back into the script object (radians to degrees) */
-/* TODO: not matching - $f20/$f21 assignment for the 180.0f constant vs the gp float is swapped */
 void Java_xeno_Chr_getRotate__(void *env, int *args, int *ret)
 {
     char *obj = (char *)args[0];
-    float fFull = 180.0f;
-    float fDeg = D_004D8418;
     float *pRot = (float *)((char *)CHR_PEER(obj) + 0x50);
 
-    *(float *)(obj + CHR_FIELD(D_004DC1B8)) = pRot[0] / fDeg * fFull;
-    *(float *)(obj + CHR_FIELD(D_004DC1C0)) = pRot[1] / fDeg * fFull;
-    *(float *)(obj + CHR_FIELD(D_004DC1C8)) = pRot[2] / fDeg * fFull;
+    *(float *)(obj + CHR_FIELD(D_004DC1B8)) = pRot[0] / 3.1415927f * 180.0f;
+    *(float *)(obj + CHR_FIELD(D_004DC1C0)) = pRot[1] / 3.1415927f * 180.0f;
+    *(float *)(obj + CHR_FIELD(D_004DC1C8)) = pRot[2] / 3.1415927f * 180.0f;
 }
 
 /* Copy the actor's position back into the script object */
@@ -696,6 +718,62 @@ void Java_xeno_Chr_touchto__Ljava_lang_String_(void *env, int *args, int *ret)
     chr->nTouchTo = ((int *)((int *)args[1])[1])[2];
 }
 
+/* Find the actor's first child of the given kind */
+/* TODO: near-miss - the original tests the tag with a branch-likely and annuls an
+   epilogue `ld $s0` in its delay slot; every natural early-return/loop shape here
+   emits a plain `bne` and two instructions fewer. */
+void Java_xeno_Chr_childGetPeer__II(void *env, int *args, int *ret)
+{
+    char *obj = (char *)args[0];
+    CHR *chr;
+    CHR *child;
+    int i;
+
+    chr = CHR_PEER(obj);
+    ret[0] = 0;
+    if (args[1] == 0x1000000) {
+        for (i = 0; i < chr->nChildNum; i++) {
+            child = chr->aChild[i];
+            if (child->nKind == 1) {
+                ret[0] = (int)child;
+                break;
+            }
+        }
+    }
+}
+
+/* Adopt an existing actor work block as this script object's peer */
+/* TODO: near-miss - the four stores through the actor base come out as
+   pUpdate/pObject/n088/nSignal; the original order is pUpdate/n088/nSignal/pObject.
+   A full 120-permutation sweep of the assignment order yields only three distinct
+   schedules, none of them the original's, so this ordering is not reachable from C. */
+void Java_xeno_Chr_setPeer__Ljava_lang_Object_(void *env, int *args, int *ret)
+{
+    CHR *chr = (CHR *)args[1];
+    char *obj = (char *)args[0];
+    ACTSEQ *seq;
+
+    if (chr != 0) {
+        CHR_PEER(obj) = chr;
+        chr->pUpdate = ACT_updateSequence;
+        chr->n088 = 0;
+        chr->nSignal = 0;
+        seq = &actSequence[chr->nSerial];
+        chr->pObject = obj;
+        seq->field_00 = 0;
+        seq->nFlags = 0;
+        seq->field_0C = 0;
+        seq->field_14 = 0;
+        seq->field_18 = 0;
+        seq->field_1C = 0;
+        seq->field_20 = 0;
+        seq->pFunc = 0;
+        seq->field_28 = 0;
+        seq->field_2C = 0;
+        seq->field_30 = 0;
+    }
+}
+
 /* Toggle whether the character appears on the radar */
 void Java_xeno_Chr_dispRadar__Z(void *env, int *args, int *ret)
 {
@@ -864,6 +942,28 @@ void Java_xeno_Chr_pixelAlphaPartsReset__(void *env, int *args, int *ret)
     char *obj = (char *)args[0];
 
     CHR_PEER(obj)->nPixelAlphaPartsNum = 0;
+}
+
+/* Select which parts of the actor the motion update is allowed to touch */
+void Java_xeno_Chr_setMotNoUpdate__I(void *env, int *args, int *ret)
+{
+    char *obj = (char *)args[0];
+    CHR *chr = CHR_PEER(obj);
+
+    switch (args[1]) {
+    case 0:
+        chr->nFlags &= ~0x400;
+        chr->nFlags2 &= ~0x100;
+        break;
+    case 1:
+        chr->nFlags |= 0x400;
+        chr->nFlags2 &= ~0x100;
+        break;
+    case 2:
+        chr->nFlags &= ~0x400;
+        chr->nFlags2 |= 0x100;
+        break;
+    }
 }
 
 /* Attach another character as this one's right-hand weapon */
