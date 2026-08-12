@@ -737,3 +737,4 @@ Java_xeno_Unit_shadow_map_id__I = 0x00304B20, 0x7C; // Java_Unit
 Java_xeno_Unit_shadow_map_reset__ = 0x00304BA0, 0x54; // Java_Unit
 Java_xeno_Unit_setClip__I = 0x00304C58, 0x78; // Java_Unit
 Java_xeno_Unit_setMonitorPrio__I = 0x00304CD0, 0x6C; // Java_Unit
+Java_xeno_Unit_setSortOffset__F = 0x00304BF8, 0x5C; // Java_Unit
