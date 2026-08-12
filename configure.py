@@ -54,6 +54,9 @@ FILE_CC = {
     "MSG.c": CC96,
     "MBUF.c": CC96,
     "JNI.c": CC96,
+    "MAP.c": CC96,
+    "Check.c": CC96,
+    "Get.c": CC96,
     "PLAY.c": CC96,
     "TMENU.c": CC96,
     "TWIN.c": CC96,
@@ -112,6 +115,9 @@ FILE_CFLAGS = {
     "MSG.c": "-O2 -G8",
     "MBUF.c": "-O2 -G8",
     "JNI.c": "-O2 -G8",
+    "MAP.c": "-O2 -G8",
+    "Check.c": "-O2 -G8",
+    "Get.c": "-O2 -G8",
     "PLAY.c": "-O2 -G8",
     "TMENU.c": "-O2 -G8",
     "TWIN.c": "-O2 -G8",
@@ -161,6 +167,8 @@ FILE_CFLAGS = {
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    # an lwc1 in a jal delay slot followed by mov.s trips a bogus hazard nop
+    "MAP.c": "--omit-hazard mov.s",
     # many util natives do lwc1->cvt.s.w with no hazard nop in the original
     "Java_util.c": "--omit-hazard cvt.s.w",
     "xglVector.c": ("--omit-hazard mul.s --omit-hazard sub.s "
