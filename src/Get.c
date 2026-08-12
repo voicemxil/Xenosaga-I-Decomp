@@ -7,6 +7,13 @@ typedef struct {
 } UWAMONO;
 
 typedef struct {
+    float x;
+    float y;
+    float z;
+    float w;
+} VECTOR;
+
+typedef struct {
     unsigned char pad0[0x80];
     unsigned char nReaction;    /* 0x80 */
 } JCHR;
@@ -29,6 +36,9 @@ typedef struct {
 
 extern JAVAREACTION D_0037C8F0[];
 extern ENEPC enepc[];
+
+extern float atan2f(float y, float x);
+extern float sqrtf(float f);
 
 /* Read the signal byte cached on a map unit */
 signed char GetUwamonoSignal(UWAMONO *pUnit)
@@ -75,6 +85,60 @@ short Get_ActorNumber(int nId)
         }
     }
     return -1;
+}
+
+/* Planar (XZ) distance between two points */
+float Get_Distance(VECTOR *pFrom, VECTOR *pTo)
+{
+    float dx, dz, x0, z0;
+
+    x0 = pFrom->x;
+    z0 = pFrom->z;
+    dx = pTo->x - x0;
+    dz = pTo->z - z0;
+    return sqrtf(dx * dx + dz * dz);
+}
+
+/* Full 3D distance between two points */
+float Get_Distance3D(VECTOR *pFrom, VECTOR *pTo)
+{
+    float dx, dy, dz, x0, y0, z0;
+
+    x0 = pFrom->x;
+    y0 = pFrom->y;
+    z0 = pFrom->z;
+    dx = pTo->x - x0;
+    dy = pTo->y - y0;
+    dz = pTo->z - z0;
+    return sqrtf(dx * dx + dy * dy + dz * dz);
+}
+
+/* Horizontal angle from one point to another */
+float Get_Angle(VECTOR *pFrom, VECTOR *pTo)
+{
+    return atan2f(pTo->x - pFrom->x, pTo->z - pFrom->z);
+}
+
+/* Solve for the X-axis crossing ratio between two points, 0 when parallel */
+int GetIntersectionPointLineX(float *pRate, VECTOR *p1, VECTOR *p2, float x)
+{
+    if (p1->x == p2->x) {
+        *pRate = 0.0f;
+        return 0;
+    }
+    *pRate = (x - p1->x) / (p2->x - p1->x);
+    return 1;
+}
+
+/* Solve for the Z-axis crossing ratio between two points, 0 when parallel */
+int GetIntersectionPointLineZ(float *pRate, VECTOR *p1, VECTOR *p2, float z)
+{
+    if (p1->z == p2->z) {
+        *pRate = 0.0f;
+        return 0;
+    }
+    *pRate = (z - p1->z) / (p2->z - p1->z);
+    return 1;
 }
 
 /* Model file name accessor (stubbed out in the shipped build) */

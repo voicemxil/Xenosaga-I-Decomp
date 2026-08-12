@@ -35,7 +35,11 @@ RE_CVT = re.compile(r'^\t(cvt\.[a-z.]+|trunc\.w\.s)[ \t](.*)$')
 # Only mtc1 and the li.s macro (which expands to lui+mtc1) carry the
 # COP1 move hazard the original ee-as padded. A plain lwc1/l.s load
 # does not -- including it inserted nops the original never had.
-RE_FPLOAD = re.compile(r'^\t(li\.s|mtc1)[ \t]')
+# Only the li.s macro (lui $at + mtc1 $at) carries the COP1 move hazard
+# the original ee-as padded. A bare mtc1 does not: `mtc1 $zero,$fN`
+# (the 0.0f constant) has no nop after it in the original, and an
+# mtc1 feeding a conversion is already handled by the RE_CVT rule below.
+RE_FPLOAD = re.compile(r'^\t(li\.s)[ \t]')
 RE_FPCOMPUTE = re.compile(
     r'^\t(c\.[a-z]+\.s|mul\.s|div\.s|add\.s|sub\.s|mov\.s|abs\.s|neg\.s'
     r'|sqrt\.s|trunc\.w\.s|cvt\.[a-z.]+)[ \t]')

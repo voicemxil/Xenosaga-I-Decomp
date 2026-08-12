@@ -45,7 +45,7 @@ typedef struct {
 extern ACTOR actor[];
 extern ENEPC enepc[];
 
-extern int CheckPointLine(VECTOR *pA, VECTOR *pB, VECTOR *pC);
+extern float sqrtf(float f);
 
 /* True when the actor slot holds a live, undestroyed actor */
 int CheckActorExist(ACTOR *pActor)
@@ -84,6 +84,27 @@ int CheckBrokenMapUnit(MAPUNIT *pUnit)
     return nState;
 }
 
+/* Classify which side of segment p0-p1 the point p2 falls on */
+int CheckPointLine(VECTOR *p0, VECTOR *p1, VECTOR *p2)
+{
+    VECTOR v1;
+    VECTOR v2;
+    float f;
+
+    v1.x = p1->x - p0->x;
+    v1.z = p1->z - p0->z;
+    v2.x = p2->x - p0->x;
+    v2.z = p2->z - p0->z;
+    f = v1.x * v2.z - v1.z * v2.x;
+    if (f > 0.0f) {
+        return 1;
+    }
+    if (f < 0.0f) {
+        return 2;
+    }
+    return 0;
+}
+
 /* True when segment p0-p1 crosses segment p2-p3 */
 int CheckCrossLine(VECTOR *p0, VECTOR *p1, VECTOR *p2, VECTOR *p3)
 {
@@ -101,6 +122,25 @@ int CheckCrossLine(VECTOR *p0, VECTOR *p1, VECTOR *p2, VECTOR *p3)
     return 0;
 }
 
+/* Full 3D distance between two points */
+float CheckDist3D(VECTOR *p1, VECTOR *p2)
+{
+    float dx = p1->x - p2->x;
+    float dy = p1->y - p2->y;
+    float dz = p1->z - p2->z;
+
+    return sqrtf(dx * dx + dy * dy + dz * dz);
+}
+
+/* Planar (XZ) distance between two points */
+float CheckDist2D(VECTOR *p1, VECTOR *p2)
+{
+    float dx = p1->x - p2->x;
+    float dz = p1->z - p2->z;
+
+    return sqrtf(dx * dx + dz * dz);
+}
+
 /* True when any live enemy is burning */
 int Check_EnemyBurn(void)
 {
@@ -112,6 +152,30 @@ int Check_EnemyBurn(void)
                 return 1;
             }
         }
+    }
+    return 0;
+}
+
+/* Sign of the cross product of segment p0-p1 against segment p2-p3 */
+int CheckSlope(VECTOR *p0, VECTOR *p1, VECTOR *p2, VECTOR *p3)
+{
+    float f = (p1->x - p0->x) * (p3->z - p2->z) - (p1->z - p0->z) * (p3->x - p2->x);
+
+    if (f == 0.0f) {
+        return 0;
+    }
+    if (f > 0.0f) {
+        return 1;
+    }
+    return -1;
+}
+
+/* True when a point lies strictly inside the XZ box */
+int CheckInBox(VECTOR *pPos, VECTOR *pMin, VECTOR *pMax)
+{
+    if (pPos->x < pMax->x && pMin->x < pPos->x &&
+        pPos->z < pMax->z && pMin->z < pPos->z) {
+        return 1;
     }
     return 0;
 }
