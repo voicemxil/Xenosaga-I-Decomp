@@ -32,7 +32,10 @@ RE_LIS = re.compile(r'^\tli\.s[ \t](.*)$')
 RE_CVT = re.compile(r'^\t(cvt\.[a-z.]+|trunc\.w\.s)[ \t](.*)$')
 # FP loads whose result feeds a COP1 compute need the hazard nop the
 # original ee-as inserted (modern gas does not).
-RE_FPLOAD = re.compile(r'^\t(li\.s|l\.s|lwc1|mtc1)[ \t]')
+# Only mtc1 and the li.s macro (which expands to lui+mtc1) carry the
+# COP1 move hazard the original ee-as padded. A plain lwc1/l.s load
+# does not -- including it inserted nops the original never had.
+RE_FPLOAD = re.compile(r'^\t(li\.s|mtc1)[ \t]')
 RE_FPCOMPUTE = re.compile(
     r'^\t(c\.[a-z]+\.s|mul\.s|div\.s|add\.s|sub\.s|mov\.s|abs\.s|neg\.s'
     r'|sqrt\.s|trunc\.w\.s|cvt\.[a-z.]+)[ \t]')
