@@ -40,6 +40,11 @@ RE_FPCOMPUTE = re.compile(
     r'^\t(c\.[a-z]+\.s|mul\.s|div\.s|add\.s|sub\.s|mov\.s|abs\.s|neg\.s'
     r'|sqrt\.s|trunc\.w\.s|cvt\.[a-z.]+)[ \t]')
 RE_FP_BRANCH_LIKELY = re.compile(r'^\tbc1[ft]l[ \t]')
+# The R5900's sqrt.s takes its operand in the ft field; modern gas encodes
+# it in fs even under -march=r5900, and no alternate syntax selects the
+# R5900 form. Emit the word directly. (splat cannot disassemble it either
+# -- it renders the original as a bare `c1 0xC0004`.)
+RE_SQRT = re.compile(r'^\tsqrt\.s\t\$f(\d+),\$f(\d+)[ \t]*$')
 # A leaf return: `j $31` or `jr $ra`/`jr $31`.
 RE_RETURN = re.compile(r'^\t(j\t\$31|jr\t\$(ra|31))\b')
 
@@ -89,6 +94,13 @@ def main(path, omitted_hazards):
                             and RE_FPCOMPUTE.match(following)
                             and not omitted
                             and not RE_FP_BRANCH_LIKELY.match(previous_insn(lines, i)))
+
+        m_sqrt = RE_SQRT.match(line)
+        if m_sqrt:
+            fd, fs = int(m_sqrt.group(1)), int(m_sqrt.group(2))
+            out.append("\t.word 0x%08X\t/* sqrt.s $f%d,$f%d */" %
+                       (0x46000004 | (fs << 16) | (fd << 6), fd, fs))
+            continue
 
         # A numeric-absolute load/store macro immediately before a leaf
         # return: gas steals its expanded access into the jr delay slot,
