@@ -121,8 +121,13 @@ def main(path, omitted_hazards):
                 wrapped += "\n\tnop"
             # Modern gas otherwise moves a conversion fed by mtc1 into a
             # following return delay slot; the original assembler kept it
-            # in place after the mtc1 hazard nop.
-            if RE_CVT.match(line) and re.match(r'^\tmtc1[ \t]', previous_insn(lines, i)):
+            # in place after the mtc1 hazard nop. This only applies when a
+            # leaf return actually follows -- applying it unconditionally
+            # inserted a nop the original does not have (seen in MAP and
+            # Enemy, reported independently by two agents).
+            if (RE_CVT.match(line)
+                    and re.match(r'^\tmtc1[ \t]', previous_insn(lines, i))
+                    and RE_RETURN.match(following)):
                 wrapped += "\n\tnop"
             out.append(wrapped)
             continue
