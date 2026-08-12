@@ -28,6 +28,11 @@ RE_MEM = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS) +
 # it is a macro to expand rather than a plain register-offset access.
 RE_MEM_ABS = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS) +
                         r')[ \t]([^,]*),(-?[0-9]+)[ \t]*$')
+# A load/store with a register base and an offset too large for the 16-bit
+# immediate field is also a macro: gas expands it as lui + daddu + op, but
+# the original ee-as used addu. Wrap in .set mips1 to get the 32-bit form.
+RE_MEM_BIGOFF = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS) +
+                           r')[ \t]([^,]*),(-?[0-9]+)(\(\$[a-z0-9]+\))[ \t]*$')
 RE_LIS = re.compile(r'^\tli\.s[ \t](.*)$')
 RE_CVT = re.compile(r'^\t(cvt\.[a-z.]+|trunc\.w\.s)[ \t](.*)$')
 # FP loads whose result feeds a COP1 compute need the hazard nop the
@@ -111,6 +116,11 @@ def main(path, omitted_hazards):
         # where the original ee-as left a nop. Barrier just this case.
         if RE_MEM_ABS.match(line) and RE_RETURN.match(following):
             out.append(wrap_mips1_noreorder(line))
+            continue
+
+        m_big = RE_MEM_BIGOFF.match(line)
+        if m_big and abs(int(m_big.group(3))) > 32767:
+            out.append(wrap_mips1(line))
             continue
 
         if RE_LA.match(line) or RE_MEM.match(line) or RE_CVT.match(line):
