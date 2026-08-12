@@ -962,3 +962,4 @@ Java_xeno_vm_Math_random__ = 0x002F6650, 0x28; // Java_vm
 Java_xeno_vm_Math_atan2__FF = 0x002F6678, 0x30; // Java_vm
 Java_xeno_vm_Math_cos__F = 0x002F66A8, 0x2C; // Java_vm
 Java_xeno_vm_Math_sin__F = 0x002F66D8, 0x2C; // Java_vm
+DB_pathGetShortPath = 0x00260A98, 0xC0; // DB2
