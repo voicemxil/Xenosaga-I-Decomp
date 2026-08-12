@@ -87,6 +87,13 @@ FILE_CC = {
     "xglVector.c": CC96,
     "RSRC.c": CC96,
     "XTK.c": CC96,
+    "EXM.c": CC96,
+    "FCV.c": CC96,
+    "RES.c": CC96,
+    "command.c": CC96,
+    "EW.c": CC96,
+    "MATRIX.c": CC96,
+    "TCAMERA.c": CC96,
 }
 # Note: game code (2.96) matches with plain -O2 -G8; adding
 # -fno-schedule-insns perturbs its register allocation.
@@ -134,6 +141,13 @@ FILE_CFLAGS = {
     "xglVector.c": "-O2 -G8",
     "RSRC.c": "-O2 -G8",
     "XTK.c": "-O2 -G8",
+    "EXM.c": "-O2 -G8",
+    "FCV.c": "-O2 -G8",
+    "RES.c": "-O2 -G8",
+    "command.c": "-O2 -G8",
+    "EW.c": "-O2 -G8",
+    "MATRIX.c": "-O2 -G8",
+    "TCAMERA.c": "-O2 -G8",
 }
 
 # xglVector's original object omits some load-delay nops that are present
@@ -143,6 +157,9 @@ FILE_FIX_FLAGS = {
     "Java_util.c": "--omit-hazard cvt.s.w",
     "xglVector.c": ("--omit-hazard mul.s --omit-hazard sub.s "
                     "--omit-hazard c.lt.s --omit-hazard mov.s"),
+    # EXM's original object schedules independent FP work into load-delay
+    # slots before comparisons and additions.
+    "EXM.c": "--omit-hazard c.lt.s --omit-hazard add.s",
 }
 
 
