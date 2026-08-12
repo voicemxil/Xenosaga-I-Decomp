@@ -110,6 +110,26 @@ RSRCITEM *RSRC_getItem2(RSRC *pResource, u_int pSource)
     return 0;
 }
 
+RSRCITEM *RSRC_getItem(RSRC *pResource, u_int pData)
+{
+    int nItemCount = pResource->nItemCount;
+    RSRCITEM *pItem = pResource->pItems;
+    int i;
+
+    if (pData == 0) {
+        return 0;
+    }
+    i = 0;
+    while (i < nItemCount) {
+        if (pItem->pData == pData) {
+            return pItem;
+        }
+        i++;
+        pItem++;
+    }
+    return 0;
+}
+
 u_int RSRC_loadFile2(RSRC *pResource, void *pPath, void *pFile)
 {
     return RSRC_loadFileSub(pResource, pPath, pFile);
@@ -118,4 +138,48 @@ u_int RSRC_loadFile2(RSRC *pResource, void *pPath, void *pFile)
 u_int RSRC_loadFile(RSRC *pResource, void *pFile)
 {
     return RSRC_loadFile2(pResource, rsrcDefaultPath, pFile);
+}
+
+/* Find a dirty (free) item: without a size target, the smallest dirty
+   item; with a size target, the first dirty item large enough.
+   TODO: near-miss only - the nSize!=0 search loop emits one fewer nop
+   between the size sltu and its beqz than the original (every other
+   instruction/register in the function matches exactly); no source
+   variant tried (nested if, nested short-circuit, staged local) changed
+   it, so the extra nop is likely a genuine 2.96 scheduling artifact of
+   this specific comparison shape that needs more investigation. */
+RSRCITEM *RSRC_getDirtyItem(RSRC *pResource, u_int nSize)
+{
+    int nItemCount = pResource->nItemCount;
+    RSRCITEM *pItem = pResource->pItems;
+    int i;
+
+    if (nSize == 0) {
+        RSRCITEM *pBest = 0;
+        u_int nBestSize = -1;
+
+        if (nItemCount != 0) {
+            i = nItemCount;
+            do {
+                if ((pItem->nState & 0x8000) != 0) {
+                    if (nBestSize >= pItem->nSize) {
+                        nBestSize = pItem->nSize;
+                        pBest = pItem;
+                    }
+                }
+                pItem++;
+            } while (--i);
+        }
+        return pBest;
+    }
+
+    i = 0;
+    while (i < nItemCount) {
+        if ((pItem->nState & 0x8000) != 0 && pItem->nSize >= nSize) {
+            return pItem;
+        }
+        i++;
+        pItem++;
+    }
+    return 0;
 }

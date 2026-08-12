@@ -1030,3 +1030,4 @@ LOOK_target_init = 0x003172C8, 0x8; // LOOK
 LOOK_target_doit = 0x003172D0, 0x8; // LOOK
 LOOK_eyeL_cont = 0x003177C0, 0x20; // LOOK
 LOOK_eyeR_cont = 0x003177E0, 0x20; // LOOK
+RSRC_getItem = 0x0026DB88, 0x5C; // RSRC
