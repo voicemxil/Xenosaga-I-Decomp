@@ -25,6 +25,16 @@ typedef struct {
 extern RES_ENEMYSE EnemySeBank[8];
 extern RES_MTNLIST cfMtnList[];
 extern char env_name[];
+extern unsigned char ScenePath;
+extern char *RES_path_table[] __asm__("tbl.0_00366420");
+
+char *RES_getPath(void)
+{
+    if (ScenePath >= 20) {
+        ScenePath = 0;
+    }
+    return RES_path_table[ScenePath];
+}
 
 /* Sound bank selector for an enemy SE set */
 int RES_GetEnemySeBank(int nId)
