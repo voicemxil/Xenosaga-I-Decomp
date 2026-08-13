@@ -302,8 +302,12 @@ int ACT_jointGetMoveElementID(ACTOR *a)
 /* Look up an accessory bone id, caching the joint accessory table */
 int ACT_jointGetAccessories(ACTOR *a, unsigned int nJoint)
 {
-    /* TODO: near-miss - the accessory-table store lands in the branch delay
-       slot instead of the sltiu */
+    /* TODO: near-miss (4/28 words) - the accessory-table store lands in the
+       branch delay slot instead of the sltiu. Tried: chained assignment
+       `pAcc = a->pAccessories = JNT_getAccessories(...)` (no change), a
+       memory barrier between the store and the reload (regressed to 16
+       diffs), register-pinning a fresh pAcc2 to $5 (no change). Pure
+       scheduler tie-break, not reachable from C so far. */
     int nResult = -1;
     int *pAcc = a->pAccessories;
 

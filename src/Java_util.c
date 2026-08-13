@@ -449,7 +449,6 @@ void Java_xeno_util_Layout_set__Ljava_lang_Object_I(JThread *thread, JValue *arg
 }
 
 /* Return the shared layout manager object */
-/* TODO: near-miss - gas inserts a load-delay nop inside the .set mips1 wrap around `sw sym` */
 void Java_xeno_util_Layout_getManager__I(JThread *thread, JValue *args, JValue *ret)
 {
     int *p;

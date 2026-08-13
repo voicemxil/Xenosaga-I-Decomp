@@ -310,6 +310,32 @@ def main(path, omitted_hazards, barrier_return_store=None,
                 out.append(wrap_mips1_noreorder(line))
                 continue
             m_mem = RE_MEM.match(line)
+            # A BARE symbol operand (`sw $3,D_004DC6B4`, no `($reg)` index)
+            # never needs the mips1 wrap at all: gas resolves it to either
+            # a single gp-relative instruction or a plain lui+%lo pair with
+            # no addu/daddu in either case, so there is no encoding this
+            # wrap could fix. Wrapping it anyway is actively harmful: gas's
+            # mips1 load-delay hazard check looks at the immediately
+            # PRECEDING instruction regardless of what mode IT was
+            # assembled under, so if that previous instruction happens to
+            # be an ordinary (unwrapped) load feeding this one, gas
+            # inserts a genuine interlock nop the R5900/original ee-as
+            # never had -- and `.set noreorder` does NOT suppress it (this
+            # is a mandatory-hazard insertion, not a reorder-fill).
+            # Verified with a minimal .s: `lw $3,0($5)` / (wrapped)
+            # `sw $3,sym` reproducibly gains an extra nop only when
+            # wrapped; dropping the wrap for the bare-symbol case removes
+            # it while the encoding (gp-rel reloc or lui/%lo pair) is
+            # identical either way. Only the INDEXED form (`sym($reg)`)
+            # actually needs the wrap, to get `addu` instead of `daddu` in
+            # the address computation. Found via
+            # Java_xeno_util_Layout_getManager__I.
+            if m_mem and '(' not in m_mem.group(3):
+                wrapped = line
+                if needs_hazard_nop:
+                    wrapped += "\n\tnop"
+                out.append(wrapped)
+                continue
             if m_mem and m_mem.group(1) in LOAD_OPS:
                 wrapped = wrap_mips1_noreorder(line)
             else:

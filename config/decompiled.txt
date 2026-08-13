@@ -1159,6 +1159,7 @@ Java_xeno_Unit_getTranslate__ = 0x003025A0, 0xE8; // Java_Unit
 Java_xeno_Unit_setRotate__ = 0x003036C8, 0x134; // Java_Unit
 Java_xeno_Unit_setTranslate__ = 0x00303800, 0xE8; // Java_Unit
 Java_xeno_util_Runtime_evsSetRetPoint__ = 0x002F86E8, 0x40; // Java_util.c
+Java_xeno_util_Layout_getManager__I = 0x002F71E0, 0x20; // Java_util.c
 SEQ_scaleSPL = 0x00309538, 0xD8; // SEQ
 SEQ_rotateSPL = 0x00309D50, 0x114; // SEQ
 SEQ_setMotion = 0x0030A298, 0x94; // SEQ
