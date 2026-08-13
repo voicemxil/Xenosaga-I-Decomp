@@ -180,15 +180,16 @@ void *UmnEventTextNextGet(int nInc)
     return 0;
 }
 
-/* TODO: near-miss (LOGIC, register-alloc/scheduling on the loop) -- not registered. */
 /* Skip the text cursor past a run of newline characters */
 void UmnEventTextGyouJump(char **ppText)
 {
     unsigned char *p = (unsigned char *)*ppText;
+    unsigned char *q;
     if (*p == '\n') {
         do {
-            p++;
-            *ppText = (char *)p;
+            q = p + 1;
+            *ppText = (char *)q;
+            p = q;
         } while (*p == '\n');
     }
 }
