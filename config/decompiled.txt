@@ -1064,6 +1064,7 @@ PartyAttackPosGet = 0x002B6708, 0x64; // Party
 PartyAttackPosSet = 0x002B6770, 0x6C; // Party
 MenuAgwsPilotCheck = 0x00290408, 0x50; // Menu
 MenuTecTypeCheck = 0x002B2F40, 0x4C; // Menu
+MenuModelDrawTypeMain = 0x00280EF8, 0x34; // Menu
 Check_CrossingOver = 0x002D81A0, 0x9C; // Check
 MenuWorkEndCheck = 0x00274D60, 0x8; // Menu
 MenuKeepSelectReset = 0x00274DB8, 0x50; // Menu

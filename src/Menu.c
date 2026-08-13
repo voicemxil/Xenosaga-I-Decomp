@@ -949,3 +949,143 @@ unsigned char *MenuSegmentMapNameGet(int nIdx)
     }
     return p;
 }
+
+typedef struct {
+    char pad0[0x20];
+    void *obj;                 /* 0x20 */
+} DRAWTYPEARG;
+
+typedef struct {
+    char pad0[0x124];
+    void (*func)(void *);      /* 0x124 */
+} DRAWTYPEOBJ;
+
+/* Run a model's draw-type callback, if it and its owning object both exist */
+void MenuModelDrawTypeMain(DRAWTYPEARG *p)
+{
+    DRAWTYPEOBJ *obj;
+
+    obj = (DRAWTYPEOBJ *)p->obj;
+    if (obj != 0) {
+        if (obj->func != 0) {
+            obj->func(obj);
+        }
+    }
+}
+
+extern int D_004AF104[8];
+extern int D_0036C278[8];
+
+/* TODO: near-miss (LOGIC) - original walks with plain pointer increments
+ * (a0/a2 += 4) not indexed loads; pointer-walk rewrite got closer (12 diffs)
+ * but still not exact. Parked after 2 attempts. */
+/* Push the 8 cached "taiki" (waiting) slots into the save buffer and clear the cache */
+void MenuCfTaikiPush(void)
+{
+    int *src;
+    int *dst;
+    int i;
+    int v;
+
+    src = D_004AF104;
+    dst = D_0036C278;
+    for (i = 0; i < 8; i++) {
+        v = *src;
+        *src = 0;
+        *dst = v;
+        dst++;
+        src++;
+    }
+}
+
+/* TODO: near-miss (LENGTH) - the bit-14 test compiles via srl/xori/andi
+ * instead of the original's andi+sltiu; parked after 2 attempts. */
+/* Ask whether an ether is flagged as "already learned" (Jouto) */
+int MenuEtherJoutoCheck(int nId)
+{
+    int idx;
+    void *p;
+    unsigned short v;
+
+    idx = nId & 0xFFFF;
+    if ((unsigned int)(idx - 1) >= 80) {
+        return 0;
+    }
+    p = func_A1A488(idx);
+    v = *(unsigned short *)((char *)p + 2);
+    return (v & 0x4000) == 0;
+}
+
+typedef struct {
+    char pad0[0x42];
+    short id;                  /* 0x42 */
+} MAPNAMEENT;
+extern MAPNAMEENT D_0036A1A4[37];
+
+/* TODO: near-miss (LOGIC) - same bnezl loop-back-reuses-delay-slot-load
+ * shape as MenuSegmentInfoTextGet/ItemNameGet/MapNameGet; unresolved there
+ * too. Parked after 2 attempts. */
+/* Search the save-map-name table for a matching id, else return the table base */
+void *MenuSaveMapNameGet(int nId)
+{
+    MAPNAMEENT *p;
+    MAPNAMEENT *base;
+    int i;
+
+    p = D_0036A1A4;
+    base = p;
+    for (i = 0; i < 37; i++) {
+        if (p->id == nId) {
+            return p;
+        }
+        p++;
+    }
+    return base;
+}
+
+extern int D_00532B10[];
+
+/* TODO: near-miss (LENGTH, 17 orig vs 21 built) - constant folding of the
+ * table base + shifted index differs from the original's separate
+ * lui/addiu/addu sequence. Parked after 2 attempts. */
+/* Count consecutive non-NULL pointer entries (after the head) in a sort chain */
+int MenuSortCheck(int nIdx)
+{
+    int *p;
+    int cnt;
+
+    p = (int *)((char *)D_00532B10 + (nIdx << 10));
+    cnt = 0;
+    if (*p != 0) {
+        p++;
+        while (*p != 0) {
+            p++;
+            cnt++;
+        }
+    }
+    return cnt;
+}
+
+typedef struct {
+    char pad0[8];
+    short s08;                 /* 0x08 */
+    char pad0A[4];
+    int s10;                    /* 0x10 */
+} ETHERINFO;
+
+/* TODO: near-miss (LENGTH) - original keeps the first field read in a
+ * callee-saved register ($s1) across no further calls; ours allocates it
+ * to a caller-saved temp instead. Parked after 2 attempts. */
+/* Ask whether a character's ether point value has reached the type's requirement */
+int MenuEtherCharPointCheck(int nId, int nPoint)
+{
+    ETHERINFO *p;
+    int s10;
+    short s08;
+
+    func_A19210(nId & 0xFFFF);
+    p = (ETHERINFO *)func_A1A488(nPoint & 0xFFFF);
+    s10 = p->s10;
+    s08 = p->s08;
+    return s10 >= s08;
+}
