@@ -486,3 +486,303 @@ MC_MATRIX *MMathMulMatrix(MC_MATRIX *pDst, MC_MATRIX *pLeft, MC_MATRIX *pRight)
         ".set reorder" : : "r"(pDst), "r"(pLeft), "r"(pRight));
     return pDst;
 }
+
+/* Identity matrix -- default `pMat` for the MMathRotateMatrix* family below
+ * when the caller passes NULL. */
+unsigned int McMathUnitMatrix[16] = {
+    0x3F800000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x3F800000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x3F800000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x3F800000,
+};
+
+/* Rotate pMat (or identity, if NULL) about X by `angle` radians */
+MC_MATRIX *MMathRotateMatrixX(MC_MATRIX *pDst, MC_MATRIX *pMat, float angle)
+{
+    register MC_MATRIX *r __asm__("$2");
+    __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
+    {
+        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        pMat = pMat ? pMat : pDef;
+    }
+    __asm__ __volatile__(".set noreorder\n"
+        "mfc1 $t0, %2\n"
+        "qmtc2 $t0, $vf4\n"
+        "vcallms 0xE8\n"
+        "vmove.x $vf5, $vf1\n"
+        "qmtc2 $t0, $vf4\n"
+        "vcallms 0x20\n"
+        "vmove.x $vf6, $vf1\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "lqc2 $vf2, 0x10(%1)\n"
+        "lqc2 $vf3, 0x20(%1)\n"
+        "lqc2 $vf4, 0x30(%1)\n"
+        "sqc2 $vf1, 0x0(%0)\n"
+        "sqc2 $vf4, 0x30(%0)\n"
+        "vmulax.xyzw $ACC, $vf2, $vf5x\n"
+        "vmaddx.xyzw $vf1, $vf3, $vf6x\n"
+        "sqc2 $vf1, 0x10(%0)\n"
+        "vmulax.xyzw $ACC, $vf3, $vf5x\n"
+        "vmsubx.xyzw $vf1, $vf2, $vf6x\n"
+        "sqc2 $vf1, 0x20(%0)\n"
+        ".set reorder" : : "r"(r), "r"(pMat), "f"(angle));
+    return r;
+}
+
+/* Rotate pMat (or identity, if NULL) about Y by `angle` radians */
+MC_MATRIX *MMathRotateMatrixY(MC_MATRIX *pDst, MC_MATRIX *pMat, float angle)
+{
+    register MC_MATRIX *r __asm__("$2");
+    __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
+    {
+        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        pMat = pMat ? pMat : pDef;
+    }
+    __asm__ __volatile__(".set noreorder\n"
+        "mfc1 $t0, %2\n"
+        "qmtc2 $t0, $vf4\n"
+        "vcallms 0xE8\n"
+        "vmove.x $vf5, $vf1\n"
+        "qmtc2 $t0, $vf4\n"
+        "vcallms 0x20\n"
+        "vmove.x $vf6, $vf1\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "lqc2 $vf2, 0x10(%1)\n"
+        "lqc2 $vf3, 0x20(%1)\n"
+        "lqc2 $vf4, 0x30(%1)\n"
+        "sqc2 $vf2, 0x10(%0)\n"
+        "sqc2 $vf4, 0x30(%0)\n"
+        "vmulax.xyzw $ACC, $vf1, $vf5x\n"
+        "vmsubx.xyzw $vf2, $vf3, $vf6x\n"
+        "sqc2 $vf2, 0x0(%0)\n"
+        "vmulax.xyzw $ACC, $vf3, $vf5x\n"
+        "vmaddx.xyzw $vf2, $vf1, $vf6x\n"
+        "sqc2 $vf2, 0x20(%0)\n"
+        ".set reorder" : : "r"(r), "r"(pMat), "f"(angle));
+    return r;
+}
+
+/* Rotate pMat (or identity, if NULL) about Z by `angle` radians */
+MC_MATRIX *MMathRotateMatrixZ(MC_MATRIX *pDst, MC_MATRIX *pMat, float angle)
+{
+    register MC_MATRIX *r __asm__("$2");
+    __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
+    {
+        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        pMat = pMat ? pMat : pDef;
+    }
+    __asm__ __volatile__(".set noreorder\n"
+        "mfc1 $t0, %2\n"
+        "qmtc2 $t0, $vf4\n"
+        "vcallms 0xE8\n"
+        "vmove.x $vf5, $vf1\n"
+        "qmtc2 $t0, $vf4\n"
+        "vcallms 0x20\n"
+        "vmove.x $vf6, $vf1\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "lqc2 $vf2, 0x10(%1)\n"
+        "lqc2 $vf3, 0x20(%1)\n"
+        "lqc2 $vf4, 0x30(%1)\n"
+        "sqc2 $vf3, 0x20(%0)\n"
+        "sqc2 $vf4, 0x30(%0)\n"
+        "vmulax.xyzw $ACC, $vf1, $vf5x\n"
+        "vmaddx.xyzw $vf3, $vf2, $vf6x\n"
+        "sqc2 $vf3, 0x0(%0)\n"
+        "vmulax.xyzw $ACC, $vf2, $vf5x\n"
+        "vmsubx.xyzw $vf3, $vf1, $vf6x\n"
+        "sqc2 $vf3, 0x10(%0)\n"
+        ".set reorder" : : "r"(r), "r"(pMat), "f"(angle));
+    return r;
+}
+
+/* Rotate pMat (or identity, if NULL) about X then Y, pAngle = {angleX, angleY} */
+MC_MATRIX *MMathRotateMatrixXY(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAngle)
+{
+    register MC_MATRIX *r __asm__("$2");
+    __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
+    {
+        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        pMat = pMat ? pMat : pDef;
+    }
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf7, 0x0(%2)\n"
+        "vaddx.x $vf4, $vf0, $vf7\n"
+        "vcallms 0xE8\n"
+        "vaddx.x $vf5, $vf0, $vf1\n"
+        "vaddy.x $vf4, $vf0, $vf7\n"
+        "vcallms 0xE8\n"
+        "vaddx.y $vf5, $vf0, $vf1\n"
+        "vaddx.x $vf4, $vf0, $vf7\n"
+        "vcallms 0x20\n"
+        "vaddx.x $vf6, $vf0, $vf1\n"
+        "vaddy.x $vf4, $vf0, $vf7\n"
+        "vcallms 0x20\n"
+        "vaddx.y $vf6, $vf0, $vf1\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "lqc2 $vf2, 0x10(%1)\n"
+        "lqc2 $vf3, 0x20(%1)\n"
+        "lqc2 $vf4, 0x30(%1)\n"
+        "vmulax.xyzw $ACC, $vf2, $vf5x\n"
+        "vmaddx.xyzw $vf7, $vf3, $vf6x\n"
+        "vmulax.xyzw $ACC, $vf3, $vf5x\n"
+        "vmsubx.xyzw $vf3, $vf2, $vf6x\n"
+        "vmulay.xyzw $ACC, $vf1, $vf5y\n"
+        "vmsuby.xyzw $vf8, $vf3, $vf6y\n"
+        "vmulay.xyzw $ACC, $vf3, $vf5y\n"
+        "vmaddy.xyzw $vf3, $vf1, $vf6y\n"
+        "sqc2 $vf8, 0x0(%0)\n"
+        "sqc2 $vf7, 0x10(%0)\n"
+        "sqc2 $vf3, 0x20(%0)\n"
+        "sqc2 $vf4, 0x30(%0)\n"
+        ".set reorder" : : "r"(r), "r"(pMat), "r"(pAngle));
+    return r;
+}
+
+/* Rotate pMat (or identity, if NULL) about Y then X, pAngle = {angleX, angleY} */
+MC_MATRIX *MMathRotateMatrixYX(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAngle)
+{
+    register MC_MATRIX *r __asm__("$2");
+    __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
+    {
+        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        pMat = pMat ? pMat : pDef;
+    }
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf7, 0x0(%2)\n"
+        "vaddx.x $vf4, $vf0, $vf7\n"
+        "vcallms 0xE8\n"
+        "vaddx.x $vf5, $vf0, $vf1\n"
+        "vaddy.x $vf4, $vf0, $vf7\n"
+        "vcallms 0xE8\n"
+        "vaddx.y $vf5, $vf0, $vf1\n"
+        "vaddx.x $vf4, $vf0, $vf7\n"
+        "vcallms 0x20\n"
+        "vaddx.x $vf6, $vf0, $vf1\n"
+        "vaddy.x $vf4, $vf0, $vf7\n"
+        "vcallms 0x20\n"
+        "vaddx.y $vf6, $vf0, $vf1\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "lqc2 $vf2, 0x10(%1)\n"
+        "lqc2 $vf3, 0x20(%1)\n"
+        "lqc2 $vf4, 0x30(%1)\n"
+        "vmulay.xyzw $ACC, $vf1, $vf5y\n"
+        "vmsuby.xyzw $vf7, $vf3, $vf6y\n"
+        "vmulay.xyzw $ACC, $vf3, $vf5y\n"
+        "vmaddy.xyzw $vf3, $vf1, $vf6y\n"
+        "vmulax.xyzw $ACC, $vf2, $vf5x\n"
+        "vmaddx.xyzw $vf8, $vf3, $vf6x\n"
+        "vmulax.xyzw $ACC, $vf3, $vf5x\n"
+        "vmsubx.xyzw $vf3, $vf2, $vf6x\n"
+        "sqc2 $vf7, 0x0(%0)\n"
+        "sqc2 $vf8, 0x10(%0)\n"
+        "sqc2 $vf3, 0x20(%0)\n"
+        "sqc2 $vf4, 0x30(%0)\n"
+        ".set reorder" : : "r"(r), "r"(pMat), "r"(pAngle));
+    return r;
+}
+
+/* Rotate pMat (or identity, if NULL) about X, Y, then Z; pAngle = {angleX, angleY, angleZ} */
+MC_MATRIX *MMathRotateMatrixXYZ(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAngle)
+{
+    register MC_MATRIX *r __asm__("$2");
+    __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
+    {
+        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        pMat = pMat ? pMat : pDef;
+    }
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf7, 0x0(%2)\n"
+        "vaddx.x $vf4, $vf0, $vf7\n"
+        "vcallms 0xE8\n"
+        "vaddx.x $vf5, $vf0, $vf1\n"
+        "vaddy.x $vf4, $vf0, $vf7\n"
+        "vcallms 0xE8\n"
+        "vaddx.y $vf5, $vf0, $vf1\n"
+        "vaddz.x $vf4, $vf0, $vf7\n"
+        "vcallms 0xE8\n"
+        "vaddx.z $vf5, $vf0, $vf1\n"
+        "vaddx.x $vf4, $vf0, $vf7\n"
+        "vcallms 0x20\n"
+        "vaddx.x $vf6, $vf0, $vf1\n"
+        "vaddy.x $vf4, $vf0, $vf7\n"
+        "vcallms 0x20\n"
+        "vaddx.y $vf6, $vf0, $vf1\n"
+        "vaddz.x $vf4, $vf0, $vf7\n"
+        "vcallms 0x20\n"
+        "vaddx.z $vf6, $vf0, $vf1\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "lqc2 $vf2, 0x10(%1)\n"
+        "lqc2 $vf3, 0x20(%1)\n"
+        "lqc2 $vf4, 0x30(%1)\n"
+        "vmulax.xyzw $ACC, $vf2, $vf5x\n"
+        "vmaddx.xyzw $vf7, $vf3, $vf6x\n"
+        "vmulax.xyzw $ACC, $vf3, $vf5x\n"
+        "vmsubx.xyzw $vf3, $vf2, $vf6x\n"
+        "vmulay.xyzw $ACC, $vf1, $vf5y\n"
+        "vmsuby.xyzw $vf8, $vf3, $vf6y\n"
+        "vmulay.xyzw $ACC, $vf3, $vf5y\n"
+        "vmaddy.xyzw $vf3, $vf1, $vf6y\n"
+        "vmulaz.xyzw $ACC, $vf8, $vf5z\n"
+        "vmaddz.xyzw $vf1, $vf7, $vf6z\n"
+        "vmulaz.xyzw $ACC, $vf7, $vf5z\n"
+        "vmsubz.xyzw $vf2, $vf8, $vf6z\n"
+        "sqc2 $vf1, 0x0(%0)\n"
+        "sqc2 $vf2, 0x10(%0)\n"
+        "sqc2 $vf3, 0x20(%0)\n"
+        "sqc2 $vf4, 0x30(%0)\n"
+        ".set reorder" : : "r"(r), "r"(pMat), "r"(pAngle));
+    return r;
+}
+
+/* Rotate pMat (or identity, if NULL) about Y, X, then Z; pAngle = {angleX, angleY, angleZ} */
+MC_MATRIX *MMathRotateMatrixYXZ(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAngle)
+{
+    register MC_MATRIX *r __asm__("$2");
+    __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
+    {
+        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        pMat = pMat ? pMat : pDef;
+    }
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf7, 0x0(%2)\n"
+        "vaddx.x $vf4, $vf0, $vf7\n"
+        "vcallms 0xE8\n"
+        "vaddx.x $vf5, $vf0, $vf1\n"
+        "vaddy.x $vf4, $vf0, $vf7\n"
+        "vcallms 0xE8\n"
+        "vaddx.y $vf5, $vf0, $vf1\n"
+        "vaddz.x $vf4, $vf0, $vf7\n"
+        "vcallms 0xE8\n"
+        "vaddx.z $vf5, $vf0, $vf1\n"
+        "vaddx.x $vf4, $vf0, $vf7\n"
+        "vcallms 0x20\n"
+        "vaddx.x $vf6, $vf0, $vf1\n"
+        "vaddy.x $vf4, $vf0, $vf7\n"
+        "vcallms 0x20\n"
+        "vaddx.y $vf6, $vf0, $vf1\n"
+        "vaddz.x $vf4, $vf0, $vf7\n"
+        "vcallms 0x20\n"
+        "vaddx.z $vf6, $vf0, $vf1\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "lqc2 $vf2, 0x10(%1)\n"
+        "lqc2 $vf3, 0x20(%1)\n"
+        "lqc2 $vf4, 0x30(%1)\n"
+        "vmulay.xyzw $ACC, $vf1, $vf5y\n"
+        "vmsuby.xyzw $vf7, $vf3, $vf6y\n"
+        "vmulay.xyzw $ACC, $vf3, $vf5y\n"
+        "vmaddy.xyzw $vf3, $vf1, $vf6y\n"
+        "vmulax.xyzw $ACC, $vf2, $vf5x\n"
+        "vmaddx.xyzw $vf8, $vf3, $vf6x\n"
+        "vmulax.xyzw $ACC, $vf3, $vf5x\n"
+        "vmsubx.xyzw $vf3, $vf2, $vf6x\n"
+        "vmulaz.xyzw $ACC, $vf7, $vf5z\n"
+        "vmaddz.xyzw $vf1, $vf8, $vf6z\n"
+        "vmulaz.xyzw $ACC, $vf8, $vf5z\n"
+        "vmsubz.xyzw $vf2, $vf7, $vf6z\n"
+        "sqc2 $vf1, 0x0(%0)\n"
+        "sqc2 $vf2, 0x10(%0)\n"
+        "sqc2 $vf3, 0x20(%0)\n"
+        "sqc2 $vf4, 0x30(%0)\n"
+        ".set reorder" : : "r"(r), "r"(pMat), "r"(pAngle));
+    return r;
+}
