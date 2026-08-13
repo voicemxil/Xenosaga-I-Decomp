@@ -4,6 +4,7 @@ typedef unsigned char u_char;
 typedef unsigned short u_short;
 typedef unsigned int u_int;
 typedef unsigned long u_long;
+typedef int TI __attribute__((mode(TI)));
 
 typedef struct {
     u_short nUnk00;
@@ -106,6 +107,69 @@ u_int nmlPacketSetAttributeAlloc16N(int nNum)
 {
     s_pPacket = xglPacketGetCurrent();
     s_pPacket[9] -= nNum << 4;
+    return s_pPacket[9];
+}
+
+/* Copy one quadword-aligned 64-byte block into the top of the attribute
+ * area */
+/* TODO: near-miss (permute.py swept all 24 store orderings, best 17/25
+ * words differ, LOGIC not scheduling -- reload/interleave shape differs
+ * from source, not just store order). Parked per budget rule. */
+u_int nmlPacketSetAttributeData64(void *pData)
+{
+    void *p;
+
+    s_pPacket = xglPacketGetCurrent();
+    s_pPacket[9] -= 64;
+    p = (void *)s_pPacket[9];
+    ((TI *)p)[0] = ((TI *)pData)[0];
+    ((TI *)p)[1] = ((TI *)pData)[1];
+    ((TI *)p)[2] = ((TI *)pData)[2];
+    ((TI *)p)[3] = ((TI *)pData)[3];
+    return s_pPacket[9];
+}
+
+/* TODO: near-miss (10/28 words differ; original loop body uses `addi`
+ * not `addiu` for the induction registers and a `bne $zero,$sN` operand
+ * order our compiler never emits, and the asm carries a local label
+ * `_$psa16_loop` -- looks like a hand-written SDK packet-loop macro, not
+ * plain compiled C. Parked per budget rule after 1 attempt. */
+/* Copy nNum 16-byte quadwords into the top of the attribute area */
+u_int nmlPacketSetAttributeData16N(void *pData, int nNum)
+{
+    void *p;
+
+    s_pPacket = xglPacketGetCurrent();
+    s_pPacket[9] -= nNum << 4;
+    p = (void *)s_pPacket[9];
+    do {
+        *(TI *)p = *(TI *)pData;
+        p = (char *)p + 16;
+        pData = (char *)pData + 16;
+    } while (--nNum);
+    return s_pPacket[9];
+}
+
+/* TODO: near-miss (same hand-written `_$psa_loop`-style SDK macro shape
+ * as nmlPacketSetAttributeData16N -- addi vs addiu, bne operand order.
+ * Parked per budget rule after 1 attempt. */
+/* Copy nNum 64-byte (4-quadword) blocks into the top of the attribute
+ * area */
+u_int nmlPacketSetAttributeData64N(void *pData, int nNum)
+{
+    void *p;
+
+    s_pPacket = xglPacketGetCurrent();
+    s_pPacket[9] -= nNum << 6;
+    p = (void *)s_pPacket[9];
+    do {
+        ((TI *)p)[0] = ((TI *)pData)[0];
+        ((TI *)p)[1] = ((TI *)pData)[1];
+        ((TI *)p)[2] = ((TI *)pData)[2];
+        ((TI *)p)[3] = ((TI *)pData)[3];
+        p = (char *)p + 64;
+        pData = (char *)pData + 64;
+    } while (--nNum);
     return s_pPacket[9];
 }
 
@@ -284,6 +348,24 @@ void nmlPacketAddGsPAbe(u_long nPabe)
     g_nGsEntry++;
 }
 
+/* TODO: near-miss (17/18 words, missing one xori-0 boolean-normalize
+ * instruction vs orig's movn-based ternary; logic/values verified correct).
+ * Parked per budget rule after triage + one extra source-shape attempt. */
+/* Queue a PRMODE register write; the value is 88 or 72 depending on bit 0
+ * of the model's flags word at +0xC0 */
+void nmlPacketAddGsPrmode(void *pModel)
+{
+    int flag = (*(int *)((char *)pModel + 0xC0) & 1) != 0;
+    int size = 72;
+
+    if (flag) {
+        size = 88;
+    }
+    g_aGsTag.l[g_nGsEntry * 2 + 2] = size;
+    g_aGsTag.l[g_nGsEntry * 2 + 3] = 0x1B;
+    g_nGsEntry++;
+}
+
 /* Queue a PRMODECONT register write */
 void nmlPacketAddGsPrmodecont(u_long nCont)
 {
@@ -300,7 +382,6 @@ void nmlPacketAddGsFba(u_long nFba)
     g_nGsEntry++;
 }
 
-typedef int TI __attribute__((mode(TI)));
 void sceVif1PkAddUpkData128(u_int *pPk, TI data);
 unsigned int sceVif1PkSize(u_int *pPk);
 void sceVif1PkRef(u_int *pPk, u_int a1, u_int a2, u_int a3, u_int t0, u_int t1);
@@ -321,6 +402,16 @@ int nmlPacketDirectData(void *pData, int nSize)
     }
     sceVif1PkRef(pk, (u_int)pData, nSize, 0, 0, 0);
     return 0;
+}
+
+/* Reference the model's transform data block (offset/size stored at
+ * +0x24/+0x28) directly from the packet and flush the microprogram */
+void nmlPacketAddTransData(void *pModel)
+{
+    s_pPacket = xglPacketGetCurrent();
+    sceVif1PkRef(s_pPacket, *(int *)((char *)pModel + 0x24) + (u_int)pModel,
+                 *(int *)((char *)pModel + 0x28) / 16, 0, 0, 0);
+    nmlPacketAddWaitMicrocode();
 }
 
 void xglMatrixUnit(void *pDst);

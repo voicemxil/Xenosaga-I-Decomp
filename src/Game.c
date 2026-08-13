@@ -183,6 +183,31 @@ void GameCfPlayerMoveInit(void)
     VECTOR_RATE = D_004D7C0C;
 }
 
+extern unsigned char GameResourceWorkReloadLeader;
+
+/* Find the first free (nUnk0C == -1) resource slot; if its capacity fits
+ * nSize, hand back its id, otherwise fall through to a full realloc */
+unsigned int GameResourceWorkAlloc(int nSize)
+{
+    GAME_RESOURCE *p = GameResource;
+    int i;
+
+    GameResourceWorkReloadLeader = 0;
+    GameResourceWorkReloadTable[0] = 0;
+    for (i = 0; i < 0x80; i++) {
+        if (p->nUnk0C == -1) {
+            if (nSize < p->nUnk04) {
+                return p->nId;
+            }
+            goto fail;
+        }
+        p++;
+    }
+fail:
+    GameResourceWorkReloadTable[0] = 1;
+    return 0x112A000;
+}
+
 /* Address of the first free resource slot, clamped to the work area base */
 unsigned int GameResourceGetFreeAddr(void)
 {
@@ -407,4 +432,58 @@ void GameResourceInit(int id, int data)
     *(int *)0x10B4000 = 0;
     *(int *)0x10E6000 = 0;
     *(int *)0x10E7000 = 0;
+}
+
+typedef struct {
+    short nUnk00;   /* 0x00 */
+    char  nUnk02;   /* 0x02 */
+    char  pad03;    /* 0x03 */
+    char  nUnk04;   /* 0x04 */
+    char  pad05[0x14 - 0x05];
+} GAME_SNDCH;
+
+extern GAME_SNDCH D_004DCB40[8];
+extern int arcfilepreload;
+extern void GameResourceDump(int nFlag);
+
+/* TODO: near-miss (LOGIC per triage.py, 28/71 words differ) -- summed-block
+ * pointer arithmetic and the nNo+1 bound recompute are structured
+ * differently from source here (register alloc + block-duplication shape),
+ * not just a scheduling tie-break. Parked per budget rule after 1 triage
+ * pass; logic/results are believed correct. */
+/* Reset resource slot nNo: sum the still-referenced data sizes of every
+ * slot from nNo on into it, clear the rest of the table past it, and
+ * reset the cinematic sound-effect channel array */
+void GameResourceReset(int nNo)
+{
+    GAME_RESOURCE *p;
+    int i;
+    int sum;
+
+    sum = 0;
+    if (nNo < 0x80) {
+        for (i = nNo; i < 0x80; i++) {
+            sum += GameResource[i].nUnk04;
+        }
+    }
+    p = &GameResource[nNo];
+    p->nUnk04 = sum;
+    p->nUnk0C = -1;
+    p->nUnk08 = 0;
+    if (nNo + 1 < 0x80) {
+        for (i = nNo + 1; i < 0x80; i++) {
+            GameResource[i].nId = 0;
+            GameResource[i].nUnk04 = 0;
+            GameResource[i].nUnk08 = 0;
+            GameResource[i].nUnk0C = -1;
+        }
+    }
+    for (i = 0; i < 8; i++) {
+        D_004DCB40[i].nUnk00 = 0;
+        D_004DCB40[i].nUnk02 = 0;
+        xglSoundSendEffect(0, 0, i + 4);
+        D_004DCB40[i].nUnk04 = 0;
+    }
+    GameResourceDump(0);
+    arcfilepreload = 0;
 }
