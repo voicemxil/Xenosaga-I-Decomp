@@ -24,6 +24,7 @@ typedef struct JOBJ
 void (*jthreadResetFunc)(void);
 
 extern int VMRegister[32];
+extern void *classDB[8];
 
 void initClassDB(void);
 int xheap_init(int nHeap, int pStart, int nSize);
@@ -91,4 +92,34 @@ void JNI_initThread(JVM *pVm)
 int JNI_getRegister(int nReg)
 {
     return VMRegister[nReg & 0x1F];
+}
+
+/* TODO: near-miss, 2 attempts tried (37 orig words vs 36/34 built) -- loop is
+ * indexed-array in original (recompute base+i*4 each iter) but gcc 2.96
+ * strength-reduces our do-while to a walking pointer; final branch shape
+ * (bgezl-based fallthrough) also doesn't reproduce from an early-return
+ * restructure. Needs a permute.py pass or different loop idiom. */
+void *JNI_loadClassDB(int nIndex, void *pClass)
+{
+    int i;
+
+    if (nIndex < 0) {
+        i = 0;
+        if (classDB[0] != 0) {
+            do {
+                i++;
+            } while (i < 8 && classDB[i] != 0);
+        }
+        if (i < 8) {
+            nIndex = i;
+        }
+    }
+    if (nIndex >= 0) {
+        if (nIndex < 256) {
+            return classDB[nIndex & 0xff];
+        }
+        classDB[nIndex] = pClass;
+        return pClass;
+    }
+    return 0;
 }
