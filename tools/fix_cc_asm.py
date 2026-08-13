@@ -326,6 +326,18 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     owner = function_at(lines)
 
+    # NOTE: a chain-tracking extension was tried here (accumulate pending
+    # mtc1 destinations across intervening non-compute instructions, under
+    # ASSUME_NO_LIT4) to close floorf/__ieee754_atan2f's missing hazard
+    # nop between two back-to-back mtc1s. It reproduced those two but
+    # regressed scalbnf and atanf (real, previously-matching functions
+    # gained spurious nops), and a closer look shows the true rule is NOT
+    # simply "any pending mtc1 register read by a later compute": atanf
+    # has the identical shape (mtc1->A, mtc1->B, compute reading A) with
+    # NO nop in the original, while floorf/atan2f need one. The
+    # distinguishing factor is not the register, the instruction count
+    # between them, or whether B is itself later consumed -- all of which
+    # were tried and ruled out. Left unsolved; see the resume doc.
     out = []
     for i, line in enumerate(lines):
         line = RE_MOVE.sub(r'\tdaddu\t\1,\2,$0', line)
