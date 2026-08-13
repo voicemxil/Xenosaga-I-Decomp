@@ -72,7 +72,8 @@ typedef struct CHR_ {
     int nHairStop1;                     /* 0x758 */
     char pad75C[0x1A4];                 /* 0x75C */
     int nChildNum;                      /* 0x900 */
-    struct CHR_ *aChild[27];            /* 0x904 */
+    struct CHR_ *aChild[15];            /* 0x904 */
+    CHR_LIGHT lightPos[3];              /* 0x940 */
     CHR_LIGHT light[3];                 /* 0x970 */
     int nFlags2;                        /* 0x9A0 */
     int nRenderCommand;                 /* 0x9A4 */
@@ -144,6 +145,8 @@ void ACT_setArms(CHR *, CHR *, int, int);
 void ACT_setRelation(CHR *, CHR *, int, int);
 void ACT_setParent(CHR *, int, CHR *);
 void ACT_resetArms(CHR *, CHR *, int);
+void ACT_filterGuno(void);
+void ACT_filterStealth(void);
 
 /* Byte offset of a named field within a xeno.Chr script object */
 #define CHR_FIELD(name) \
@@ -684,6 +687,42 @@ void Java_xeno_Chr_setSortOffset__F(void *env, int *args, int *ret)
     CHR_PEER(obj)->fSortOffset = *(float *)&args[1];
 }
 
+/* Select the actor's render filter effect */
+/* TODO: not matching (LOGIC, 25 diffs of 70) - cases 0/1 (clear filter) match
+ * the original exactly; cases 2/3 (ACT_filterGuno/ACT_filterStealth) do not.
+ * The original computes the function-pointer constant with lui+addiu into
+ * v0 while the nFlags mask is applied to a separately preloaded v1, then a
+ * shared tail (sw v0,8(s0); sw v1,0(s0); sw a1,0(s2)) is jumped into from
+ * both cases -- this switch reproduces that shared tail shape but schedules
+ * the pFilter assignment and the mask differently. */
+void Java_xeno_Chr_setFilter__I(void *env, int *args, int *ret)
+{
+    char *obj = (char *)args[0];
+    CHR *chr = CHR_PEER(obj);
+
+    switch (args[1]) {
+    case 0:
+        chr->pFilter = 0;
+        chr->nFlags &= ~0x800;
+        ret[0] = -1;
+        break;
+    case 1:
+        chr->nFlags &= ~0x800;
+        ret[0] = -1;
+        break;
+    case 2:
+        chr->pFilter = (void *)ACT_filterGuno;
+        chr->nFlags &= ~0x800;
+        ret[0] = 4;
+        break;
+    case 3:
+        chr->pFilter = (void *)ACT_filterStealth;
+        chr->nFlags &= ~0x800;
+        ret[0] = 4;
+        break;
+    }
+}
+
 /* Set one of the character's point light colours */
 /* TODO: not matching - the original reloads args[1] per component (aliasing) instead of CSEing it */
 void Java_xeno_Chr_setPointLightCol__IFFF(void *env, int *args, int *ret)
@@ -698,6 +737,50 @@ void Java_xeno_Chr_setPointLightCol__IFFF(void *env, int *args, int *ret)
         *(float *)((char *)chr + args[1] * 16 + 0x974) = *(float *)&args[3];
         *(float *)((char *)chr + args[1] * 16 + 0x978) = *(float *)&args[4];
     }
+}
+
+/* Set one of the character's point light positions */
+/* TODO: not matching - the original resolves the CHR peer field TWICE (two
+ * independent loadConstString+lookupClassField call pairs, the first one's
+ * result unused before obj is even loaded) before ever dereferencing it;
+ * a single CHR_PEER(obj) local does not reproduce that shape. Needs the
+ * exact source expression that causes gcc to redo the field lookup. Also:
+ * struct offsets 0x904-0x970 reshaped to fit a lightPos[3] array ahead of
+ * light[3] (col) at 0x970 -- aChild shrunk from 27 to 15 entries to make
+ * room; childGetPeer__II (which reads aChild) is itself still unverified,
+ * so this is not yet cross-checked against a passing test. */
+void Java_xeno_Chr_setPointLightPos__IFFF(void *env, int *args, int *ret)
+{
+    char *obj = (char *)args[0];
+    CHR *chr = CHR_PEER(obj);
+
+    if ((unsigned int)args[1] < 3) {
+        chr->nFlags |= 0x800;
+        chr->nFlags2 |= 0x20;
+        *(float *)((char *)chr + args[1] * 16 + 0x940) = *(float *)&args[2];
+        *(float *)((char *)chr + args[1] * 16 + 0x944) = *(float *)&args[3];
+        *(float *)((char *)chr + args[1] * 16 + 0x948) = *(float *)&args[4];
+    }
+}
+
+/* Clear all three of the character's point lights */
+/* TODO: near-miss (LOGIC, 5 diffs) -- same TI-mode lq/sq wall as
+ * nmlModelGetGblPosition et al.: 2.96 always materializes a zero source
+ * register with `por $r,$0,$0` before a TI-mode `sq`, where the original
+ * stores `$0` directly, and offsets/counter direction don't change it. */
+void Java_xeno_Chr_setPointLightReset__(void *env, int *args, int *ret)
+{
+    typedef int T128 __attribute__((mode(TI)));
+    char *obj = (char *)args[0];
+    CHR *chr = CHR_PEER(obj);
+    CHR_LIGHT *p = &chr->light[0];
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        *(T128 *)p = 0;
+        p++;
+    }
+    chr->nFlags2 &= ~0x20;
 }
 
 /* Record the string id the character responds to when talked to */
@@ -922,7 +1005,6 @@ void Java_xeno_Chr_pixelAlpha__I(void *env, int *args, int *ret)
 }
 
 /* Append a per-part per-pixel alpha override */
-/* TODO: not matching - the count store schedules first and $a1/$a2 are swapped */
 void Java_xeno_Chr_pixelAlphaParts__II(void *env, int *args, int *ret)
 {
     char *obj = (char *)args[0];
@@ -931,8 +1013,8 @@ void Java_xeno_Chr_pixelAlphaParts__II(void *env, int *args, int *ret)
 
     if (nNum < 4) {
         chr->alphaParts[nNum * 2] = *(unsigned short *)&args[2];
+        chr->nPixelAlphaPartsNum = nNum + 1;
         chr->alphaParts[nNum * 2 + 1] = *(unsigned short *)&args[1];
-        chr->nPixelAlphaPartsNum++;
     }
 }
 
