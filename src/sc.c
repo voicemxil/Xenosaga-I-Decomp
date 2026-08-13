@@ -454,3 +454,52 @@ int scRDUMPScript(SCOBJ *o) {
     }
     return 1;
 }
+
+typedef struct { unsigned short flags; } SC_TASK_FLAGS;
+int scWaitParseEveScript(SCOBJ *o) {
+    SC_TASK_FLAGS *p = (SC_TASK_FLAGS *)scGetTaskAdr(_nowScript, o->field60);
+    return (p == 0) || (p->flags == 0);
+}
+
+extern char D_004CC830[];
+int scGOSUBScript(SCOBJ *o) {
+    int adr = scGetAdrScript(o);
+    if (o->field54 < 3) {
+        int idx = (unsigned short)o->field54 + 1;
+        o->field54 = idx;
+        o->cmdBuf[(short)idx] = adr;
+    } else {
+        tracePrint(D_004CC830);
+    }
+    return 1;
+}
+
+void scDeleteTaskAll(int a)
+{
+    int i, j;
+    for (i = 0; i < 16; i++) {
+        if (a < 0 || i == a) {
+            for (j = 0; j < 8; j++) {
+                scDeleteTask(i, j);
+            }
+        }
+    }
+}
+
+int scRDIVScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    int a = scGetNumScript(o);
+    if (a != 0) {
+        scSetReg(reg, scGetReg(reg) / a);
+    }
+    return 1;
+}
+
+int scRMODScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    int a = scGetNumScript(o);
+    if (a != 0) {
+        scSetReg(reg, scGetReg(reg) % a);
+    }
+    return 1;
+}

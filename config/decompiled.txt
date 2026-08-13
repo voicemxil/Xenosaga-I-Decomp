@@ -1422,4 +1422,5 @@ MenuBoxChk = 0x0028F1F8, 0x9C; // Menu.c
 scGetCmdScript = 0x2ea418, 0x6c; // sc.c
 scSetReg = 0x2ea380, 0x98; // sc.c
 scGetAdrImmScript = 0x2ea790, 0x50; // sc.c
-Java_xeno_Chr_pixelAlphaParts__II = 0x003010d8, 0x88; // Chr.c
+scWaitParseEveScript = 0x2ebdb0, 0x3c; // sc.c
+scDeleteTaskAll = 0x2ea278, 0x78; // sc.c
