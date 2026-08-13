@@ -147,6 +147,12 @@ FILE_FIX_FLAGS = {
     # which changes when a li.s float literal carries the mtc1 COP1 hazard
     # nop -- see fix_cc_asm.py's ASSUME_NO_LIT4 comment.
     "libm.c": "--barrier-return-store fabs,__ieee754_fmod --as-g0",
+    # _dtoa_r: `dpcmp(d.d, 0.0)`'s `a1 = 0` argument setup is left as a
+    # separate instruction (with a genuine nop in the jal delay slot) in
+    # the original, but gas's reorder pass steals it into the jal's delay
+    # slot here. Same RE_RETURN_MOVE fingerprint as fabs/__ieee754_fmod
+    # above, just against a `jal` instead of a leaf return.
+    "libc.c": "--barrier-return-store _dtoa_r",
 }
 
 
