@@ -18,7 +18,11 @@ int scPAUSEScript(SC_FLAGS_OBJ *o) { o->flags |= 4; return 1; }
 int scFADEONScript(SC_FLAGS_OBJ *o) { o->flags |= 0x100; return 1; }
 
 typedef struct { char pad[0x5E]; short field5E; } SC_CNT_OBJ;
-int scWaitParseCntScript(SC_CNT_OBJ *o) { return (--o->field5E < 1); }
+int scWaitParseCntScript(SC_CNT_OBJ *o) {
+    int v = o->field5E - 1;
+    o->field5E = v;
+    return v < 1;
+}
 
 typedef struct { unsigned short flags; } SC_MOV_OBJ;
 int scWaitParseMovScript(SC_MOV_OBJ *o) { return ((o->flags >> 5) ^ 1) & 1; }
@@ -37,7 +41,7 @@ int scOfsToAdr(int a0) {
 }
 
 extern int func_A33248(void *p);
-int scWaitParseMovieScript(void *p) { return func_A33248(p) < 1; }
+int scWaitParseMovieScript(void *p) { return (unsigned)func_A33248(p) < 1; }
 
 extern int args_jump[2];
 extern short D_0033868E[];

@@ -56,9 +56,6 @@ void *sefGetDmgNull(void) {
     return (D_0079411C[0] >= 2) ? (void *)0x20F : (void *)0x210;
 }
 
-extern char D_0040D69C[];
-void *svGetImageItem(int idx) { return D_0040D69C + idx * 36; }
-
 extern short _hitFlag;
 
 extern void srsFileLoadCf(void *p);
@@ -72,17 +69,6 @@ extern char _loadEsdData[];
 void *sefGetEffectName(int idx) {
     if ((unsigned int)idx >= 0xC00) return 0;
     return _loadEsdData + idx * 16;
-}
-
-extern int _draw3D;
-extern int _nEffect2D;
-extern int _nowImage;
-extern void svDrawSchedulerParticle(void);
-void svDrawScheduler(void) {
-    _draw3D = 0;
-    _nEffect2D = 0;
-    _nowImage = 0;
-    svDrawSchedulerParticle();
 }
 
 typedef struct { char pad[0xA8C]; int flags; } SEF_SCHED2;
@@ -101,11 +87,6 @@ void *sefGetLineAdr(int idx) {
     return (char *)_lineData + idx * 65 * 32;
 }
 
-extern int _sdvMapRgb[];
-extern int _sdvAmbient[];
-extern void sdvSetAmbient(void *a, void *b);
-
-extern int _sefLoadEftQue;
 extern int srsLeaveCdRead(void);
 int sefCheckLoad(void) {
     if (_sefLoadEftQue != 0) {
@@ -143,9 +124,10 @@ void sefExecLoadQue(void) {
 
 extern int _ptAlloc[];
 void *sefGetParentLine(int a, int b) {
-    if (a < 0) return 0;
-    if (b < 0) return 0;
-    return (char *)_ptAlloc + b * 0x280;
+    if (a >= 0 && b >= 0) {
+        return (char *)_ptAlloc + b * 0x280;
+    }
+    return 0;
 }
 
 extern void srsAnalyzeEftNo(void *p, int *a, int *b);
