@@ -71,6 +71,13 @@ typedef DItype intfrac;
 #define LARGEST_EXPONENT_IS_NORMAL(x) 0
 #define ROUND_TOWARDS_ZERO 0
 
+/* Confirmed by disassembly: __unpack_d treats any exp==0 encoding as a
+   flat zero (no shift-to-normalize loop), and __pack_d saturates a too-
+   small exponent straight to a zero encoding (no shift-into-denormal
+   loop) -- both are exactly what NO_DENORMALS does to fp-bit.c's
+   #ifdef/#else blocks. Sony built this file without denormal support. */
+#define NO_DENORMALS 1
+
 #define INLINE __inline__
 
 /* Preserve the sticky-bit when shifting fractions to the right.  */
@@ -186,6 +193,13 @@ pack_d ( fp_number_type *  src)
     {
       if (src->normal_exp < NORMAL_EXPMIN)
 	{
+#ifdef NO_DENORMALS
+	  /* Go straight to a zero representation if denormals are not
+	     supported.  The denormal handling would be harmless but
+	     isn't unnecessary.  */
+	  exp = 0;
+	  fraction = 0;
+#else /* NO_DENORMALS */
 	  /* This number's exponent is too low to fit into the bits
 	     available in the number, so we'll store 0 in the exponent and
 	     shift the fraction to the right to make up for it.  */
@@ -217,6 +231,7 @@ pack_d ( fp_number_type *  src)
 	      exp += 1;
 	    }
 	  fraction >>= NGARDS;
+#endif /* NO_DENORMALS */
 	}
       else if (!LARGEST_EXPONENT_IS_NORMAL (FRAC_NBITS)
 	       && src->normal_exp > EXPBIAS)
@@ -279,7 +294,11 @@ unpack_d (FLO_union_type * src, fp_number_type * dst)
   dst->sign = sign;
   if (exp == 0)
     {
-      if (fraction == 0)
+      if (fraction == 0
+#ifdef NO_DENORMALS
+	  || 1
+#endif
+	  )
 	{
 	  dst->class = CLASS_ZERO;
 	}
