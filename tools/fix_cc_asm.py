@@ -145,6 +145,27 @@ RE_RETURN_DELAY_STORE = re.compile(
 # --barrier-return-store rather than a blanket rule: most functions here
 # legitimately DO end with a store in the delay slot.
 RE_STORE = re.compile(r'^\t(sw|sh|sb|sd|swc1|s\.s|sq)[ \t]')
+# A return-value copy into $2 (originally `move $2,reg`, already rewritten
+# to `daddu $2,reg,$0` by RE_MOVE above) immediately before a leaf return:
+# gas's default reorder mode steals it into the jr delay slot, but the
+# original ee-as build left it as three separate instructions (the copy,
+# the branch, and a genuine nop). Same fingerprint/opt-in mechanism as
+# RE_STORE -- confirmed on fabs (src/libm.c), where SET_HIGH_WORD's final
+# `return x` computes the result into $4/$6 and needs an explicit copy to
+# $2 that the original did not fold into the delay slot.
+# Also matches an arbitrary-register argument-setup copy (e.g.
+# `move $5,$4` i.e. `daddu $5,$4,$0`) immediately before a `jal` call:
+# the same theft happens into a CALL's delay slot, not just a leaf
+# return's -- confirmed on __ieee754_fmod's `return (x*y)/(x*y);`, where
+# `a1 = a0;` before `dpdiv(...)` is left as a separate instruction (with
+# a genuine nop in dpdiv's delay slot) in the original, but gas pulls it
+# into the delay slot here.
+RE_RETURN_MOVE = re.compile(r'^\tdaddu\t\$\w+,\$\w+,\$0$')
+# A leaf return OR a call: both have a delay slot gas may steal a
+# preceding independent move into. Used only by the RE_RETURN_MOVE
+# barrier above -- RE_RETURN alone is used elsewhere for return-only
+# fixes (la-before-return, mem-abs-before-return) that must not widen.
+RE_RETURN_OR_CALL = re.compile(r'^\t(j\t\$31|jr\t\$(ra|31)|jal\t[A-Za-z_]\w*)\b')
 
 
 def synth_load32(reg, val):
@@ -345,8 +366,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
                 out.append(wrap_mips1(line))
             continue
 
-        if (barrier_return_store is not None and RE_STORE.match(line)
-                and RE_RETURN.match(following)
+        if (barrier_return_store is not None
+                and ((RE_STORE.match(line) and RE_RETURN.match(following))
+                     or (RE_RETURN_MOVE.match(line)
+                         and RE_RETURN_OR_CALL.match(following)))
                 and in_scope(owner[i], barrier_return_store)):
             out.append("\t.set push\n\t.set noreorder\n" + line +
                        "\n\t.set pop")

@@ -105,6 +105,12 @@ FILE_FIX_FLAGS = {
     # --hoist-return-store regresses other nmlModel.c functions (see
     # XENOSAGA_RESUME_PROMPT.md), so scope to just this one.
     "nmlModel.c": "--barrier-return-store nmlModelSetFadeInInterrupt",
+    # fabs: SET_HIGH_WORD's final `return x` computes the masked result
+    # into a4/a1-family regs and needs an explicit copy into $2; gas's
+    # reorder pass steals that copy into the jr $31 delay slot, but the
+    # original ee-as build left it as three separate instructions (copy,
+    # branch, genuine nop). See RE_RETURN_MOVE in fix_cc_asm.py.
+    "libm.c": "--barrier-return-store fabs,__ieee754_fmod",
 }
 
 
