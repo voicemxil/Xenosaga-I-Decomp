@@ -1,6 +1,22 @@
 /*
- * newlib libc, statically linked into SLUS_204.69.
- * Same build as src/libm.c: ee-gcc 2.96 at -O2 -G0 (soft-float doubles).
+ * newlib (~1.8.x vintage) libc, statically linked into SLUS_204.69.
+ * Built with the 2.96 game compiler at -O2 -G8, same as the rest of the
+ * game code -- confirmed via the _i2b prologue fingerprint (8-byte
+ * per-saved-register stride) and by every function below matching once
+ * the small-data heuristic is defeated (see _impure_ptr below). Do NOT
+ * move this file into SDK_FILES / the 2.9-ee compiler.
+ *
+ * Reentrancy convention: _impure_ptr must be declared as an incomplete
+ * array (`struct _reent *_impure_ptr[]`) and dereferenced as
+ * `_impure_ptr[0]`, NOT as a plain `extern struct _reent *_impure_ptr`.
+ * At -G8 a plain pointer-sized extern is small-data eligible and gcc
+ * emits a 1-instruction %gp_rel load; the original always uses the
+ * 2-instruction %hi/%lo absolute load, because the real _impure_ptr
+ * symbol lives far from gp. Declaring it as an array of unknown size
+ * makes the total size unknowable to gcc, which forces %hi/%lo. This
+ * one change took 13 functions in this file from near-miss to exact
+ * match (__errno, srand, raise, signal, _init_signal, __sigtramp,
+ * strtol, strtoul, strtod, malloc, free, localeconv, setlocale).
  */
 
 typedef int __int32_t;
@@ -16,9 +32,9 @@ struct _reent
   unsigned long long _rand_next;
 };
 
-extern struct _reent *_impure_ptr;
+extern struct _reent *_impure_ptr[];
 
-#define _REENT _impure_ptr
+#define _REENT (_impure_ptr[0])
 
 typedef union
 {
