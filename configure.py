@@ -53,12 +53,20 @@ SDK_CC = CC
 SDK_CFLAGS = CFLAGS
 
 
+def is_sdk(name):
+    # Any sce*-prefixed translation unit is Sony SDK code. Pattern-matched
+    # rather than listed so a NEW sce file gets the right compiler
+    # automatically -- the inverse mistake (game code silently built with
+    # the SDK compiler) already cost an agent a run.
+    return name in SDK_FILES or name.startswith("sce")
+
+
 def cc_for(name):
-    return SDK_CC if name in SDK_FILES else CC96
+    return SDK_CC if is_sdk(name) else CC96
 
 
 def cflags_for(name):
-    return SDK_CFLAGS if name in SDK_FILES else "-O2 -G8"
+    return SDK_CFLAGS if is_sdk(name) else "-O2 -G8"
 
 
 # xglVector's original object omits some load-delay nops that are present
