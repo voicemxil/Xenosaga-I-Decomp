@@ -1605,3 +1605,6 @@ __unpack_d = 0x0032DDA0, 0xAC; // fpbit.c
 __pack_d = 0x0032DC88, 0x118; // fpbit.c
 
 // dpmul = 0x0032BEE8, 0x2AC; // fpbit.c -- TODO: down to 117 of 169 diff words (started at 684 vs 692 bytes fully mismatched). The (UDItype)(x & 0xffffffffULL) mask idiom fixed the __muldi3-vs-native-multu widening-mult mismatch (now 4 jal __muldi3 calls match). Remaining gap is purely register allocation: original saves s0-s6+ra (176-byte frame) to keep nl/nh/ml/mh/pp_hl/pp_lh live across all 4 __muldi3 calls plus a,b pointers across the whole function; built only saves s0+ra (160-byte frame) and reloads a/b fields from the stack repeatedly instead. Needs register pinning (register T x __asm__("$N")) on the 4-5 live-across-call temporaries, one at a time per the project's pinning idiom, or a source restructuring that keeps a/b pointers live in locals across the whole function.
+
+strstr = 0x00330220, 0x84; // newlib_str.c
+strrchr = 0x003301D0, 0x50; // newlib_str.c
