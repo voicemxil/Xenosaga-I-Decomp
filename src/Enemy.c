@@ -329,8 +329,7 @@ void Enemy_Unique(ACTOR *a)
     }
 }
 
-/* Play a positional enemy sound effect 
-   TODO: near-miss - the trailing xglSoundEffectPosID call sibling-calls (j) here, the original keeps jal + epilogue */
+/* Play a positional enemy sound effect */
 void EnemySound(ACTOR *a, short nId, char nCh, char nForce)
 {
     int nBank;
@@ -353,13 +352,14 @@ void EnemySound(ACTOR *a, short nId, char nCh, char nForce)
         return;
     }
     xglSoundEffectPosID(nBank + (u16)nId, &a->fPos[0], 1, a->nSerial + 1);
+    __asm__ volatile("" ::: "memory");
 }
 
-/* Stop one enemy sound effect by id 
-   TODO: near-miss - the trailing xglSoundEffectStopID call sibling-calls (j) here, the original keeps jal + epilogue */
+/* Stop one enemy sound effect by id */
 void EnemySoundEnd(ACTOR *a, short nId)
 {
     xglSoundEffectStopID(RES_GetEnemySeBank(a->nAlive) + (u16)nId, a->nSerial + 1);
+    __asm__ volatile("" ::: "memory");
 }
 
 /* Stop every enemy sound plus the shared encounter channels */
@@ -512,20 +512,20 @@ void Enemy_Command_Stop_FreeFall(ACTOR *a, char nMode)
     }
 }
 
-/* Set an enemy's behaviour type and pause it 
-   TODO: near-miss - the trailing Enemy_Pause call sibling-calls (j) here, the original keeps jal + epilogue */
+/* Set an enemy's behaviour type and pause it */
 void Enemy_Command_Type(ACTOR *a, char nType)
 {
     enepc[a->nSerial].nType = nType;
     Enemy_Pause(a);
+    __asm__ volatile("" ::: "memory");
 }
 
-/* Store an enemy script code and restart the enemy 
-   TODO: near-miss - the trailing Enemy_Init call sibling-calls (j) here, the original keeps jal + epilogue */
+/* Store an enemy script code and restart the enemy */
 void Enemy_Command_Code(ACTOR *a, int nCode)
 {
     a->nCode = nCode;
     Enemy_Init(a);
+    __asm__ volatile("" ::: "memory");
 }
 
 /* Point an enemy at an actor, or at the player for id 100 */
@@ -603,11 +603,11 @@ void Enemy_Command_Action(ACTOR *a, int nSet, int nAct, int nArg)
     }
 }
 
-/* Force an encounter check against an enemy 
-   TODO: near-miss - the trailing Check_Encount call sibling-calls (j) here, the original keeps jal + epilogue */
+/* Force an encounter check against an enemy */
 void Enemy_Command_Encount(ACTOR *a, char nType)
 {
     Check_Encount(a, 1, nType);
+    __asm__ volatile("" ::: "memory");
 }
 
 /* Move an enemy immediately, or start a timed slide to a new position */

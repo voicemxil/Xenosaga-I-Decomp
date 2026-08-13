@@ -53,6 +53,23 @@ RE_MEM_ABS = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS) +
 RE_MEM_BIGOFF = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS_BIGOFF) +
                            r')[ \t]([^,]*),(-?[0-9]+)(\(\$[a-z0-9]+\))[ \t]*$')
 RE_LIS = re.compile(r'^\tli\.s[ \t](.*)$')
+# li.d loads a 64-bit double-precision bit pattern into a GPR (this target's
+# soft-float double ABI packs a double into one 64-bit register/register
+# pair, not a COP1 register -- confirmed by real li.d destinations being
+# plain integer regs like $5/$16/$17 feeding libcalls such as dpadd/dpmul).
+# The r5900 assembler rejects the li.d mnemonic outright ("opcode not
+# supported on this processor"), so every use is a hard build blocker --
+# this rewrite is unconditionally safe (nothing that used li.d could ever
+# have assembled before). Reverse-engineered from the ORIGINAL binary's own
+# codegen for 64-bit immediates (e.g. _strtod_r's `li $17,0xbff0` +
+# `dsll32 $17,$17,0x10` for -1.0): strip trailing zero bits from the 64-bit
+# pattern, load the remaining significant bits with the shortest li/lui+ori
+# sequence, then shift back into place with dsll/dsll32. When the low 32
+# bits are not all zero (irrational-looking constants with few trailing
+# zero bits), fall back to building hi32 and lo32 halves in two registers
+# and OR-ing them together -- unverified against real bytes for that path,
+# but it is the standard MIPS 64-bit constant idiom.
+RE_LID = re.compile(r'^\tli\.d\t(\$[0-9a-zA-Z]+),\s*(\S+)$')
 RE_CVT = re.compile(r'^\t(cvt\.[a-z.]+|trunc\.w\.s)[ \t](.*)$')
 # FP loads whose result feeds a COP1 compute need the hazard nop the
 # original ee-as inserted (modern gas does not).
@@ -128,6 +145,50 @@ RE_RETURN_DELAY_STORE = re.compile(
 # --barrier-return-store rather than a blanket rule: most functions here
 # legitimately DO end with a store in the delay slot.
 RE_STORE = re.compile(r'^\t(sw|sh|sb|sd|swc1|s\.s|sq)[ \t]')
+
+
+def synth_load32(reg, val):
+    """Load an unsigned 32-bit value into `reg` with li, or lui[+ori]."""
+    val &= 0xFFFFFFFF
+    if val <= 0xFFFF:
+        return [f"\tli\t{reg},{val}"]
+    hi = (val >> 16) & 0xFFFF
+    lo = val & 0xFFFF
+    out = [f"\tlui\t{reg},{hi}"]
+    if lo:
+        out.append(f"\tori\t{reg},{reg},{lo}")
+    return out
+
+
+def synth_li_d(reg, bits):
+    """Emit an instruction sequence loading the 64-bit pattern `bits` into
+    `reg`, replacing an unassemblable `li.d`. See RE_LID comment above."""
+    if bits == 0:
+        return [f"\tmove\t{reg},$0"]
+    tz = (bits & -bits & 0xFFFFFFFFFFFFFFFF).bit_length() - 1
+    sig = bits >> tz
+    if sig.bit_length() <= 32:
+        out = synth_load32(reg, sig)
+    else:
+        # Low 32 bits are not all zero: build hi32/lo32 halves separately
+        # and merge with an `or`, using $at as scratch.
+        hi32 = (bits >> 32) & 0xFFFFFFFF
+        lo32 = bits & 0xFFFFFFFF
+        out = synth_load32(reg, hi32)
+        out.append(f"\tdsll32\t{reg},{reg},0")
+        if lo32:
+            at = "$1" if reg != "$1" else "$2"
+            out += synth_load32(at, lo32)
+            out.append(f"\tdsll32\t{at},{at},0")
+            out.append(f"\tdsrl32\t{at},{at},0")
+            out.append(f"\tor\t{reg},{reg},{at}")
+        return out
+    if tz:
+        if tz < 32:
+            out.append(f"\tdsll\t{reg},{reg},{tz}")
+        else:
+            out.append(f"\tdsll32\t{reg},{reg},{tz - 32}")
+    return out
 
 
 def wrap_mips1(text):
@@ -240,6 +301,13 @@ def main(path, omitted_hazards, barrier_return_store=None,
                             and reads_fp_reg(following, hazard_dest)
                             and not omitted
                             and not RE_FP_BRANCH_LIKELY.match(previous_insn(lines, i)))
+
+        m_lid = RE_LID.match(line)
+        if m_lid:
+            reg, valstr = m_lid.groups()
+            bits = struct.unpack('<Q', struct.pack('<d', float(valstr)))[0]
+            out.append('\n'.join(synth_li_d(reg, bits)))
+            continue
 
         m_sqrt = RE_SQRT.match(line)
         if m_sqrt:
