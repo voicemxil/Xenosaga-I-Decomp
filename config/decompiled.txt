@@ -1499,3 +1499,7 @@ xglRenderClear = 0x0022DC10, 0x68; // xglRender.c
 xglRenderDispEnvInit = 0x0022D338, 0x7C; // xglRender.c
 xglRenderDrawEnvMove = 0x0022D2A0, 0x94; // xglRender.c
 xglRenderFinalPacket = 0x0022D8C8, 0x74; // xglRender.c
+eBattleWinClose2 = 0x00281E90, 0xC; // eBattle.c
+eBattleWinClose3 = 0x002826D8, 0x18; // eBattle.c
+eBattleWinClose4 = 0x00282890, 0x10; // eBattle.c
+eBattleWinPageCheck4 = 0x002828A0, 0xC; // eBattle.c

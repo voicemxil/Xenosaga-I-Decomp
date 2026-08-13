@@ -188,6 +188,44 @@ void UmnEventTextGyouJump(char **ppText)
     }
 }
 
+/* TODO: near-miss (LOGIC/register-alloc) -- not registered. Algorithm is
+   confirmed correct (decimal vs octal digit run parser, byte-truncated
+   accumulator matches the andi 0xff in the original). The original stages
+   ppText into a fresh register (t0) with a bare "move t0,a0" as its very
+   first real instruction, before the nMode branch; an explicit
+   `char **p = ppText;` local gets optimized back to a0 with no copy emitted
+   since nothing else clobbers a0 in this leaf function. Everything after
+   that single missing instruction is a 1-word shift of an otherwise
+   matching body. Two attempts spent (direct param use, explicit local). */
+/* Parse a run of digits (decimal when nMode == 1, otherwise octal) starting
+   at *ppText, advancing *ppText past the digits consumed */
+int UmnEventTextNumberGet(char **ppText, int nMode)
+{
+    char **p = ppText;
+    int nBase, nMax;
+    unsigned char c;
+    int nVal = 0;
+
+    if (nMode == 1) {
+        nBase = 10;
+        nMax = '9';
+    } else {
+        nBase = 8;
+        nMax = '7';
+    }
+
+    c = **p;
+    if (c < '0' || c > nMax) {
+        return nVal;
+    }
+    do {
+        nVal = (unsigned char)(nVal * nBase + c - '0');
+        (*p)++;
+        c = **p;
+    } while (c >= '0' && c <= nMax);
+    return nVal;
+}
+
 /* Look up one mail table entry by index */
 /* TODO: Find the natural source shape for this matched return-delay scaffold. */
 short *UmnMailDataGet(int nNo)

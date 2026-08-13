@@ -25,6 +25,31 @@ void eBattleWinInit(void)
     eBattleWinInit2(MenuWorkEndGet());
 }
 
+/* Clear the sub-window's status byte (BW2) */
+void eBattleWinClose2(void)
+{
+    *((char *)g_pEBattleUnk3 + 24) = 0;
+}
+
+/* Set two status bytes on the BW3 sub-window */
+void eBattleWinClose3(void)
+{
+    *((char *)g_pEBattleUnk4 + 20) = 4;
+    *((char *)g_pEBattleUnk4 + 804) = 4;
+}
+
+/* Set the BW4 sub-window's status byte */
+void eBattleWinClose4(void)
+{
+    *((char *)g_pEBattleUnk5 + 24) = 4;
+}
+
+/* Read the BW4 sub-window's page/check word */
+int eBattleWinPageCheck4(void)
+{
+    return *(int *)((char *)g_pEBattleUnk5 + 4);
+}
+
 /* TODO: not decompiled -- LENGTH mismatch (27 orig vs 24 built words). 2.96
  * batches/reorders the gp-rel stores to g_pEBattleUnk* near the end instead
  * of interleaving them with the byte/word stores as the original does;
