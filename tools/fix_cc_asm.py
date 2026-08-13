@@ -152,19 +152,51 @@ def previous_insn(lines, idx):
     return ""
 
 
-def hoist_return_delay_stores(lines):
+def function_at(lines):
+    """Map line index -> enclosing function name.
+
+    gcc emits `.ent NAME` / `.end NAME` around each function. Lines outside
+    any function map to None. Used to scope a fix pass to specific functions:
+    several passes are correct for one function and actively WRONG for
+    another in the same translation unit (--hoist-return-store fixes
+    xglLightIntensityAmbient but regresses nmlModel), so per-file scoping is
+    too coarse.
+    """
+    owner = [None] * len(lines)
+    cur = None
+    for i, l in enumerate(lines):
+        m = re.match(r'\s*\.ent\s+(\S+)', l)
+        if m:
+            cur = m.group(1)
+        owner[i] = cur
+        if re.match(r'\s*\.end\s+(\S+)', l):
+            cur = None
+    return owner
+
+
+def in_scope(name, scope):
+    """True if a pass scoped to `scope` applies to function `name`.
+
+    Empty scope means "whole file" (backwards compatible with the old
+    file-level boolean flags).
+    """
+    return not scope or name in scope
+
+def hoist_return_delay_stores(lines, scope=()):
     """Swap an immediately-adjacent `j $31` / store pair so the store
     comes first and the delay slot is left as a plain nop. Only handles
     the case where the store is the literal next line after the branch
     (i.e. really is gcc's own delay-slot fill, not something separated
     by directives) -- that is the only shape gcc actually emits."""
+    owner = function_at(lines)
     out = []
     i = 0
     n = len(lines)
     while i < n:
         line = lines[i]
         if (RE_RETURN.match(line) and i + 1 < n
-                and RE_RETURN_DELAY_STORE.match(lines[i + 1])):
+                and RE_RETURN_DELAY_STORE.match(lines[i + 1])
+                and in_scope(owner[i], scope)):
             out.append(lines[i + 1])
             out.append(line)
             out.append('\tnop')
@@ -175,13 +207,17 @@ def hoist_return_delay_stores(lines):
     return out
 
 
-def main(path, omitted_hazards, barrier_return_store=False,
-         hoist_return_store=False):
+def main(path, omitted_hazards, barrier_return_store=None,
+         hoist_return_store=None):
+    # Each flag is either None (off), an empty tuple (whole file), or a set
+    # of function names to scope the pass to.
     with open(path) as f:
         lines = f.read().split('\n')
 
-    if hoist_return_store:
-        lines = hoist_return_delay_stores(lines)
+    if hoist_return_store is not None:
+        lines = hoist_return_delay_stores(lines, hoist_return_store)
+
+    owner = function_at(lines)
 
     out = []
     for i, line in enumerate(lines):
@@ -215,8 +251,9 @@ def main(path, omitted_hazards, barrier_return_store=False,
             out.append(wrap_mips1(line))
             continue
 
-        if (barrier_return_store and RE_STORE.match(line)
-                and RE_RETURN.match(following)):
+        if (barrier_return_store is not None and RE_STORE.match(line)
+                and RE_RETURN.match(following)
+                and in_scope(owner[i], barrier_return_store)):
             out.append("\t.set push\n\t.set noreorder\n" + line +
                        "\n\t.set pop")
             continue
@@ -274,11 +311,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("path")
     parser.add_argument("--omit-hazard", action="append", default=[])
-    parser.add_argument("--barrier-return-store", action="store_true",
-                        help="keep a trailing store out of a leaf return delay slot")
-    parser.add_argument("--hoist-return-store", action="store_true",
+    parser.add_argument("--barrier-return-store", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="keep a trailing store out of a leaf return delay "
+                             "slot; optionally a comma-separated list of "
+                             "function names to scope the pass to")
+    parser.add_argument("--hoist-return-store", nargs="?", const="",
+                        default=None, metavar="FUNCS",
                         help="move a store gcc placed in a leaf return's "
                              "delay slot to before the branch instead")
     args = parser.parse_args()
-    main(args.path, set(args.omit_hazard), args.barrier_return_store,
-         args.hoist_return_store)
+    def scope(v):
+        if v is None:
+            return None
+        return frozenset(f for f in v.split(',') if f)
+
+    main(args.path, set(args.omit_hazard), scope(args.barrier_return_store),
+         scope(args.hoist_return_store))
