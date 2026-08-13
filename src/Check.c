@@ -179,3 +179,123 @@ int CheckInBox(VECTOR *pPos, VECTOR *pMin, VECTOR *pMax)
     }
     return 0;
 }
+
+/* Same fields as VECTOR, but 8-byte aligned so a whole-struct copy uses
+   ld/sd instead of the unaligned ldl/ldr/sdl/sdr sequence */
+typedef struct {
+    float x;
+    float y;
+    float z;
+    float w;
+} __attribute__((aligned(8))) VECTOR8;
+
+typedef struct {
+    unsigned char pad0C0[0xC0];
+    VECTOR8 pos;                /* 0xC0 */
+    unsigned char pad1D0[0xD5]; /* 0xD0 .. 0x1A5 */
+    signed char nMapIdx;         /* 0x1A5 */
+} DOORACTOR;
+
+typedef struct {
+    unsigned char pad00[0x10];
+    VECTOR8 pos;                 /* 0x10 */
+    unsigned char pad20[0x34];   /* 0x20 .. 0x54 */
+    float fDir;                   /* 0x54 */
+} DOORTARGET;
+
+typedef struct {
+    unsigned char pad00[0xC0];
+    VECTOR8 pos;                  /* 0xC0 */
+    unsigned char pad0D0[0x230]; /* pad to the 0x300 array stride */
+} MAPUNIT2;
+
+/* Non-gp_rel: an incomplete array keeps a <=8-byte extern out of sdata */
+extern DOORTARGET *D_00338684[];
+extern MAPUNIT2 MapUnit[];
+extern short D_00490DBA[];
+extern float D_004D7F4C;
+extern float D_004D7F50;
+
+extern float fabsf(float f);
+extern float atan2f(float y, float x);
+extern float nearDir(float a, float b);
+void CheckDoorPos(DOORACTOR *a, VECTOR8 *pOut);
+
+/* Compute a door's approach distance, blending toward its linked map unit */
+/* TODO: near-miss - the a.y/pDoor.y load registers ($f1/$f2 vs original's
+   $f2/$f1, with the 2.0f constant landing in $f2 not $f3) are an allocator
+   tie-break; every statement ordering and operand direction tried gives the
+   same pair of registers, so it looks unreachable from C alone. */
+float CheckDoorDist(DOORACTOR *a)
+{
+    DOORTARGET *pDoor = D_00338684[0];
+    VECTOR8 buf;
+
+    if (fabsf(pDoor->pos.y - a->pos.y) > 2.0f) {
+        return D_004D7F4C;
+    }
+    CheckDoorPos(a, &buf);
+    return CheckDist2D((VECTOR *)&pDoor->pos, (VECTOR *)&buf);
+}
+
+/* True when the actor is aligned with its linked door's direction, within
+   the switch-activation gate */
+int CheckDoorSwitch(DOORACTOR *a)
+{
+    DOORTARGET *pDoor = D_00338684[0];
+    VECTOR8 buf;
+    int nRet;
+
+    CheckDoorPos(a, &buf);
+    if ((D_00490DBA[0] & 0x20) != 0) {
+        if (fabsf(nearDir(atan2f(buf.x - pDoor->pos.x, buf.z - pDoor->pos.z),
+                           pDoor->fDir)) < D_004D7F50) {
+            return 1;
+        }
+    }
+    nRet = 0;
+    return nRet;
+}
+
+/* Fill pOut with a door actor's position, blended toward its linked map unit */
+void CheckDoorPos(DOORACTOR *a, VECTOR8 *pOut)
+{
+    int nMapIdx = a->nMapIdx;
+    MAPUNIT2 *m;
+    float x, dx, z, dz;
+
+    if (nMapIdx == -1) {
+        *pOut = a->pos;
+    } else {
+        m = &MapUnit[nMapIdx];
+        x = a->pos.x;
+        dx = x - m->pos.x;
+        pOut->x = x - dx * 0.5f;
+        pOut->y = a->pos.y;
+        z = a->pos.z;
+        dz = z - m->pos.z;
+        pOut->z = z - dz * 0.5f;
+    }
+}
+
+/* True when any live, non-frozen enemy is electrified */
+/* TODO: near-miss - LOGIC, 27/34 instructions differ. The original walks
+   actor/enepc with two hand-incremented pointers (actor stride 0xA70,
+   enepc stride 0x38B0) rather than index expressions, and its inner
+   attribute check reuses a "move v0,a0" copy of the enepc pointer before
+   the lb -- Check_EnemyBurn's simpler two-condition body matches with
+   plain indexing, so the extra nesting here likely needs the pointer-pair
+   loop shape instead. */
+int Check_EnemyElec(void)
+{
+    short i;
+
+    for (i = 0; i < 16; i++) {
+        if (actor[i].nUnk86 > 0 && actor[i].nUnk82 != 1) {
+            if (enepc[i].nAttr == 0xC || (enepc[i].nFlags6A & 2) != 0) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}

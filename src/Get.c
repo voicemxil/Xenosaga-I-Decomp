@@ -36,9 +36,13 @@ typedef struct {
 
 extern JAVAREACTION D_0037C8F0[];
 extern ENEPC enepc[];
+extern float LocaterAngle[8][2];
 
 extern float atan2f(float y, float x);
 extern float sqrtf(float f);
+extern float sinf(float f);
+extern float cosf(float f);
+extern int xglSRand(void);
 
 /* Read the signal byte cached on a map unit */
 signed char GetUwamonoSignal(UWAMONO *pUnit)
@@ -144,4 +148,97 @@ int GetIntersectionPointLineZ(float *pRate, VECTOR *p1, VECTOR *p2, float z)
 /* Model file name accessor (stubbed out in the shipped build) */
 void GetMdlFileName(void)
 {
+}
+
+/* TODO: near-match (LENGTH) - gcc schedules the range subtraction in the
+ * xglSRand delay slot, leaving the build one instruction shorter. */
+/* Return a random integer in the inclusive range */
+int Get_Rnd(int minimum, int maximum)
+{
+    int range = maximum - minimum;
+    int random;
+
+    random = xglSRand();
+    range++;
+    return minimum + random % range;
+}
+
+/* Return the sector containing an angle, or -1 outside every sector. */
+signed char Get_LocaterType_Angle(float angle)
+{
+    short index = 0;
+
+    while (index < 8) {
+        if ((LocaterAngle[index][0] < angle) &&
+            (angle < LocaterAngle[index][1])) {
+            break;
+        }
+        index++;
+    }
+    if (index != 8) {
+        return index;
+    }
+    return -1;
+}
+
+/* Project a point by an angle and planar distance */
+void Get_Point_By_AngleLength(VECTOR *source, VECTOR *result,
+    float angle, float length)
+{
+    result->x = source->x + sinf(angle) * length;
+    result->y = source->y;
+    result->z = source->z + cosf(angle) * length;
+    result->w = source->w;
+}
+
+/* Return the signed planar angle relative to a facing direction */
+float Get_Angle_Relative(VECTOR *source, VECTOR *target, float facing)
+{
+    float angle = Get_Angle(source, target) - facing;
+
+    if (angle < -3.141592741f) {
+        angle += 6.283185482f;
+    }
+    if (angle > 3.141592741f) {
+        angle -= 6.283185482f;
+    }
+    return angle;
+}
+
+/* Fold a value into the highest interval below a maximum */
+float Get_Multi_Max_Under(float value, float step, float maximum)
+{
+    float result = value;
+
+    if (result < maximum) {
+        maximum -= step;
+        if (result <= maximum) {
+            do {
+                result += step;
+            } while (result <= maximum);
+        }
+    } else {
+        maximum -= step;
+        while (!(result <= maximum)) {
+            result -= step;
+        }
+    }
+    return result;
+}
+
+/* Wrap an angle into the signed radius interval */
+float Get_Decimal_Surplus_for_Radius(float angle)
+{
+    if (angle <= 0.0f) {
+        if (angle < -3.141592741f) {
+            do {
+                angle += 6.283185482f;
+            } while (angle < -3.141592741f);
+        }
+    } else {
+        while (3.141592741f <= angle) {
+            angle -= 6.283185482f;
+        }
+    }
+    return angle;
 }

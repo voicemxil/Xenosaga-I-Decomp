@@ -2137,3 +2137,930 @@ __kernel_tanf (float x, float y, int iy)
       return t + a * (s + t * v);
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* k_rem_pio2f.c                                                      */
+/* ------------------------------------------------------------------ */
+
+static const int init_jkf[] = { 4, 7, 9 };	/* initial value for jk */
+
+static const float PIo2f[] = {
+  1.5703125298e+00,		/* 0x3fc90000 */
+  4.5776367915e-04,		/* 0x39f00000 */
+  2.5987625577e-05,		/* 0x37da0000 */
+  7.5437130320e-08,		/* 0x33a20000 */
+  6.0026652052e-11,		/* 0x2e840000 */
+  7.3896445874e-13,		/* 0x2b500000 */
+  5.3845817753e-15,		/* 0x27c20000 */
+  5.6378514003e-18,		/* 0x22d00000 */
+  8.3009230447e-20,		/* 0x1fc40000 */
+  3.2756352888e-22,		/* 0x1bc60000 */
+  6.3331016881e-25,		/* 0x17440000 */
+};
+
+static const float
+  zero_kf = 0.0,
+  one_kf = 1.0, two8 = 2.5600000763e+02,	/* 0x43800000 */
+  twon8 = 3.9062501164e-03;	/* 0x3b800000 */
+
+int
+__kernel_rem_pio2f (float *x, float *y, int e0, int nx, int prec,
+		    const __int32_t *ipio2)
+{
+  __int32_t jz, jx, jv, jp, jk, carry, n, iq[20], i, j, k, m, q0, ih;
+  float z, fw, f[20], fq[20], q[20];
+
+  /* initialize jk */
+  jk = init_jkf[prec];
+  jp = jk;
+
+  /* determine jx,jv,q0, note that 3>q0 */
+  jx = nx - 1;
+  jv = (e0 - 3) / 8;
+  if (jv < 0)
+    jv = 0;
+  q0 = e0 - 8 * (jv + 1);
+
+  /* set up f[0] to f[jx+jk] where f[jx+jk] = ipio2[jv+jk] */
+  j = jv - jx;
+  m = jx + jk;
+  for (i = 0; i <= m; i++, j++)
+    f[i] = (j < 0) ? zero_kf : (float) ipio2[j];
+
+  /* compute q[0],q[1],...q[jk] */
+  for (i = 0; i <= jk; i++)
+    {
+      for (j = 0, fw = 0.0; j <= jx; j++)
+	fw += x[j] * f[jx + i - j];
+      q[i] = fw;
+    }
+
+  jz = jk;
+recompute:
+  /* distill q[] into iq[] reversingly */
+  for (i = 0, j = jz, z = q[jz]; j > 0; i++, j--)
+    {
+      fw = (float) ((__int32_t) (twon8 * z));
+      iq[i] = (__int32_t) (z - two8 * fw);
+      z = q[j - 1] + fw;
+    }
+
+  /* compute n */
+  z = scalbnf (z, q0);		/* actual value of z */
+  z -= (float) 8.0 * floorf (z * (float) 0.125);	/* trim off integer >= 8 */
+  n = (__int32_t) z;
+  z -= (float) n;
+  ih = 0;
+  if (q0 > 0)
+    {				/* need iq[jz-1] to determine n */
+      i = (iq[jz - 1] >> (8 - q0));
+      n += i;
+      iq[jz - 1] -= i << (8 - q0);
+      ih = iq[jz - 1] >> (7 - q0);
+    }
+  else if (q0 == 0)
+    ih = iq[jz - 1] >> 8;
+  else if (z >= (float) 0.5)
+    ih = 2;
+
+  if (ih > 0)
+    {				/* q > 0.5 */
+      n += 1;
+      carry = 0;
+      for (i = 0; i < jz; i++)
+	{			/* compute 1-q */
+	  j = iq[i];
+	  if (carry == 0)
+	    {
+	      if (j != 0)
+		{
+		  carry = 1;
+		  iq[i] = 0x100 - j;
+		}
+	    }
+	  else
+	    iq[i] = 0xff - j;
+	}
+      if (q0 > 0)
+	{			/* rare case: chance is 1 in 12 */
+	  switch (q0)
+	    {
+	    case 1:
+	      iq[jz - 1] &= 0x7f;
+	      break;
+	    case 2:
+	      iq[jz - 1] &= 0x3f;
+	      break;
+	    }
+	}
+      if (ih == 2)
+	{
+	  z = one_kf - z;
+	  if (carry != 0)
+	    z -= scalbnf (one_kf, q0);
+	}
+    }
+
+  /* check if recomputation is needed */
+  if (z == zero_kf)
+    {
+      j = 0;
+      for (i = jz - 1; i >= jk; i--)
+	j |= iq[i];
+      if (j == 0)
+	{			/* need recomputation */
+	  for (k = 1; iq[jk - k] == 0; k++);	/* k = no. of terms needed */
+
+	  for (i = jz + 1; i <= jz + k; i++)
+	    {			/* add q[jz+1] to q[jz+k] */
+	      f[jx + i] = (float) ipio2[jv + i];
+	      for (j = 0, fw = 0.0; j <= jx; j++)
+		fw += x[j] * f[jx + i - j];
+	      q[i] = fw;
+	    }
+	  jz += k;
+	  goto recompute;
+	}
+    }
+
+  /* chop off zero terms */
+  if (z == (float) 0.0)
+    {
+      jz -= 1;
+      q0 -= 8;
+      while (iq[jz] == 0)
+	{
+	  jz--;
+	  q0 -= 8;
+	}
+    }
+  else
+    {				/* break z into 8-bit if necessary */
+      z = scalbnf (z, -q0);
+      if (z >= two8)
+	{
+	  fw = (float) ((__int32_t) (twon8 * z));
+	  iq[jz] = (__int32_t) (z - two8 * fw);
+	  jz += 1;
+	  q0 += 8;
+	  iq[jz] = (__int32_t) fw;
+	}
+      else
+	iq[jz] = (__int32_t) z;
+    }
+
+  /* convert integer "bit" chunk to floating-point value */
+  fw = scalbnf (one_kf, q0);
+  for (i = jz; i >= 0; i--)
+    {
+      q[i] = fw * (float) iq[i];
+      fw *= twon8;
+    }
+
+  /* compute PIo2[0,...,jp]*q[jz,...,0] */
+  for (i = jz; i >= 0; i--)
+    {
+      for (fw = 0.0, k = 0; k <= jp && k <= jz - i; k++)
+	fw += PIo2f[k] * q[i + k];
+      fq[jz - i] = fw;
+    }
+
+  /* compress fq[] into y[] */
+  switch (prec)
+    {
+    case 0:
+      fw = 0.0;
+      for (i = jz; i >= 0; i--)
+	fw += fq[i];
+      y[0] = (ih == 0) ? fw : -fw;
+      break;
+    case 1:
+    case 2:
+      fw = 0.0;
+      for (i = jz; i >= 0; i--)
+	fw += fq[i];
+      y[0] = (ih == 0) ? fw : -fw;
+      fw = fq[0] - fw;
+      for (i = 1; i <= jz; i++)
+	fw += fq[i];
+      y[1] = (ih == 0) ? fw : -fw;
+      break;
+    case 3:			/* painful */
+      for (i = jz; i > 0; i--)
+	{
+	  fw = fq[i - 1] + fq[i];
+	  fq[i] += fq[i - 1] - fw;
+	  fq[i - 1] = fw;
+	}
+      for (i = jz; i > 1; i--)
+	{
+	  fw = fq[i - 1] + fq[i];
+	  fq[i] += fq[i - 1] - fw;
+	  fq[i - 1] = fw;
+	}
+      for (fw = 0.0, i = jz; i >= 2; i--)
+	fw += fq[i];
+      if (ih == 0)
+	{
+	  y[0] = fq[0];
+	  y[1] = fq[1];
+	  y[2] = fw;
+	}
+      else
+	{
+	  y[0] = -fq[0];
+	  y[1] = -fq[1];
+	  y[2] = -fw;
+	}
+    }
+  return n & 7;
+}
+
+/* ------------------------------------------------------------------ */
+/* e_rem_pio2f.c                                                      */
+/* ------------------------------------------------------------------ */
+
+static const __int32_t two_over_pif[] = {
+  0xA2, 0xF9, 0x83, 0x6E, 0x4E, 0x44, 0x15, 0x29, 0xFC,
+  0x27, 0x57, 0xD1, 0xF5, 0x34, 0xDD, 0xC0, 0xDB, 0x62,
+  0x95, 0x99, 0x3C, 0x43, 0x90, 0x41, 0xFE, 0x51, 0x63,
+  0xAB, 0xDE, 0xBB, 0xC5, 0x61, 0xB7, 0x24, 0x6E, 0x3A,
+  0x42, 0x4D, 0xD2, 0xE0, 0x06, 0x49, 0x2E, 0xEA, 0x09,
+  0xD1, 0x92, 0x1C, 0xFE, 0x1D, 0xEB, 0x1C, 0xB1, 0x29,
+  0xA7, 0x3E, 0xE8, 0x82, 0x35, 0xF5, 0x2E, 0xBB, 0x44,
+  0x84, 0xE9, 0x9C, 0x70, 0x26, 0xB4, 0x5F, 0x7E, 0x41,
+  0x39, 0x91, 0xD6, 0x39, 0x83, 0x53, 0x39, 0xF4, 0x9C,
+  0x84, 0x5F, 0x8B, 0xBD, 0xF9, 0x28, 0x3B, 0x1F, 0xF8,
+  0x97, 0xFF, 0xDE, 0x05, 0x98, 0x0F, 0xEF, 0x2F, 0x11,
+  0x8B, 0x5A, 0x0A, 0x6D, 0x1F, 0x6D, 0x36, 0x7E, 0xCF,
+  0x27, 0xCB, 0x09, 0xB7, 0x4F, 0x46, 0x3F, 0x66, 0x9E,
+  0x5F, 0xEA, 0x2D, 0x75, 0x27, 0xBA, 0xC7, 0xEB, 0xE5,
+  0xF1, 0x7B, 0x3D, 0x07, 0x39, 0xF7, 0x8A, 0x52, 0x92,
+  0xEA, 0x6B, 0xFB, 0x5F, 0xB1, 0x1F, 0x8D, 0x5D, 0x08,
+  0x56, 0x03, 0x30, 0x46, 0xFC, 0x7B, 0x6B, 0xAB, 0xF0,
+  0xCF, 0xBC, 0x20, 0x9A, 0xF4, 0x36, 0x1D, 0xA9, 0xE3,
+  0x91, 0x61, 0x5E, 0xE6, 0x1B, 0x08, 0x65, 0x99, 0x85,
+  0x5F, 0x14, 0xA0, 0x68, 0x40, 0x8D, 0xFF, 0xD8, 0x80,
+  0x4D, 0x73, 0x27, 0x31, 0x06, 0x06, 0x15, 0x56, 0xCA,
+  0x73, 0xA8, 0xC9, 0x60, 0xE2, 0x7B, 0xC0, 0x8C, 0x6B,
+};
+
+static const __int32_t npio2_hwf[] = {
+  0x3fc90f00, 0x40490f00, 0x4096cb00, 0x40c90f00, 0x40fb5300, 0x4116cb00,
+  0x412fed00, 0x41490f00, 0x41623100, 0x417b5300, 0x418a3a00, 0x4196cb00,
+  0x41a35c00, 0x41afed00, 0x41bc7e00, 0x41c90f00, 0x41d5a000, 0x41e23100,
+  0x41eec200, 0x41fb5300, 0x4203f200, 0x420a3a00, 0x42108200, 0x4216cb00,
+  0x421d1300, 0x42235c00, 0x4229a400, 0x422fed00, 0x42363500, 0x423c7e00,
+  0x4242c600, 0x42490f00,
+};
+
+static const float
+  zero_rf = 0.0,
+  half_rf = 0.5,
+  invpio2f = 6.3661982119e-01,	/* 0x3f22f984 */
+  pio2_1f = 1.5707855523e+00,	/* 0x3fc90f80 */
+  pio2_1tf = 1.0804334352e-05,	/* 0x37354443 */
+  pio2_2f = 1.0804273415e-05,	/* 0x37354400 */
+  pio2_2tf = 6.0771001079e-11,	/* 0x2e85a308 */
+  pio2_3f = 6.0770945567e-11,	/* 0x2e85a300 */
+  pio2_3tf = 6.1232344284e-17;	/* 0x248d3132 */
+
+__int32_t
+__ieee754_rem_pio2f (float x, float *y)
+{
+  float z, w, t, r, fn;
+  float tx[3];
+  __int32_t i, j, n, ix, hx;
+  int e0, nx;
+
+  GET_FLOAT_WORD (hx, x);
+  ix = hx & 0x7fffffff;
+  if (ix <= 0x3f490fd8)		/* |x| ~<= pi/4 , no need for reduction */
+    {
+      y[0] = x;
+      y[1] = 0;
+      return 0;
+    }
+  if (ix < 0x4016cbe4)
+    {				/* |x| < 3pi/4, special case with n=+-1 */
+      if (hx > 0)
+	{
+	  z = x - pio2_1f;
+	  if ((ix & 0xfffffff0) != 0x3fc90fd0)
+	    {			/* 24+24 bit pi OK */
+	      y[0] = z - pio2_1tf;
+	      y[1] = (z - y[0]) - pio2_1tf;
+	    }
+	  else
+	    {			/* near pi/2, use 24+24+24 bit pi */
+	      z -= pio2_2f;
+	      y[0] = z - pio2_2tf;
+	      y[1] = (z - y[0]) - pio2_2tf;
+	    }
+	  return 1;
+	}
+      else
+	{			/* negative x */
+	  z = x + pio2_1f;
+	  if ((ix & 0xfffffff0) != 0x3fc90fd0)
+	    {			/* 24+24 bit pi OK */
+	      y[0] = z + pio2_1tf;
+	      y[1] = (z - y[0]) + pio2_1tf;
+	    }
+	  else
+	    {			/* near pi/2, use 24+24+24 bit pi */
+	      z += pio2_2f;
+	      y[0] = z + pio2_2tf;
+	      y[1] = (z - y[0]) + pio2_2tf;
+	    }
+	  return -1;
+	}
+    }
+  if (ix <= 0x43490f80)
+    {				/* |x| ~<= 2^7*(pi/2), medium size */
+      t = fabsf (x);
+      n = (__int32_t) (t * invpio2f + half_rf);
+      fn = (float) n;
+      r = t - fn * pio2_1f;
+      w = fn * pio2_1tf;	/* 1st round good to 40 bit */
+      if (n < 32 && (ix & 0xffffff00) != npio2_hwf[n - 1])
+	{
+	  y[0] = r - w;		/* quick check no cancellation */
+	}
+      else
+	{
+	  __uint32_t high;
+	  j = ix >> 23;
+	  y[0] = r - w;
+	  GET_FLOAT_WORD (high, y[0]);
+	  i = j - ((high >> 23) & 0xff);
+	  if (i > 8)
+	    {			/* 2nd iteration needed, good to 57 */
+	      t = r;
+	      w = fn * pio2_2f;
+	      r = t - w;
+	      w = fn * pio2_2tf - ((t - r) - w);
+	      y[0] = r - w;
+	      GET_FLOAT_WORD (high, y[0]);
+	      i = j - ((high >> 23) & 0xff);
+	      if (i > 25)
+		{		/* 3rd iteration need, 74 bits acc */
+		  t = r;	/* will cover all possible cases */
+		  w = fn * pio2_3f;
+		  r = t - w;
+		  w = fn * pio2_3tf - ((t - r) - w);
+		  y[0] = r - w;
+		}
+	    }
+	}
+      y[1] = (r - y[0]) - w;
+      if (hx < 0)
+	{
+	  y[0] = -y[0];
+	  y[1] = -y[1];
+	  return -n;
+	}
+      else
+	return n;
+    }
+  /*
+   * all other (large) arguments
+   */
+  if (!FLT_UWORD_IS_FINITE (ix))
+    {
+      y[0] = y[1] = x - x;
+      return 0;
+    }
+  /* set z = scalbn(|x|,ilogb(x)-7) */
+  e0 = (ix >> 23) - 134;	/* e0 = ilogb(z)-7; */
+  SET_FLOAT_WORD (z, ix - ((__int32_t) (e0 << 23)));
+  for (i = 0; i < 2; i++)
+    {
+      tx[i] = (float) ((__int32_t) (z));
+      z = (z - tx[i]) * two8;
+    }
+  tx[2] = z;
+  nx = 3;
+  while (tx[nx - 1] == zero_rf)
+    nx--;			/* skip zero term */
+  n = __kernel_rem_pio2f (tx, y, e0, nx, 2, two_over_pif);
+  if (hx < 0)
+    {
+      y[0] = -y[0];
+      y[1] = -y[1];
+      return -n;
+    }
+  return n;
+}
+
+/* ------------------------------------------------------------------ */
+/* s_sinf.c / s_cosf.c / s_tanf.c                                     */
+/* ------------------------------------------------------------------ */
+
+extern float __kernel_sinf (float, float, int);
+extern float __kernel_cosf (float, float);
+extern float __kernel_tanf (float, float, int);
+
+float
+sinf (float x)
+{
+  float y[2], z = 0.0;
+  __int32_t n, ix;
+
+  GET_FLOAT_WORD (ix, x);
+
+  /* |x| ~< pi/4 */
+  ix &= 0x7fffffff;
+  if (ix <= 0x3f490fd8)
+    return __kernel_sinf (x, z, 0);
+
+  /* sin(Inf or NaN) is NaN */
+  else if (!FLT_UWORD_IS_FINITE (ix))
+    return x - x;
+
+  /* argument reduction needed */
+  else
+    {
+      n = __ieee754_rem_pio2f (x, y);
+      switch (n & 3)
+	{
+	case 0:
+	  return __kernel_sinf (y[0], y[1], 1);
+	case 1:
+	  return __kernel_cosf (y[0], y[1]);
+	case 2:
+	  return -__kernel_sinf (y[0], y[1], 1);
+	default:
+	  return -__kernel_cosf (y[0], y[1]);
+	}
+    }
+}
+
+float
+cosf (float x)
+{
+  float y[2], z = 0.0;
+  __int32_t n, ix;
+
+  GET_FLOAT_WORD (ix, x);
+
+  /* |x| ~< pi/4 */
+  ix &= 0x7fffffff;
+  if (ix <= 0x3f490fd8)
+    return __kernel_cosf (x, z);
+
+  /* cos(Inf or NaN) is NaN */
+  else if (!FLT_UWORD_IS_FINITE (ix))
+    return x - x;
+
+  /* argument reduction needed */
+  else
+    {
+      n = __ieee754_rem_pio2f (x, y);
+      switch (n & 3)
+	{
+	case 0:
+	  return __kernel_cosf (y[0], y[1]);
+	case 1:
+	  return -__kernel_sinf (y[0], y[1], 1);
+	case 2:
+	  return -__kernel_cosf (y[0], y[1]);
+	default:
+	  return __kernel_sinf (y[0], y[1], 1);
+	}
+    }
+}
+
+float
+tanf (float x)
+{
+  float y[2], z = 0.0;
+  __int32_t n, ix;
+
+  GET_FLOAT_WORD (ix, x);
+
+  /* |x| ~< pi/4 */
+  ix &= 0x7fffffff;
+  if (ix <= 0x3f490fda)
+    return __kernel_tanf (x, z, 1);
+
+  /* tan(Inf or NaN) is NaN */
+  else if (!FLT_UWORD_IS_FINITE (ix))
+    return x - x;		/* NaN */
+
+  /* argument reduction needed */
+  else
+    {
+      n = __ieee754_rem_pio2f (x, y);
+      return __kernel_tanf (y[0], y[1], 1 - ((n & 1) << 1));	/*   1 -- n even
+								   -1 -- n odd */
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* s_atanf.c                                                          */
+/* ------------------------------------------------------------------ */
+
+static const float atanhif[] = {
+  4.6364761144e-01,		/* atan(0.5)hi 0x3eed6338 */
+  7.8539814055e-01,		/* atan(1.0)hi 0x3f490fda */
+  9.8279370368e-01,		/* atan(1.5)hi 0x3f7b985e */
+  1.5707962811e+00,		/* atan(inf)hi 0x3fc90fda */
+};
+
+static const float atanlof[] = {
+  5.0121583550e-09,		/* atan(0.5)lo 0x31ac3769 */
+  3.7748947967e-08,		/* atan(1.0)lo 0x33222168 */
+  3.4473218058e-08,		/* atan(1.5)lo 0x33140fb4 */
+  7.5497895935e-08,		/* atan(inf)lo 0x33a22168 */
+};
+
+static const float aTf[] = {
+  3.3333335072e-01,		/* 0x3eaaaaaa */
+  -2.0000000671e-01,		/* 0xbe4ccccd */
+  1.4285715297e-01,		/* 0x3e124925 */
+  -1.1111110635e-01,		/* 0xbde38e38 */
+  9.0908871964e-02,		/* 0x3dba2e6e */
+  -7.6923886314e-02,		/* 0xbd9d8795 */
+  6.6610733047e-02,		/* 0x3d886b35 */
+  -5.8335703798e-02,		/* 0xbd6ef16b */
+  4.9768780358e-02,		/* 0x3d4bda59 */
+  -3.6531572230e-02,		/* 0xbd15a221 */
+  1.6285820398e-02,		/* 0x3c8569d7 */
+};
+
+static const float one_af = 1.0, huge_af = 1.00000002e30;
+
+float
+atanf (float x)
+{
+  float w, s1, s2, z;
+  __int32_t ix, hx, id;
+
+  GET_FLOAT_WORD (hx, x);
+  ix = hx & 0x7fffffff;
+  if (FLT_UWORD_IS_NAN (ix))
+    return x + x;		/* NaN */
+  if (ix >= 0x50800000)
+    {				/* if |x| >= 2^34 */
+      if (hx > 0)
+	return atanhif[3] + atanlof[3];
+      else
+	return -atanhif[3] - atanlof[3];
+    }
+  if (ix < 0x3ee00000)
+    {				/* |x| < 0.4375 */
+      if (ix < 0x31000000)
+	{			/* |x| < 2^-29 */
+	  if (huge_af + x > one_af)
+	    return x;		/* raise inexact */
+	}
+      id = -1;
+    }
+  else
+    {
+      x = fabsf (x);
+      if (ix < 0x3f980000)
+	{			/* |x| < 1.1875 */
+	  if (ix < 0x3f300000)
+	    {			/* 7/16 <=|x|<11/16 */
+	      id = 0;
+	      x = ((float) 2.0 * x - one_af) / ((float) 2.0 + x);
+	    }
+	  else
+	    {			/* 11/16<=|x|< 19/16 */
+	      id = 1;
+	      x = (x - one_af) / (x + one_af);
+	    }
+	}
+      else
+	{
+	  if (ix < 0x401c0000)
+	    {			/* |x| < 2.4375 */
+	      id = 2;
+	      x = (x - (float) 1.5) / (one_af + (float) 1.5 * x);
+	    }
+	  else
+	    {			/* 2.4375 <= |x| < 2^66 */
+	      id = 3;
+	      x = -(float) 1.0 / x;
+	    }
+	}
+    }
+  /* end of argument reduction */
+  z = x * x;
+  w = z * z;
+  /* break sum from i=0 to 10 aT[i]z**(i+1) into odd and even poly */
+  s1 = z * (aTf[0] + w * (aTf[2] + w * (aTf[4] + w * (aTf[6] + w * (aTf[8]
+								    +
+								    w *
+								    aTf
+								    [10])))));
+  s2 = w * (aTf[1] + w * (aTf[3] + w * (aTf[5] + w * (aTf[7] + w * aTf[9]))));
+  if (id < 0)
+    return x - x * (s1 + s2);
+  else
+    {
+      z = atanhif[id] - ((x * (s1 + s2) - atanlof[id]) - x);
+      return (hx < 0) ? -z : z;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* e_asinf.c                                                          */
+/* ------------------------------------------------------------------ */
+
+static const float
+  one_asf = 1.0,
+  huge_asf = 1.00000002e30,
+  pio2_hif = 1.5707962811e+00,	/* 0x3fc90fda */
+  pio2_lof = 7.5497895935e-08,	/* 0x33a22168 */
+  pio4_hif = 7.8539820015e-01,	/* 0x3f490fdb */
+  pS0f = 1.6666667536e-01,	/* 0x3e2aaaab */
+  pS1f = -3.2556582242e-01,	/* 0xbea6b090 */
+  pS2f = 2.0121252909e-01,	/* 0x3e4e0aa8 */
+  pS3f = -4.0055536665e-02,	/* 0xbd241146 */
+  pS4f = 7.9153502884e-04,	/* 0x3a4f7f04 */
+  pS5f = 3.4793310078e-05,	/* 0x3811ef08 */
+  qS1f = -2.4033949971e+00,	/* 0xc019d139 */
+  qS2f = 2.0209458470e+00,	/* 0x4001572d */
+  qS3f = -6.8828399479e-01,	/* 0xbf303361 */
+  qS4f = 7.7038155869e-02;	/* 0x3d9dc62e */
+
+float
+__ieee754_asinf (float x)
+{
+  float t, w, p, q, c, r, s;
+  __int32_t hx, ix;
+  GET_FLOAT_WORD (hx, x);
+  ix = hx & 0x7fffffff;
+  if (ix == 0x3f800000)
+    {
+      /* asin(1)=+-pi/2 with inexact */
+      return x * pio2_hif + x * pio2_lof;
+    }
+  else if (ix > 0x3f800000)
+    {				/* |x|>= 1 */
+      return (x - x) / (x - x);	/* asin(|x|>1) is NaN */
+    }
+  else if (ix < 0x3f000000)
+    {				/* |x|<0.5 */
+      if (ix < 0x32000000)
+	{			/* if |x| < 2**-27 */
+	  if (huge_asf + x > one_asf)
+	    return x;		/* return x with inexact if x!=0 */
+	}
+      else
+	{
+	  t = x * x;
+	  w = t * (pS0f + t * (pS1f + t * (pS2f + t * (pS3f + t * (pS4f
+								  +
+								  t *
+								  pS5f)))));
+	  q = one_asf + t * (qS1f + t * (qS2f + t * (qS3f + t * qS4f)));
+	  w = w / q;
+	  return x + x * w;
+	}
+    }
+  /* 1> |x|>= 0.5 */
+  w = one_asf - fabsf (x);
+  t = w * (float) 0.5;
+  p = t * (pS0f + t * (pS1f + t * (pS2f + t * (pS3f + t * (pS4f
+							  + t * pS5f)))));
+  q = one_asf + t * (qS1f + t * (qS2f + t * (qS3f + t * qS4f)));
+  s = __ieee754_sqrtf (t);
+  if (ix >= 0x3F79999A)
+    {				/* if |x| > 0.975 */
+      w = p / q;
+      t = pio2_hif - ((float) 2.0 * (s + s * w) - pio2_lof);
+    }
+  else
+    {
+      __int32_t iw;
+      w = s;
+      GET_FLOAT_WORD (iw, w);
+      SET_FLOAT_WORD (w, iw & 0xfffff000);
+      c = (t - w * w) / (s + w);
+      r = p / q;
+      p = (float) 2.0 * s * r - (pio2_lof - (float) 2.0 * c);
+      q = pio4_hif - (float) 2.0 * w;
+      t = pio4_hif - (p - q);
+    }
+  if (hx > 0)
+    return t;
+  else
+    return -t;
+}
+
+/* ------------------------------------------------------------------ */
+/* e_atan2f.c                                                         */
+/* ------------------------------------------------------------------ */
+
+static const float
+  tiny_atf = 1.00000005e-30,
+  zero_atf = 0.0,
+  pi_o_4f = 7.8539820015e-01,	/* 0x3f490fdb */
+  pi_o_2f = 1.5707964003e+00,	/* 0x3fc90fdb */
+  pif = 3.1415925622e+00,	/* 0x40490fda */
+  pi_lof = 1.5099579187e-07;	/* 0x34222168 */
+
+float
+__ieee754_atan2f (float y, float x)
+{
+  float z;
+  __int32_t k, m, hx, hy, ix, iy;
+
+  GET_FLOAT_WORD (hx, x);
+  ix = hx & 0x7fffffff;
+  GET_FLOAT_WORD (hy, y);
+  iy = hy & 0x7fffffff;
+  if (FLT_UWORD_IS_NAN (ix) || FLT_UWORD_IS_NAN (iy))	/* x or y is NaN */
+    return x + y;
+  if (hx == 0x3f800000)
+    return atanf (y);		/* x=1.0 */
+  m = ((hy >> 31) & 1) | ((hx >> 30) & 2);	/* 2*sign(x)+sign(y) */
+
+  /* when y = 0 */
+  if (FLT_UWORD_IS_ZERO (iy))
+    {
+      switch (m)
+	{
+	case 0:
+	case 1:
+	  return y;		/* atan(+-0,+anything)=+-0 */
+	case 2:
+	  return pif + tiny_atf;	/* atan(+0,-anything) = pi */
+	case 3:
+	  return -pif - tiny_atf;	/* atan(-0,-anything) =-pi */
+	}
+    }
+  /* when x = 0 */
+  if (FLT_UWORD_IS_ZERO (ix))
+    return (hy < 0) ? -pi_o_2f - tiny_atf : pi_o_2f + tiny_atf;
+
+  /* when x is INF */
+  if (FLT_UWORD_IS_INFINITE (ix))
+    {
+      if (FLT_UWORD_IS_INFINITE (iy))
+	{
+	  switch (m)
+	    {
+	    case 0:
+	      return pi_o_4f + tiny_atf;	/* atan(+INF,+INF) */
+	    case 1:
+	      return -pi_o_4f - tiny_atf;	/* atan(-INF,+INF) */
+	    case 2:
+	      return (float) 3.0 * pi_o_4f + tiny_atf;	/*atan(+INF,-INF) */
+	    case 3:
+	      return (float) -3.0 * pi_o_4f - tiny_atf;	/*atan(-INF,-INF) */
+	    }
+	}
+      else
+	{
+	  switch (m)
+	    {
+	    case 0:
+	      return zero_atf;	/* atan(+...,+INF) */
+	    case 1:
+	      return -zero_atf;	/* atan(-...,+INF) */
+	    case 2:
+	      return pif + tiny_atf;	/* atan(+...,-INF) */
+	    case 3:
+	      return -pif - tiny_atf;	/* atan(-...,-INF) */
+	    }
+	}
+    }
+  /* when y is INF */
+  if (FLT_UWORD_IS_INFINITE (iy))
+    return (hy < 0) ? -pi_o_2f - tiny_atf : pi_o_2f + tiny_atf;
+
+  /* compute y/x */
+  k = (iy - ix) >> 23;
+  if (k > 60)
+    z = pi_o_2f + (float) 0.5 * pi_lof;	/* |y/x| >  2**60 */
+  else if (hx < 0 && k < -60)
+    z = 0.0;			/* |y|/x < -2**60 */
+  else
+    z = atanf (fabsf (y / x));	/* safe to do y/x */
+  switch (m)
+    {
+    case 0:
+      return z;			/* atan(+,+) */
+    case 1:
+      {
+	__uint32_t zh;
+	GET_FLOAT_WORD (zh, z);
+	SET_FLOAT_WORD (z, zh ^ 0x80000000);
+      }
+      return z;			/* atan(-,+) */
+    case 2:
+      return pif - (z - pi_lof);	/* atan(+,-) */
+    default:			/* case 3 */
+      return (z - pi_lof) - pif;	/* atan(-,-) */
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* e_fmodf.c                                                          */
+/* ------------------------------------------------------------------ */
+
+static const float one_ff = 1.0, Zerof[] = { 0.0, -0.0, };
+
+float
+__ieee754_fmodf (float x, float y)
+{
+  __int32_t n, hx, hy, hz, ix, iy, sx, i;
+
+  GET_FLOAT_WORD (hx, x);
+  GET_FLOAT_WORD (hy, y);
+  sx = hx & 0x80000000;		/* sign of x */
+  hx ^= sx;			/* |x| */
+  hy &= 0x7fffffff;		/* |y| */
+
+  /* purge off exception values */
+  if (FLT_UWORD_IS_ZERO (hy) ||
+      !FLT_UWORD_IS_FINITE (hx) || FLT_UWORD_IS_NAN (hy))
+    return (x * y) / (x * y);
+  if (hx < hy)
+    return x;			/* |x|<|y| return x */
+  if (hx == hy)
+    return Zerof[(__uint32_t) sx >> 31];	/* |x|=|y| return x*0 */
+
+  /* determine ix = ilogb(x) */
+  if (FLT_UWORD_IS_SUBNORMAL (hx))
+    {				/* subnormal x */
+      for (ix = -126, i = (hx << 8); i > 0; i <<= 1)
+	ix -= 1;
+    }
+  else
+    ix = (hx >> 23) - 127;
+
+  /* determine iy = ilogb(y) */
+  if (FLT_UWORD_IS_SUBNORMAL (hy))
+    {				/* subnormal y */
+      for (iy = -126, i = (hy << 8); i >= 0; i <<= 1)
+	iy -= 1;
+    }
+  else
+    iy = (hy >> 23) - 127;
+
+  /* set up {hx,lx}, {hy,ly} and align y to x */
+  if (ix >= -126)
+    hx = 0x00800000 | (0x007fffff & hx);
+  else
+    {				/* subnormal x, shift x to normal */
+      n = -126 - ix;
+      hx = hx << n;
+    }
+  if (iy >= -126)
+    hy = 0x00800000 | (0x007fffff & hy);
+  else
+    {				/* subnormal y, shift y to normal */
+      n = -126 - iy;
+      hy = hy << n;
+    }
+
+  /* fix point fmod */
+  n = ix - iy;
+  while (n--)
+    {
+      hz = hx - hy;
+      if (hz < 0)
+	{
+	  hx = hx + hx;
+	}
+      else
+	{
+	  if (hz == 0)		/* return sign(x)*0 */
+	    return Zerof[(__uint32_t) sx >> 31];
+	  hx = hz + hz;
+	}
+    }
+  hz = hx - hy;
+  if (hz >= 0)
+    {
+      hx = hz;
+    }
+
+  /* convert back to floating value and restore the sign */
+  if (hx == 0)			/* return sign(x)*0 */
+    return Zerof[(__uint32_t) sx >> 31];
+  while (hx < 0x00800000)
+    {				/* normalize x */
+      hx = hx + hx;
+      iy -= 1;
+    }
+  if (iy >= -126)
+    {				/* normalize output */
+      hx = ((hx - 0x00800000) | ((iy + 127) << 23));
+      SET_FLOAT_WORD (x, hx | sx);
+    }
+  else
+    {				/* subnormal output */
+      n = -126 - iy;
+      hx >>= n;
+      SET_FLOAT_WORD (x, hx | sx);
+      x *= one_ff;		/* create necessary signal */
+    }
+  return x;			/* exact output */
+}
