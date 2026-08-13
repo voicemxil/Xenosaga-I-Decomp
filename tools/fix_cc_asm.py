@@ -73,11 +73,20 @@ RE_LIS = re.compile(r'^\tli\.s[ \t](.*)$')
 # codegen for 64-bit immediates (e.g. _strtod_r's `li $17,0xbff0` +
 # `dsll32 $17,$17,0x10` for -1.0): strip trailing zero bits from the 64-bit
 # pattern, load the remaining significant bits with the shortest li/lui+ori
-# sequence, then shift back into place with dsll/dsll32. When the low 32
-# bits are not all zero (irrational-looking constants with few trailing
-# zero bits), fall back to building hi32 and lo32 halves in two registers
-# and OR-ing them together -- unverified against real bytes for that path,
-# but it is the standard MIPS 64-bit constant idiom.
+# sequence, then shift back into place with dsll/dsll32. That path is only
+# actually cheap (2 real instructions: lui/li + dsll32) when the low 32
+# bits are entirely zero, which is exactly when the original uses it.
+#
+# When the low 32 bits are NOT all zero (irrational-looking constants, e.g.
+# dtoa.c's 0.289529654602168), the original does NOT synthesize bit-by-bit
+# at all -- confirmed on _dtoa_r, whose quick-path constants are emitted as
+# `lui $at,%hi(LCx)` / `ld $a1,%lo(LCx)($at)`, loading from a table of
+# 8-byte-strided rodata slots (three consecutive constants sit at
+# 0x4d79a0/0x4d79a8/0x4d79b0). This is the standard MIPS "big constant ->
+# literal pool" behavior: a table load is only 2 instructions, cheaper than
+# the 5-6 instruction hi32/lo32-halves-OR'd synthesis that used to be here
+# (and was itself unverified against real bytes). Route this case through a
+# synthesized `.rdata` literal pool instead.
 RE_LID = re.compile(r'^\tli\.d\t(\$[0-9a-zA-Z]+),\s*(\S+)$')
 RE_CVT = re.compile(r'^\t(cvt\.[a-z.]+|trunc\.w\.s)[ \t](.*)$')
 # FP loads whose result feeds a COP1 compute need the hazard nop the
@@ -206,45 +215,58 @@ def synth_load32(reg, val):
     return out
 
 
-def synth_li_d(reg, bits):
+def synth_li_d(reg, bits, lit_pool):
     """Emit an instruction sequence loading the 64-bit pattern `bits` into
-    `reg`, replacing an unassemblable `li.d`. See RE_LID comment above."""
+    `reg`, replacing an unassemblable `li.d`. See RE_LID comment above.
+
+    `lit_pool` is a list the caller accumulates (label, bits) pairs into;
+    the caller emits the backing `.rdata` once, at the end of the file."""
     if bits == 0:
         return [f"\tmove\t{reg},$0"]
-    tz = (bits & -bits & 0xFFFFFFFFFFFFFFFF).bit_length() - 1
-    # The real li.d/dli macro expansion works in 16-bit halfwords (it's
-    # built from the same lui/ori/dsll primitives as the 32-bit li macro,
-    # just applied per-halfword), not by stripping every trailing zero
-    # BIT. Rounding down to the nearest halfword boundary matches gas's
-    # actual behavior; stripping further can pick a shorter-looking but
-    # wrong encoding when the low halfword's zero run isn't 16-aligned
-    # (e.g. -2147483648.0 = 0xc1e0000000000000: raw tz=53 gives sig=0x60f
-    # shift=53, but the real object uses sig=0xc1e0 shift=48). Any value
-    # whose raw tz is already a multiple of 16 is unaffected.
-    tz -= tz % 16
-    sig = bits >> tz
-    if sig.bit_length() <= 32:
+    raw_tz = (bits & -bits & 0xFFFFFFFFFFFFFFFF).bit_length() - 1
+    msb = bits.bit_length() - 1
+    sig_width = msb - raw_tz + 1  # width of the fully-stripped significant part
+    # The real li.d/dli macro only synthesizes bit-by-bit when the value's
+    # ENTIRE significant content (from its highest set bit down to its
+    # lowest set bit) fits in a 16-bit window -- i.e. "round" constants like
+    # -1.0, 1.5, or 2.0**32 whose low ~48 bits are all zero. It is NOT a
+    # generic "strip trailing zero bits, round to nearest halfword" rule
+    # (an earlier version of this comment claimed that, based on only two
+    # examples that happen to be consistent with both theories). Confirmed
+    # against four real bit patterns from the original binary:
+    #   -1.0             = 0xbff0000000000000 -> li $r,0xbff0 / dsll32 ,16
+    #   -2147483648.0    = 0xc1e0000000000000 -> li $r,0xc1e0 / dsll32 ,16
+    #   2.0**32          = 0x41f0000000000000 -> li $r,0x83e0 / dsll32 ,15
+    #   1.5              = 0x3ff8000000000000 -> li $r,0xffe0 / dsll32 ,14
+    # In every case the emitted 16-bit immediate has its OWN top bit (bit
+    # 15) set -- i.e. it's a 16-bit window anchored at the value's highest
+    # set bit (shift = msb - 15), not the widest all-zero-low-halfword
+    # window. This only ever loses no precision when sig_width <= 16.
+    if sig_width <= 16:
+        shift = max(msb - 15, 0)
+        sig = bits >> shift
         out = synth_load32(reg, sig)
-    else:
-        # Low 32 bits are not all zero: build hi32/lo32 halves separately
-        # and merge with an `or`, using $at as scratch.
-        hi32 = (bits >> 32) & 0xFFFFFFFF
-        lo32 = bits & 0xFFFFFFFF
-        out = synth_load32(reg, hi32)
-        out.append(f"\tdsll32\t{reg},{reg},0")
-        if lo32:
-            at = "$1" if reg != "$1" else "$2"
-            out += synth_load32(at, lo32)
-            out.append(f"\tdsll32\t{at},{at},0")
-            out.append(f"\tdsrl32\t{at},{at},0")
-            out.append(f"\tor\t{reg},{reg},{at}")
+        if shift:
+            if shift < 32:
+                out.append(f"\tdsll\t{reg},{reg},{shift}")
+            else:
+                out.append(f"\tdsll32\t{reg},{reg},{shift - 32}")
         return out
-    if tz:
-        if tz < 32:
-            out.append(f"\tdsll\t{reg},{reg},{tz}")
-        else:
-            out.append(f"\tdsll32\t{reg},{reg},{tz - 32}")
-    return out
+    # The value's significant content is wider than 16 bits (irrational-
+    # looking constants, e.g. dtoa.c's 0.289529654602168): the original
+    # does NOT synthesize these bit-by-bit at all -- confirmed on _dtoa_r,
+    # whose quick-path constants are emitted as `lui $at,%hi(LCx)` /
+    # `ld $a1,%lo(LCx)($at)`, loading from a table of 8-byte-strided rodata
+    # slots (three consecutive constants sit at 0x4d79a0/0x4d79a8/
+    # 0x4d79b0). This is the standard MIPS "big constant -> literal pool"
+    # behavior: a table load is only 2 instructions, cheaper than
+    # synthesizing hi32/lo32 halves and OR-ing them (5-6 instructions, and
+    # was itself unverified against real bytes). Route through a
+    # synthesized `.rdata` literal pool instead.
+    label = f"$LID{len(lit_pool)}"
+    lit_pool.append((label, bits))
+    at = "$1" if reg != "$1" else "$2"
+    return [f"\tlui\t{at},%hi({label})", f"\tld\t{reg},%lo({label})({at})"]
 
 
 def wrap_mips1(text):
@@ -358,6 +380,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
     # between them, or whether B is itself later consumed -- all of which
     # were tried and ruled out. Left unsolved; see the resume doc.
     out = []
+    lit_pool = []
     for i, line in enumerate(lines):
         line = RE_MOVE.sub(r'\tdaddu\t\1,\2,$0', line)
 
@@ -374,7 +397,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
         if m_lid:
             reg, valstr = m_lid.groups()
             bits = struct.unpack('<Q', struct.pack('<d', float(valstr)))[0]
-            out.append('\n'.join(synth_li_d(reg, bits)))
+            out.append('\n'.join(synth_li_d(reg, bits, lit_pool)))
             continue
 
         m_sqrt = RE_SQRT.match(line)
@@ -503,6 +526,21 @@ def main(path, omitted_hazards, barrier_return_store=None,
             continue
 
         out.append(line)
+
+    if lit_pool:
+        # Backing store for the li.d table-load fallback above. Section
+        # choice/placement doesn't need to match the original -- only
+        # .text bytes are verified, and the lui %hi/ld %lo relocations
+        # this data is addressed through are masked immediates in
+        # verify.py's comparison either way.
+        out.append("\t.rdata")
+        out.append("\t.align 3")
+        for label, bits in lit_pool:
+            lo32 = bits & 0xFFFFFFFF
+            hi32 = (bits >> 32) & 0xFFFFFFFF
+            out.append(f"{label}:")
+            out.append(f"\t.word {lo32}")
+            out.append(f"\t.word {hi32}")
 
     with open(path, 'w') as f:
         f.write('\n'.join(out))

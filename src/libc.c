@@ -1199,56 +1199,62 @@ quorem (_Bigint * b, _Bigint * S)
    struct _reent_full at their real reent.h offsets (64/68), just before
    _p5s (72).
 
-   ROOT CAUSE OF THE REMAINING ~1024/1177-WORD DIFF (found 2026-08-13,
-   after the previous agent's stall): this is NOT a wrong dtoa.c #ifdef
-   branch. The original binary's "quick" floating-point fast path (the
-   `if (ilim >= 0 && ilim <= Quick_max && try_quick) { ... }` block plus
-   the small-integer path right after it -- the two sections in this
-   transcription that use native `double` operators +/-/x//, `<`, `*=`
-   etc.) does NOT compile those operators to normal soft-float codegen.
-   Instead the ORIGINAL calls out ~59 times to a distinct set of named
-   double-precision helper routines:
+   UPDATE 2026-08-13 (later session): the note below (dpadd/dpsub/dpmul/
+   dpdiv/etc are fp-bit.c, real names) is still correct background, but
+   its two "TO CLOSE THIS" conclusions were WRONG and have been verified
+   directly, twice:
+     (1) native double operators (+/-/x// etc) in THIS transcription
+         already compile to `jal dpadd` / `jal dpmul` / etc under
+         ee-gcc 2.96 -O2 -G8 -- no source-level call injection needed.
+         Confirmed: after the li.d fix below, the entire quick-path
+         dpmul/dpadd/litodp call sequence (previously the biggest
+         visible diff block, ~20 words) now matches the original
+         byte-for-byte with ZERO changes to this function's C.
+     (2) tools/verify.py masks jal targets (R_MIPS_26), so an unresolved
+         `jal 0 <__errno>`-looking call can never itself cause a diff.
 
-     dpadd  0x0032be28 0x58   dpsub  0x0032be80 0x64
-     dpmul  0x0032bee8 0x2ac  dpdiv  0x0032c198 0x174
-     dpcmp  0x0032c310 0x4c   litodp 0x0032c360 0xb8  (long -> double)
-     dptoli 0x0032c418 0x9c   (double -> long)
+   THE ACTUAL CAUSE of the (previously) ~1004/1177-word diff was
+   tools/fix_cc_asm.py's li.d-synthesis fallback. gcc emits `li.d` for
+   every compile-time double constant, which the r5900 assembler can't
+   encode; fix_cc_asm.py rewrites it into real instructions. Its old
+   fallback for a constant with more than 16 bits of real precision
+   (dtoa.c's irrational quick-path coefficients: 0.289529654602168,
+   0.1760912590558, 0.301029995663981, ...) synthesized hi32/lo32 halves
+   and OR'd them together (5-6 instructions) -- but the ORIGINAL doesn't
+   synthesize those at all. It pools them into a `.rdata` literal table
+   and loads with `lui $at,%hi(LCx)` / `ld $a1,%lo(LCx)($at)` (three
+   consecutive constants sit 8 bytes apart at 0x4d79a0/0x4d79a8/
+   0x4d79b0) -- 2 instructions, and the source of most of this
+   function's structural +20-instruction LENGTH-class gap. Separately,
+   the "round" constants that genuinely ARE bit-shift-synthesized
+   (-1.0, 2.0**32, 1.5, ...) were using the wrong trailing-zero-rounding
+   rule (round down to nearest halfword) instead of the real rule
+   (16-bit window anchored at the value's highest set bit). Both are now
+   fixed in tools/fix_cc_asm.py's synth_li_d -- see its comments for the
+   four real bit patterns the corrected rule was verified against. This
+   dropped _dtoa_r from 1004 to 867 differing words (of 1177) and its
+   built length from 1197 to 1179 words (orig is 1177) with ZERO changes
+   to this function's C and no regressions elsewhere (full verify.py
+   unchanged: 1567 passed). Any future li.d user in libc.c/libm.c/
+   fpbit.c benefits automatically.
 
-   Disassembling dpadd shows it calls __unpack_d (0x0032dda0), then
-   _fpadd_parts (0x0032bbc8), then __pack_d (0x0032dc88) -- and the ELF
-   symbol table also has __fpcmp_parts_d (0x0032d550), __unpack_f/
-   __pack_f (single-precision siblings). These names are NOT newlib;
-   they are GCC's classic `fp-bit.c` software floating-point emulation
-   library (the same one used by other soft-float MIPS/embedded gcc
-   targets before soft-fp), with its public entry points renamed from
-   the usual __adddf3/__subdf3/__muldf3/__divdf3/__floatsidf/__fixdfsi
-   to dpadd/dpsub/dpmul/dpdiv/litodp/dptoli. _fpmul_parts/_fpdiv_parts
-   have no separate global symbol, consistent with fp-bit.c usually
-   keeping those `static` (inlined into the public mul/div wrapper).
-
-   This means the PS2 SDK's newlib port did NOT let gcc silently lower
-   double arithmetic to whatever soft-float runtime the compiler
-   defaults to (which is what our current toolchain does -- visible in
-   `checkfile.py`'s build as unresolved `jal 0` relocations libgcc
-   would normally fill in). It explicitly called a *renamed* fp-bit.c
-   through source-level function calls in dtoa.c's quick/small-integer
-   paths (and probably in _strtod_r's inner loop too -- worth checking
-   before investing there).
-
-   TO CLOSE THIS: (1) adapt real gcc fp-bit.c (available at
-   https://raw.githubusercontent.com/gcc-mirror/gcc/releases%2Fgcc-3.4.0/gcc/config/fp-bit.c
-   as an old-enough reference; algorithm is stable across gcc 2.x-4.x)
-   into src/libc.c or a new src file, implementing __unpack_d, __pack_d,
-   _fpadd_parts, and dpadd/dpsub/dpmul/dpdiv/dpcmp/litodp/dptoli as the
-   renamed public wrappers -- these are matchable, portable functions
-   in their own right (~1660 bytes across 7-11 functions) independent
-   of _dtoa_r. (2) THEN rewrite _dtoa_r's quick-path and small-integer
-   sections below to call them explicitly (dpsub(&d.d,&L) etc) instead
-   of using native +/-/x// operators, matching the original's exact
-   call order. Do NOT attempt step 2 without step 1 -- the call sites
-   cannot match until the callees exist with the right signatures.
-   This is a multi-function undertaking on its own, not a quick idiom
-   fix; budget it as its own session. */
+   REMAINING ~867-word gap, not yet closed:
+     - A handful of stack-slot offsets (e.g. `denorm`/`b` at sp+64/+68 in
+       the original vs sp+68/+72 here) are shifted by a consistent 4
+       bytes -- a compiler stack-slot-allocation tie-break in the same
+       class as this project's other documented "allocator order not
+       reachable from C" walls, not a source bug.
+     - The `switch (mode)` dispatch (the mode/ilim/ndigits setup block)
+       has a different instruction order/spill pattern around the jump
+       table (the original pre-stores a default value to two stack
+       slots before the range check; the built version doesn't). Tried
+       staging `switch (mode)` through a fresh local first (the idiom
+       that fixed EventDoorFunc's jump-table generation) -- no effect,
+       so it is not that specific pattern.
+     - The rest of the 867 words have not been individually triaged one
+       by one; this is a 4708-byte function and this pass focused on
+       structural/toolchain causes rather than exhaustively walking
+       every remaining diff. */
 char *
 _dtoa_r (struct _reent * ptr, double _d, int mode, int ndigits, int *decpt,
 	 int *sign, char **rve)
