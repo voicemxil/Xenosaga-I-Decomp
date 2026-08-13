@@ -44,38 +44,52 @@ def check_object(repo, objpath, srcname, registered, only_new=False,
         reg = registered.get(name)
         if only_new and reg:
             continue
-        if reg:
+        # The original ELF kept its symbol table, so prefer its bounds:
+        # they are authoritative and catch a wrong size in decompiled.txt
+        # (a truncated size makes verify.py compare a prefix and pass).
+        loc = repo.orig_functions.get(name)
+        regnote = ""
+        if loc:
+            addr, osize = loc
+            if reg and reg[0] != addr:
+                regnote = (f"  [!] decompiled.txt says {reg[0]:#010x}, the ELF "
+                           f"symbol is at {addr:#010x}")
+            elif reg and reg[1] != osize:
+                regnote = (f"  [!] decompiled.txt size {reg[1]:#x} vs ELF "
+                           f"symbol size {osize:#x}")
+        elif reg:
             addr, osize = reg
         else:
-            loc = repo.orig_functions.get(name)
-            if not loc:
-                results.append((name, "ABSENT", "not in the original ELF", None))
-                continue
-            addr, osize = loc
+            results.append((name, "ABSENT", "not in the original ELF", None))
+            continue
         n = min(osize, bsize)
         orig = repo.orig.words_at_vaddr(addr, n)
         built = e.words_at_offset(off, n)
         om, bm, diffs = masked_compare(orig, built, relocs, off)
-        pad = ""
-        if osize > bsize:
-            tail = repo.orig.words_at_vaddr(addr + bsize, osize - bsize)
-            if all(w == NOP for w in tail):
-                pad = f" (+{len(tail)} trailing pad nop(s) in original)"
+        note = ""
+        # A size difference that is only trailing nops is alignment padding
+        # (the original ELF symbol and the compiled symbol disagree about
+        # whether the pad belongs to the function); not a real diff.
+        if osize != bsize:
+            if osize > bsize:
+                tail = repo.orig.words_at_vaddr(addr + bsize, osize - bsize)
+                where = "original"
             else:
-                diffs = diffs + list(range(len(om), osize // 4))
-                om = om + tail
-        elif bsize > osize:
-            om = om + [None] * ((bsize - osize) // 4)
-            diffs = diffs + list(range(osize // 4, bsize // 4))
+                tail = e.words_at_offset(off + osize, bsize - osize)
+                where = "built"
+            if all(w == NOP for w in tail):
+                note = f" (+{len(tail)} trailing pad nop(s) in the {where})"
+            else:
+                om = om + [w for w in (tail if where == "original" else [])]
+                bm = bm + [w for w in (tail if where == "built" else [])]
+                diffs = diffs + list(range(n // 4, max(osize, bsize) // 4))
         if not diffs:
-            results.append((name, "MATCH", f"{n // 4} words{pad}",
-                            (addr, bsize if not pad else bsize)))
+            results.append((name, "MATCH", f"{n // 4} words{note}{regnote}",
+                            (addr, min(osize, bsize))))
         else:
-            label, detail = triage(
-                [w for w in om if w is not None],
-                bm, [d for d in diffs if d < len(bm)])
+            label, detail = triage(om, bm, [d for d in diffs if d < len(bm)])
             results.append((name, f"{len(diffs)} diffs",
-                            f"{label} -- {detail}", None))
+                            f"{label} -- {detail}{note}{regnote}", None))
     return results
 
 
