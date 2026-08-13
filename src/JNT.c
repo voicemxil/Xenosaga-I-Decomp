@@ -25,6 +25,30 @@ typedef struct {
     char pad034[0xC];           /* 0x34 */
 } JNT_ELEMENT;
 
+/* Fixed-width animated element consumed by JNT_getVal2. Every successful
+ * evaluation advances by one 0x40-byte record. */
+typedef struct {
+    unsigned short nType;       /* 0x00: dispatch mode 0..6 */
+    unsigned short nFlags;      /* 0x02 */
+    unsigned int nRelative;     /* 0x04: optional auxiliary record */
+    char pad008[0x6];           /* 0x08 */
+    unsigned short nMatrix;     /* 0x0E */
+    float aTranslate[4];        /* 0x10 */
+    float aRotate[4];           /* 0x20 */
+    float aPayload[4];          /* 0x30 */
+} JNT_ANIM_RECORD;
+
+/* Attribute returned by FCV2_getPackAttribute for an animated record. */
+typedef struct {
+    unsigned short nUnknown00;  /* 0x00 */
+    unsigned short nUnknown02;  /* 0x02 */
+    unsigned short nFlags;      /* 0x04 */
+    unsigned short nChannels;   /* 0x06: three bits per vector group */
+    unsigned short nMatrixT;    /* 0x08 */
+    unsigned short nUnknown0A;  /* 0x0A */
+    unsigned short nMatrixR;    /* 0x0C */
+} JNT_FCV_ATTRIBUTE;
+
 typedef struct {
     char pad000[0x4];           /* 0x00 */
     unsigned short nVersion;    /* 0x04 */

@@ -111,6 +111,61 @@ extern void subMenuSystemInit(int);
 extern void xglCdReadCancel(void);
 extern int xglFlagsGet(int, int);
 
+/* --- Segment-item menu monolith layout ---
+   These layouts are recovered from MenuItemSegmentMain's affine accesses.
+   They intentionally describe storage only; the behavioral reconstruction is
+   kept out of the build until every state and renderer path is represented. */
+typedef enum {
+    MENU_ITEM_SEGMENT_INIT = 0,
+    MENU_ITEM_SEGMENT_DRAW = 1,
+    MENU_ITEM_SEGMENT_WAIT = 2,
+    MENU_ITEM_SEGMENT_ENTER = 3,
+    MENU_ITEM_SEGMENT_ACTIVE = 4,
+    MENU_ITEM_SEGMENT_LEAVE = 5
+} MENU_ITEM_SEGMENT_STATE;
+
+typedef struct {
+    unsigned char pulse;       /* 0x00: 0..0x78 highlight intensity */
+    signed char pulseStep;     /* 0x01: signed highlight increment */
+    char pad02[2];
+    unsigned char flags;       /* 0x04: three flag-bank results in bits 0..2 */
+    char pad05;
+    unsigned char partPulse;   /* 0x06: 0..0x78 robot-part intensity */
+    signed char partPulseStep; /* 0x07: signed robot-part increment */
+    char mainSprite[0x28];     /* 0x08 */
+    char flag1Sprite[0x28];    /* 0x30, flags & 1 */
+    char flag2Sprite[0x28];    /* 0x58, flags & 2 */
+    char allFlagsSprite[0x28]; /* 0x80, flags == 7 */
+    char padA8[0x28];
+    char number[0x8C];         /* 0xD0 */
+} MENU_ITEM_SEGMENT_ENTRY;
+
+typedef struct {
+    unsigned char state;       /* 0x0000: MENU_ITEM_SEGMENT_STATE */
+    unsigned char draw;        /* 0x0001: run the shared renderer */
+    short slideX;              /* 0x0002 */
+    short baseY;               /* 0x0004 */
+    short pad0006;
+    void *texture;             /* 0x0008 */
+    int selected;              /* 0x000C: wrapped to 0..17 */
+    char windows[0x328];       /* 0x0010: two 0x194-byte WindowDX objects */
+    char headingSprites[0x50]; /* 0x0338: two 0x28-byte sprites */
+    char headingMessages[0x88];/* 0x0388: two 0x44-byte messages */
+    MENU_ITEM_SEGMENT_ENTRY entry[18]; /* 0x0410, stride 0x15C */
+    char pad1C88[4];
+    unsigned short allPartMask;      /* 0x1C8C: OR of subRoboPartsCheck results */
+    unsigned short selectedPartMask; /* 0x1C8E */
+    char partSprites[0x2F8];   /* 0x1C90: nineteen 0x28-byte sprites */
+    char ribbonArea[0x188];    /* 0x1F88 */
+    char printArea[0x130];     /* 0x2110 */
+    void *printTexture;        /* 0x2240 */
+} MENU_ITEM_SEGMENT_WORK;
+
+typedef char MENU_ITEM_SEGMENT_ENTRY_size_check[
+    sizeof(MENU_ITEM_SEGMENT_ENTRY) == 0x15C ? 1 : -1];
+typedef char MENU_ITEM_SEGMENT_WORK_size_check[
+    sizeof(MENU_ITEM_SEGMENT_WORK) == 0x2244 ? 1 : -1];
+
 /* Return whether the menu task-work has already been torn down (always false - stub) */
 void MenuWorkEndCheck(void)
 {

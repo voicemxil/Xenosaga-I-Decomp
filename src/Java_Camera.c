@@ -100,6 +100,15 @@ typedef struct {
     float fW;               /* 0x0C */
 } CFANGLE;
 
+/* One 128-bit angle record.  The EE compiler uses its native quadword mode
+ * for copies of this aligned four-float value, matching the original lq/sq
+ * aggregate copy without inline assembly. */
+typedef int CFANGLE_QUAD __attribute__((mode(TI)));
+typedef union {
+    CFANGLE angle;
+    CFANGLE_QUAD quad;
+} CFANGLE_VALUE;
+
 typedef struct {
     unsigned char nOffsetFlag;  /* 0x00 */
     unsigned char nHokanFlag;   /* 0x01 */
@@ -450,15 +459,17 @@ void Java_xeno_Camera_start__ILjava_lang_Object_(void *pEnv, JVAL *pArgs, JVAL *
 }
 
 /* Set the orbit angles of one or all chase-camera definitions */
-/* TODO: the 16-byte `pDef->angle = angle` copy needs the original's lq/sq pair;
-   gcc emits ld/sd here, so this function is a near-miss on those two words. */
+/* TODO: near-match (LENGTH, 142 original / 140 built). The recovered native
+ * quadword representation now emits the original lq/sq aggregate copy, but
+ * GCC hoists the source load ahead of the loop bookkeeping instead of keeping
+ * the original stack-pointer copy and load/store schedule. */
 void Java_xeno_Camera_setCFAngle__IFFFF(void *pEnv, JVAL *pArgs, JVAL *pRet)
 {
     int nIndex;
     int nFirst;
     int nLast;
     CFCAMERA *pDef;
-    CFANGLE angle;
+    CFANGLE_VALUE value;
     float fTwoPi;
 
     nIndex = pArgs[1].i;
@@ -470,32 +481,32 @@ void Java_xeno_Camera_setCFAngle__IFFFF(void *pEnv, JVAL *pArgs, JVAL *pRet)
         nLast = nFirst + 1;
     }
     pDef = &CfCameraDefine[nFirst];
-    angle.fX = pArgs[2].f / 180.0f * 3.1415927f;
-    angle.fY = pArgs[3].f / 180.0f * 3.1415927f;
-    angle.fZ = pArgs[4].f / 180.0f * 3.1415927f;
-    angle.fW = pArgs[5].f;
+    value.angle.fX = pArgs[2].f / 180.0f * 3.1415927f;
+    value.angle.fY = pArgs[3].f / 180.0f * 3.1415927f;
+    value.angle.fZ = pArgs[4].f / 180.0f * 3.1415927f;
+    value.angle.fW = pArgs[5].f;
     fTwoPi = 6.2831855f;
-    while (angle.fX < 0.0f) {
-        angle.fX += fTwoPi;
+    while (value.angle.fX < 0.0f) {
+        value.angle.fX += fTwoPi;
     }
-    while (angle.fX > fTwoPi) {
-        angle.fX -= fTwoPi;
+    while (value.angle.fX > fTwoPi) {
+        value.angle.fX -= fTwoPi;
     }
-    while (angle.fY < 0.0f) {
-        angle.fY += fTwoPi;
+    while (value.angle.fY < 0.0f) {
+        value.angle.fY += fTwoPi;
     }
-    while (angle.fY > fTwoPi) {
-        angle.fY -= fTwoPi;
+    while (value.angle.fY > fTwoPi) {
+        value.angle.fY -= fTwoPi;
     }
-    while (angle.fZ < 0.0f) {
-        angle.fZ += fTwoPi;
+    while (value.angle.fZ < 0.0f) {
+        value.angle.fZ += fTwoPi;
     }
-    while (angle.fZ > fTwoPi) {
-        angle.fZ -= fTwoPi;
+    while (value.angle.fZ > fTwoPi) {
+        value.angle.fZ -= fTwoPi;
     }
     while (nFirst < nLast) {
         pDef->nOffsetFlag = 0;
-        pDef->angle = angle;
+        *(CFANGLE_QUAD *)&pDef->angle = value.quad;
         pDef->fAnglePitch = pDef->angle.fY;
         pDef++;
         nFirst++;
