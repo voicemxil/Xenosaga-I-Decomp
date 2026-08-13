@@ -203,3 +203,33 @@ void xglVectorClampXYZ(float *pDest, const float *pSource,
              : fMaximum < pSource[2] ? fMaximum : pSource[2];
     pDest[3] = pSource[3];
 }
+
+/* Normalize a 3-component vector (w carried through unnormalized) via the
+ * VU0 macro-mode reciprocal-square-root pipeline */
+void xglVectorNormal(void *pDest, void *pSource)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf2, 0x0(%1)\n"
+        "vmul.xyz $vf3, $vf2, $vf2\n"
+        "vaddy.x $vf3, $vf3, $vf3y\n"
+        "vaddz.x $vf3, $vf3, $vf3z\n"
+        "vrsqrt $Q, $vf0w, $vf3x\n"
+        "vwaitq\n"
+        "vmulq.xyz $vf2, $vf2, $Q\n"
+        "sqc2 $vf2, 0x0(%0)\n"
+        ".set reorder" : : "r"(pDest), "r"(pSource));
+}
+
+/* Transform a 3-component point by a 4x4 matrix through the VU0
+ * macro-mode multiply-accumulate pipeline (w = 1) */
+void xglVectorMulMat(void *pDest, void *pMtx, void *pVec)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%2)\n"
+        "lqc2 $vf27, 0x0(%1)\n lqc2 $vf28, 0x10(%1)\n"
+        "lqc2 $vf29, 0x20(%1)\n lqc2 $vf30, 0x30(%1)\n"
+        "vmulax.xyzw $ACC, $vf27, $vf1x\n vmadday.xyzw $ACC, $vf28, $vf1y\n"
+        "vmaddaz.xyzw $ACC, $vf29, $vf1z\n vmaddw.xyzw $vf31, $vf30, $vf1w\n"
+        "sqc2 $vf31, 0x0(%0)\n"
+        ".set reorder" : : "r"(pDest), "r"(pMtx), "r"(pVec));
+}

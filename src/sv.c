@@ -31,8 +31,10 @@ void svDrawAlters(void) {
 extern int _scMslCate;
 extern void MEfObjExec2nd(int a);
 void svDrawMissile(int a) {
-    if (_draw3D == 0 && _scMslCate == a) {
-        MEfObjExec2nd(a);
+    if (_draw3D == 0) {
+        if (_scMslCate == a) {
+            MEfObjExec2nd(a);
+        }
     }
 }
 
@@ -57,15 +59,13 @@ void svDeleteImageMapper(int idx) {
 int svGetSizeBit(int flags) {
     int bit = 2;
     int n = 1;
-    for (;;) {
+    do {
         if ((flags & bit) != 0) {
             return n;
         }
         n++;
-        if (n >= 32) {
-            return 0;
-        }
         bit <<= 1;
-    }
+    } while (n < 32);
+    return 0;
 }
 

@@ -293,9 +293,9 @@ void DefocusMainType01(GAME_DEFOCUS *p, void *pkt)
 
     i = 0;
     Head_0.nTex0 = GetTex0(p->nParam, 0);
+    q[3] = 0x51000006;
     q[5] = 0x50AB4000;
     q[6] = 0x53531;
-    q[3] = 0x51000006;
     col = (u8 *)&p->nUnk10;
     q[4] = 0x8001;
     q[0] = 0;
@@ -305,14 +305,14 @@ void DefocusMainType01(GAME_DEFOCUS *p, void *pkt)
     q[8] = col[0];
     q[9] = col[1];
     q[10] = col[2];
-    q[20] = 0x2000;
     q[11] = col[3];
+    q[20] = 0x2000;
     q[12] = 0;
     a = (p->nUnk14 << 4) + 0x6FF8;
     q[16] = a;
+    q[24] = ((p->nUnk14 + p->nUnk1C) << 4) + 0x8FF8;
     q[21] = 0x1C00;
     q[13] = 0;
-    q[24] = ((p->nUnk14 + p->nUnk1C) << 4) + 0x8FF8;
     b = (p->nUnk18 << 4) + 0x71F7;
     q[17] = b;
     q[25] = ((p->nUnk18 + p->nUnk20) << 4) + 0x8DF7;

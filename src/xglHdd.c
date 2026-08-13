@@ -198,3 +198,36 @@ int xglHddActivate(int nMode)
     }
     return (nOld < 2) ? nOld : 0;
 }
+
+/* Trivial stub install-callback: reports success without doing any work */
+int xglHddDummyCB(void)
+{
+    return 0;
+}
+
+extern char yoursaves[];
+int sceDopen(char *pName, void *pBuf);
+int Judge_MakeNewFolder(int nFd);
+int Judge_MakeNewSavedata(int nFd);
+
+/* TODO: near-miss (25/28 words). Original spills pBuf into $s0 across
+ * the sceDopen call (unused afterward) instead of just moving it into
+ * $a1 directly; every natural form here uses the cheaper single move. */
+/* Ensure the memory card has a "Your Saves" folder, creating the folder
+ * or an empty savedata block as needed */
+int xglHddMcCheckYourSaves(void *pBuf)
+{
+    int nFd;
+
+    nFd = sceDopen(yoursaves, pBuf);
+    if (nFd >= 0) {
+        if (Judge_MakeNewFolder(nFd) == 1) {
+            return 1;
+        }
+        return -2;
+    }
+    if (Judge_MakeNewSavedata(nFd) == 1) {
+        return 0;
+    }
+    return -3;
+}

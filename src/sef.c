@@ -144,7 +144,7 @@ extern float D_004D82D8;
  * draw, scale by 1/32767. */
 float sefRandf(void) {
     sefRandSeed = sefRandSeed * 0x41C64E6D + 12345;
-    return (float)(((unsigned int)sefRandSeed >> 16) & 0x7FFF) * D_004D82D8;
+    return (float)(int)(((unsigned int)sefRandSeed >> 16) & 0x7FFF) * D_004D82D8;
 }
 
 extern int sefCnvEtEffectNo(int a);
