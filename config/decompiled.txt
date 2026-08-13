@@ -1349,6 +1349,7 @@ sefLoadEffect = 0x002E7100, 0x34; // sef
 sefDrawEffect2D = 0x002E7260, 0x3C; // sef
 sefDrawEffect3D = 0x002E7220, 0x3C; // sef
 sefRandf = 0x002E11B0, 0x38; // sef.c
+sefProgressEffect = 0x002E7198, 0x38; // sef.c
 scGetCmdAdrScript = 0x002EBD40, 0x4C; // sc
 scGetRegScript = 0x002EA4E0, 0x50; // sc
 scREVEScript = 0x002EB298, 0x50; // sc

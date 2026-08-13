@@ -158,10 +158,12 @@ void sefLoadEffect(int a0) {
 
 extern void sefExecEffect(void);
 void sefProgressEffect(int a0) {
+    register int cnt __asm__("$16");
     if (a0 > 0) {
+        cnt = a0;
         do {
             sefExecEffect();
-        } while (--a0 != 0);
+        } while (--cnt != 0);
     }
 }
 
