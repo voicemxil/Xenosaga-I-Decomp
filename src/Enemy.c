@@ -575,8 +575,7 @@ void Enemy_Command_Sac_Move(ACTOR *a, int nTime, float fX, float fZ)
     }
 }
 
-/* Turn an enemy immediately, or start a timed turn to a new angle 
-   TODO: near-miss - needs --omit-hazard c.lt.s, and the tail store schedule still differs */
+/* Turn an enemy immediately, or start a timed turn to a new angle */
 void Enemy_Command_Sac_Turn(ACTOR *a, int nTime, short nIdx, float fAngle, float fDir)
 {
     ENEPC *p;
@@ -599,9 +598,9 @@ void Enemy_Command_Sac_Turn(ACTOR *a, int nTime, short nIdx, float fAngle, float
     } else {
         p->nStatus |= 0x10000;
         p->nSacTurnTime = nTime;
-        p->nSacTurn = 0;
         p->fTurnFrom = a->fDir[nIdx];
         p->fTurnTo = fAngle;
+        p->nSacTurn = 0;
     }
 }
 

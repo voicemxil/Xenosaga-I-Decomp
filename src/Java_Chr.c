@@ -390,13 +390,12 @@ void Java_xeno_Chr_setHand__I(void *env, int *args, int *ret)
 }
 
 /* Copy script arguments into the character's argument block */
-/* TODO: not matching - the three argument loads are emitted in a different order */
 void Java_xeno_Chr_setArgs__III(void *env, int *args, int *ret)
 {
     int nValue = args[2];
-    int nCount = args[3];
-    char *obj = (char *)args[0];
     int nIndex = args[1];
+    char *obj = (char *)args[0];
+    int nCount = args[3];
     CHR *chr = CHR_PEER(obj);
 
     if ((unsigned int)(nCount - 1) < 4) {

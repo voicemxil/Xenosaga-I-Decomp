@@ -148,14 +148,12 @@ void Java_xeno_vm_Thread_create__(void *pEnv, JVAL *pArgs, JVAL *pRet)
 }
 
 /* Point a thread at an object and a named method */
-/* TODO: not matching - the two argument chains are scheduled in the other
-   order; the name lookup should be issued before the target deref */
 void Java_xeno_vm_Thread_setTarget__Ljava_lang_Object_Ljava_lang_String_(void *pEnv, JVAL *pArgs, JVAL *pRet)
 {
-    JARRAY *pArr = ((JSTRING *)pArgs[2].p)->pArray;
     char *pTarget = (char *)pArgs[1].p;
     int nClass = *(int *)*(int *)pTarget;
     JTHREAD *pThread = (JTHREAD *)pArgs[0].p;
+    JARRAY *pArr = ((JSTRING *)pArgs[2].p)->pArray;
     void *pMethod;
 
     pMethod = findMethod(nClass,
