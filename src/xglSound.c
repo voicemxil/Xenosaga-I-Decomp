@@ -72,7 +72,6 @@ void xglSoundWaitDma(void)
     SsdSpuDmaCompleted(0);
 }
 
-/* TODO: near-match - the reloaded slot value lands in $v0 where the original used $v1 */
 /* Load a wave bank into a slot, releasing whatever that slot held */
 void xglSoundSendSwd(void *pData, int nNo)
 {
@@ -112,10 +111,12 @@ void xglSoundSendSwd(void *pData, int nNo)
             nId = 0xFFFF;
         }
     }
-    p->nSwd = nId;
+    {
+        register unsigned short nId2 __asm__("$3") = nId;
+        p->nSwd = nId2;
+    }
 }
 
-/* TODO: near-match - the reloaded slot value lands in $v0 where the original used $v1 */
 /* Load a sequence into a slot, releasing whatever that slot held */
 void xglSoundSendSmd2(void *pData, int nNo)
 {
@@ -143,7 +144,10 @@ void xglSoundSendSmd2(void *pData, int nNo)
             nId = 0xFFFF;
         }
     }
-    p->nData = nId;
+    {
+        register unsigned short nId2 __asm__("$3") = nId;
+        p->nData = nId2;
+    }
 }
 
 /* Load a sequence into slot 0 */
@@ -152,7 +156,6 @@ void xglSoundSendSmd(void *pData)
     xglSoundSendSmd2(pData, 0);
 }
 
-/* TODO: near-match - the reloaded slot value lands in $v0 where the original used $v1 */
 /* Load an effect bank into a slot, releasing whatever that slot held */
 void xglSoundSendSed(void *pData, int nNo)
 {
@@ -180,7 +183,10 @@ void xglSoundSendSed(void *pData, int nNo)
             nId = 0xFFFF;
         }
     }
-    p->nData = nId;
+    {
+        register unsigned short nId2 __asm__("$3") = nId;
+        p->nData = nId2;
+    }
 }
 
 /* Build "data\sound\<name>.SWD" and read that file into pBuf */
@@ -490,17 +496,20 @@ void xglSoundStreamOpenVagMulti(int nChannel, char *pName)
     xglSoundStreamOpenVagMultiParam(nChannel, pName, 0x1000, 0x7F, 0x40);
 }
 
-/* TODO: near-match - the loop guard emits bnezl/$v0 where the original has bnez/$v1 */
 /* Release every loaded bank and reset the streaming work area */
 void xglSoundReset(void)
 {
     XGL_STREAM *pStream;
     int i;
+    register int more __asm__("$3");
 
-    for (i = 0; i < 8; i++) {
+    i = 0;
+    do {
         xglSoundSendSwd(0, -1 - i);
         xglSoundSendSmd2(0, i);
-    }
+        i++;
+        more = (i < 8);
+    } while (more);
     for (i = 0; i < 16; i++) {
         xglSoundSendEffect(0, 0, i);
     }
