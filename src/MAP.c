@@ -89,6 +89,13 @@ typedef struct {
     float fUnk44;                   /* 0x44 */
 } PLAYWORK;
 
+typedef struct {
+    int nUnk0;                      /* 0x00 */
+    MAPUNIT *pPlayer;               /* 0x04 */
+    u8 pad008[0x14];                /* 0x08 */
+    int nUnk01C;                    /* 0x1C */
+} MAPGAMELOOP;
+
 extern MAPUNIT MapUnit[];
 extern UNITSEQ unitSequence[];
 extern MAPUNIT *D_00338684[];
@@ -104,8 +111,11 @@ extern float D_004D7EB8;
 extern float D_004D7EBC;
 extern float D_004D8784;
 extern u8 UseTestPath;
+extern u8 D_0037915B[];
+extern MAPGAMELOOP GameLoopState;
 
 extern void unit6003_update(MAPUNIT *);
+extern void ACT_updateEnemy(MAPUNIT *);
 
 int printf(const char *, ...);
 void LOG(char *);
@@ -129,6 +139,7 @@ int *RES_loadFile(int, int, int, int);
 void MDL_create(int *, int);
 void MAP_drawUnitAt(MAPUNIT *);
 void MAP_updateUnitDefault(MAPUNIT *);
+float Get_Angle(float *, float *);
 
 /* Select the map data path for the current test-path setting */
 char *MAP_getPath(void)
@@ -510,5 +521,114 @@ void MAP_initUnitSequance(void)
         pUnit->nUnk0A8 = 0;
         pUnit->pUpdate = MAP_updateUnitDefault;
         pUnit++;
+    }
+}
+
+/* TODO: near-match (LOGIC) - the 49-word natural form differs at 12 words;
+ * gcc hoists MapUnit + 0x10 before the 0x300-stride index calculation, while
+ * the original forms offset + 0x10 first and adds the MapUnit base afterward. */
+/* Update an enemy marker from its linked map unit */
+void MAP_updateUnitEnemy(MAPUNIT *pUnit)
+{
+    int nIndex;
+    int nOffset;
+    int nEnemy;
+    MAPUNIT *pTarget;
+    float *pTargetPos;
+
+    nEnemy = pUnit->nUnk080;
+    nIndex = D_0037915B[nEnemy * 0x38B0];
+    nOffset = nIndex * 0x300;
+    pTarget = (MAPUNIT *)((char *)MapUnit + nOffset);
+    pTargetPos = (float *)((char *)MapUnit + nOffset + 0x10);
+    if (pTarget->nUnk0A2 == 0) {
+        pUnit->nFlags |= 8;
+    } else {
+        float fAngle;
+
+        *(unsigned long long *)&pUnit->fPos[0] =
+            *(unsigned long long *)&pTargetPos[0];
+        *(unsigned long long *)&pUnit->fPos[2] =
+            *(unsigned long long *)&pTargetPos[2];
+        pUnit->nFlags &= ~8;
+        pUnit->pUpdate = ACT_updateEnemy;
+        GameLoopState.nUnk01C = 0;
+        fAngle = Get_Angle(pUnit->fPos, GameLoopState.pPlayer->fPos);
+        *(float *)((char *)pUnit + 0x54) = fAngle;
+        *(float *)((char *)pUnit + 0x9E4) = fAngle;
+    }
+}
+
+/* TODO: near-match (LENGTH) - 73 instructions versus 75 original; the three
+ * descending clear loops and all field stores are reconstructed, but gcc
+ * omits the original pre-loop nop before the second and third clear loops and
+ * schedules the initial nested-work pointer ahead of the first flag store. */
+/* Reset every map-unit slot and its embedded resource arrays */
+void MAP_initUnit(void)
+{
+    MAPUNIT *pUnit = MapUnit;
+    int *p;
+    char *pWork;
+    int i;
+    int j;
+
+    for (i = 0; i < 0x40; i++, pUnit++) {
+        pUnit->nFlags = 0;
+        pWork = (char *)pUnit + 8;
+        pUnit->nAlive = -1;
+        pUnit->pUpdate = 0;
+        pUnit->nUnk008 = 0;
+        pUnit->pDraw = 0;
+        pUnit->nUnk0D4 = 0;
+        pUnit->nUnk0D0 = 0;
+        pUnit->fScale[0] = 1.0f;
+        pUnit->fScale[1] = 1.0f;
+        pUnit->fScale[2] = 1.0f;
+        pUnit->fScale[3] = 1.0f;
+        pUnit->fPos[0] = 0.0f;
+        pUnit->fPos[1] = 0.0f;
+        pUnit->fPos[2] = 0.0f;
+        pUnit->fPos[3] = 1.0f;
+        pUnit->fUnk220[0] = 0.0f;
+        pUnit->fUnk220[1] = 0.0f;
+        pUnit->fUnk220[2] = 0.0f;
+        pUnit->fUnk220[3] = 1.0f;
+        pUnit->nUnk2E4 = 0;
+        pUnit->nUnk2E8 = 0;
+        pUnit->nUnk234 = 0;
+        pUnit->nUnk238 = 0x10;
+        pUnit->nUnk2E0 = 0;
+        pUnit->fUnk23C = 0.5f;
+        pUnit->nUnk2EC = 0;
+        pUnit->nUnk0A6 = 0;
+        p = &pUnit->nUnk0D8[1];
+        j = 1;
+clear_d8:
+        j--;
+        *p = 0;
+        p--;
+        if (j >= 0) {
+            goto clear_d8;
+        }
+        p = &pUnit->pModel[1];
+        j = 1;
+clear_model:
+        j--;
+        *p = 0;
+        p--;
+        if (j >= 0) {
+            goto clear_model;
+        }
+        p = (int *)(pWork + 0xE8);
+        j = 2;
+clear_e8:
+        j--;
+        *p = 0;
+        p--;
+        if (j >= 0) {
+            goto clear_e8;
+        }
+        pUnit->nUnk0FC = 0;
+        pUnit->mdl[0] = 0;
     }
 }

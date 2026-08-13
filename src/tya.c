@@ -150,3 +150,175 @@ void tyaCaptureEnd(void)
     xglFontSetFlags(xglFontGetFlags() | 3);
     GameLoopState.nFlags &= 0xFAFFFFFF;
 }
+
+typedef struct {
+    int state;
+    u8 pad04[4];
+    short x;
+    short y;
+    short width;
+    short height;
+    unsigned long long color;
+    short source_x;
+    short source_y;
+    short source_width;
+    short source_height;
+    int image;
+    u8 pad24[4];
+    u8 drawing;
+} TYA_UML_DISP;
+
+typedef struct {
+    u8 pad00[8];
+    int state;
+    u8 pad0C[4];
+} TYA_UML_IMAGE;
+
+extern TYA_UML_IMAGE image_00A10BC0[];
+extern int buffer_00A13660[];
+
+/* Reset one UML display parameter block to its default rectangle and color. */
+int tyaUmlDispParamReset(TYA_UML_DISP *disp)
+{
+    disp->color = 0xFFFF00ULL;
+    disp->state = -1;
+    disp->x = 0;
+    disp->y = 0;
+    disp->width = 0x200;
+    disp->height = 0x1C0;
+    disp->source_width = 0x200;
+    disp->source_height = 0x1C0;
+    disp->source_x = 0;
+    disp->source_y = 0;
+    disp->image = -1;
+    return 0;
+}
+
+/* Initialize the UML image slots and retain their shared output buffer. */
+void tyaUmlDispInit2(int buffer)
+{
+    int i;
+
+    buffer_00A13660[0] = buffer;
+    for (i = 7; i >= 0; i--) {
+        image_00A10BC0[i].state = 0;
+    }
+}
+
+/* Initialize UML display output in the default memory region. */
+void tyaUmlDispInit(void)
+{
+    tyaUmlDispInit2(0x1000000);
+}
+
+extern void *memset(void *destination, int value, unsigned int size);
+extern void tyaUmlDispType3(TYA_UML_DISP *disp);
+extern int tyaUmlDispLoad(TYA_UML_DISP *disp);
+
+/* Refresh or load one UML display image when its requested state changes. */
+int tyaUmlDispMain(TYA_UML_DISP *disp)
+{
+    int result = -1;
+
+    if (disp != 0) {
+        if (disp->state < 0) {
+            memset((void *)buffer_00A13660[0], 0, 0x64);
+            memset(image_00A10BC0, 0, 0x80);
+            tyaUmlDispType3(disp);
+            result = 0;
+        } else if (disp->state != disp->image) {
+            return tyaUmlDispLoad(disp);
+        } else {
+            tyaUmlDispType3(disp);
+            result = 0;
+        }
+    }
+    return result;
+}
+
+typedef unsigned long tya_u64;
+
+typedef struct {
+    u8 pad00[4];
+    short width;
+    short height;
+    u8 pad08[0x50];
+} TYA_RENDER_SIZE;
+
+typedef struct {
+    void *packet;
+    u8 pad04[0x2C];
+    tya_u64 direct[4];
+} TYA_UML_PACKET;
+
+extern TYA_RENDER_SIZE sRender;
+extern void sceVif1PkAddDirectDataN(void *packet, void *data, int count);
+
+/* Append the UML display's direct GS-coordinate packet. */
+void tyaUmlDispType3Sub1(void *work)
+{
+    TYA_UML_PACKET *packet = (TYA_UML_PACKET *)work;
+    tya_u64 *direct = packet->direct;
+
+    direct[0] = 0x1000000000008001UL;
+    direct[1] = 0xE;
+    direct[2] = ((tya_u64)(sRender.width - 1) << 16) |
+                ((tya_u64)(sRender.height - 1) << 48);
+    direct[3] = 0x40;
+    sceVif1PkAddDirectDataN(packet->packet, direct, 2);
+}
+
+typedef struct {
+    u8 pad000[0xA4];
+    short state;
+    u8 pad0A6[0x56];
+    ACTOR *owner;
+    u8 pad100[0x200];
+} TYA_MAP_UNIT_LINK;
+
+/* Draw map units attached to the actor selected by the current layer. */
+void tyaCaptureUnit2(void)
+{
+    ACTOR *a = actor;
+    ACTOR *owner = (ACTOR *)-1;
+    int i;
+
+    for (i = 0; i < 0x40; i++, a++) {
+        if (a->nAlive != 0 && (a->nFlags & 8) == 0 &&
+            layer == i + 0x200) {
+            owner = a;
+            break;
+        }
+    }
+    {
+        TYA_MAP_UNIT_LINK *unit = (TYA_MAP_UNIT_LINK *)MapUnit;
+
+        for (i = 0x3F; i >= 0; i--, unit++) {
+            if (unit->state >= 0 && unit->owner == owner) {
+                MAP_drawUnitAt((MAP_UNIT *)unit);
+            }
+        }
+    }
+}
+
+extern void tyaUmlDispType3Sub0(void *work);
+extern void xglFontPrintExtFunc(void *text, void (*callback)(void *), void *work);
+extern void xglFontPrint(int x, int y, void *text, void *output);
+extern int D_00A13380[];
+
+/* Draw the two text passes and their direct-packet callbacks for UML type 3. */
+void tyaUmlDispType3(TYA_UML_DISP *disp)
+{
+    int x;
+    int y;
+
+    disp->drawing = 0;
+    x = disp->x - 0x700;
+    y = disp->y - 0x720;
+    xglFontPrintExtFunc((void *)(disp->color + 1), tyaUmlDispType3Sub0, disp);
+    xglFontPrint(0, 0, (void *)(disp->color + 0xF), D_00A13380);
+    xglFontPrint(x - disp->source_x, y - disp->source_y,
+                 (void *)(disp->color + 0xF),
+                 (char *)buffer_00A13660[0] + 0x60);
+    xglFontPrintExtFunc((void *)(disp->color + 1), tyaUmlDispType3Sub1, disp);
+}

@@ -44,6 +44,8 @@ extern float sinf(float f);
 extern float cosf(float f);
 extern int xglSRand(void);
 
+float Get_Distance(VECTOR *pFrom, VECTOR *pTo);
+
 /* Read the signal byte cached on a map unit */
 signed char GetUwamonoSignal(UWAMONO *pUnit)
 {
@@ -179,6 +181,47 @@ signed char Get_LocaterType_Angle(float angle)
         return index;
     }
     return -1;
+}
+
+/* TODO: near-match (LOGIC) - the interpolation arithmetic is recovered, but
+ * the original uses a different temporary floating-register allocation and
+ * store schedule. Find the original local-variable/source-expression shape. */
+/* Interpolate a position between two points; the output always has w = 1. */
+void Get_MiddlePoint(VECTOR *from, VECTOR *to, short current, short total,
+    VECTOR *result)
+{
+    if (current == total) {
+        result->x = to->x;
+        result->y = to->y;
+        result->w = 1.0f;
+        result->z = to->z;
+    } else {
+        float current_float = (float)current;
+        float total_float = (float)total;
+
+        result->x = from->x + (to->x - from->x) * current_float / total_float;
+        result->y = from->y + (to->y - from->y) * current_float / total_float;
+        result->w = 1.0f;
+        result->z = from->z + (to->z - from->z) * current_float / total_float;
+    }
+}
+
+/* TODO: near-match (SCHEDULING) - this has the exact instruction multiset,
+ * but GCC orders the x and z scale/multiply/store sequence differently from
+ * the original. Find the original expression/local-variable order. */
+/* Produce a planar step from one point toward another. */
+void Get_One_Step(VECTOR *from, VECTOR *to, VECTOR *result, float amount)
+{
+    float dx = to->x - from->x;
+    float dz = to->z - from->z;
+    float scale = 1.0f / Get_Distance(from, to);
+    float z_step = dz * scale * amount;
+    float x_step = dx * scale * amount;
+
+    result->y = 0.0f;
+    result->w = 1.0f;
+    result->z = z_step;
+    result->x = x_step;
 }
 
 /* Project a point by an angle and planar distance */
