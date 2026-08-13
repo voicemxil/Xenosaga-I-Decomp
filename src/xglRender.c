@@ -48,9 +48,14 @@ typedef struct {
     u_long aUnk08[15];
 } XGLDISPENV;
 
+typedef union {
+    u_long l[32];
+} XGLDRAWENV;
+
 XGLRENDER sRender;
 XGLCLEARENV ClearEnv;
 XGLDISPENV DispEnv;
+XGLDRAWENV DrawEnv;
 int s_nClearFrame;
 int s_nGblFadeInit;
 int s_nGblFade;
@@ -207,5 +212,96 @@ void xglRenderEntry(void)
         xglSendSePacket();
         xglPadRead();
         xglSleep();
+    }
+}
+
+typedef struct {
+    char pad[0x30];
+    u_int nR;
+    u_int nG;
+    u_int nB;
+    u_int nA;
+    char pad2[0x40];
+} XGLTESTENV;
+
+u_int *xglPacketGetCurrent(void);
+void sceVif1PkRef(u_int *pPk, u_int nAddr, u_int nSize, u_int a3, u_int t0, u_int t1);
+
+XGLTESTENV TestEnv;
+
+/* Copy the current clear color into TestEnv and reference the packet
+ * through the VIF1 packet builder */
+void xglRenderClear(void)
+{
+    u_int *pPacket;
+
+    TestEnv.nR = ClearEnv.nR;
+    TestEnv.nG = ClearEnv.nG;
+    TestEnv.nB = ClearEnv.nB;
+    TestEnv.nA = 0x80;
+    pPacket = xglPacketGetCurrent();
+    sceVif1PkRef(pPacket, (u_int)&TestEnv, 6, 0, 0, 0);
+}
+
+void sceGsSetDefDispEnv(void *pEnv, int nPsm, int nWidth, int nMagic, u_int t0, u_int t1);
+
+/* Initialize the display environment from the current render state */
+void xglRenderDispEnvInit(void)
+{
+    u_long nPMode;
+
+    sceGsSetDefDispEnv(&DispEnv, sRender.nPsm, sRender.nWidth, *(short *)&sRender.nUnk06, 0, 0);
+    nPMode = DispEnv.nPMode;
+    nPMode &= ~2;
+    nPMode &= ~0x40;
+    DispEnv.nPMode = nPMode;
+    DispEnv.aUnk08[4] = DispEnv.aUnk08[1];
+    DispEnv.aUnk08[5] = DispEnv.aUnk08[2];
+    DispEnv.aUnk08[6] = 0;
+    DispEnv.aUnk08[7] = 0;
+    DispEnv.aUnk08[8] = 0;
+}
+
+void sceGsPutDrawEnv(void *pEnv);
+
+/* Update the draw environment's frame/zbuf registers from the render
+ * state and flush it to the GS */
+void xglRenderDrawEnvMove(void)
+{
+    u_long nMask, nZbp, nFbp;
+
+    nMask = 0x1FF;
+    nFbp = sRender.nUnk12 & nMask;
+    nZbp = sRender.nUnk08 & nMask;
+    DrawEnv.l[2] = (DrawEnv.l[2] & ~nMask) | nFbp;
+    DrawEnv.l[12] = (DrawEnv.l[12] & ~nMask) | nFbp;
+    DrawEnv.l[4] = (DrawEnv.l[4] & ~nMask) | nZbp;
+    DrawEnv.l[14] = (DrawEnv.l[14] & ~nMask) | nZbp;
+    SyncDCache(&DrawEnv, (char *)&DrawEnv + 0x100);
+    sceGsPutDrawEnv(&DrawEnv);
+}
+
+int nmlModelIsBackBufferRequest(void);
+
+/* Call each registered per-frame final-packet callback with the current
+ * packet pointer, unless a back-buffer request is pending */
+void xglRenderFinalPacket(void)
+{
+    u_int *pPacket;
+    XGLRENDER *pRender;
+    void (**pCallback)(u_int *);
+    int i;
+
+    pPacket = xglPacketGetCurrent();
+    if (nmlModelIsBackBufferRequest()) {
+        return;
+    }
+    pRender = &sRender;
+    pCallback = (void (**)(u_int *))pRender->aUnk24;
+    for (i = 7; i >= 0; i--) {
+        if (*pCallback != 0) {
+            (*pCallback)(pPacket);
+        }
+        pCallback++;
     }
 }

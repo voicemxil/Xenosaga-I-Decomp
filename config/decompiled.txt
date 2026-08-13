@@ -1495,3 +1495,7 @@ eofread = 0x0032F630, 0x8; // libc.c
 EventDoorOpenOpeFunc = 0x002C5150, 0x78; // EventDoor
 // EventDoorOpenNowFunc = 0x002C51C8, 0xB8; // EventDoor -- near-miss, see TODO in src/EventDoor.c
 EventDoorCloseOpeFunc = 0x002C5280, 0x6C; // EventDoor
+xglRenderClear = 0x0022DC10, 0x68; // xglRender.c
+xglRenderDispEnvInit = 0x0022D338, 0x7C; // xglRender.c
+xglRenderDrawEnvMove = 0x0022D2A0, 0x94; // xglRender.c
+xglRenderFinalPacket = 0x0022D8C8, 0x74; // xglRender.c
