@@ -957,13 +957,24 @@ ret_d:
   return d.d;
 }
 
-/* double to Bigint. TODO: not registered -- the `y = d1` temp lands in
-   $2 (v0) here but $5 (a1, the now-dead high half of the packed
-   double argument) in the original; a register pin doesn't apply
-   because `&y` is taken (see the "address taken" pinning caveat in
-   the resume notes) and a fresh-local-for-the-final-use trick doesn't
-   apply either since y's FIRST use is the address-taken one. Otherwise
-   an exact transcription of newlib's d2b with Pack_32 defined. */
+/* double to Bigint. TODO: not registered -- 5 diffs -> 2 diffs this
+   session. The "address taken, can't pin" reasoning above turned out to
+   be wrong: staging `d1` through a register-pinned ($5/a1) fresh local
+   `y2`, forced live with an empty "+r" asm barrier, THEN assigning
+   `y = y2` gets the compiler to allocate y itself in $5 to match the
+   original (closed 3 of 5 diffs -- the dsll32/dsra32 sign-extend chain
+   and the beqz). The pin alone (no barrier) was satisfied by gcc without
+   honouring it -- needed the barrier to carry the dependency.
+   Remaining 2 diffs are a pure SCHEDULING tie-break: original computes
+   `move a0,sp` (address of the &y stack slot) BEFORE `sw a1,0(sp)`
+   (spilling y's value there for the address-taken use); we get the store
+   first, then the address move. Tried: an extra memory barrier right
+   before the `_lo0bits(&y)` call (no effect), hoisting `&y` into an
+   explicit `__ULong *py = &y;` local before the call (no effect,
+   reverted). permute.py doesn't apply -- this is sub-expression argument
+   evaluation order within one call, not a multi-statement store group.
+   Otherwise an exact transcription of newlib's d2b with Pack_32
+   defined. */
 _Bigint *
 _d2b (struct _reent * ptr, double _d, int *e, int *bits)
 {
@@ -982,7 +993,12 @@ _d2b (struct _reent * ptr, double _d, int *e, int *bits)
   d0 &= 0x7fffffff;
   if (de = (int) (d0 >> Exp_shift))
     z |= Exp_msk1;
-  if (y = d1)
+  {
+    register __ULong y2 __asm__ ("$5") = d1;
+    __asm__ volatile ("" : "+r" (y2));
+    y = y2;
+  }
+  if (y)
     {
       if (k = _lo0bits (&y))
 	{

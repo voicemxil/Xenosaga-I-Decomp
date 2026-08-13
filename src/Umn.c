@@ -47,7 +47,8 @@ typedef struct {
 extern MAIL_ATTACH umn_attach_tbl[];
 extern MAIL_HEADER *UmnMailHeaderBuf[];
 extern EVENT_TEXT_BUF *uet_text_buf[];
-extern int uet_flag;
+extern int uet_flag[];
+#define uet_flag (uet_flag[0])
 extern int *UmnHistoryTreeBuf[];
 extern char *umn_text[];
 
@@ -126,7 +127,6 @@ MAIL_HEADER *UmnMailHeaderGet(int nNo)
     return &UmnMailHeaderBuf[0][nNo];
 }
 
-/* TODO: near-miss (LOGIC, register-alloc/scheduling) -- not registered. */
 /* Align the raw event-text buffer, install it, and return the entry table start */
 void *UmnEventTextInit(void *pRaw)
 {
@@ -136,7 +136,12 @@ void *UmnEventTextInit(void *pRaw)
     return (char *)pAligned + 0x2000;
 }
 
-/* TODO: near-miss (LOGIC, register-alloc/scheduling) -- not registered. */
+/* TODO: near-miss (LOGIC, 6 diffs) -- the bounds-check compare and the
+   base-pointer load interleave differently: original does
+   sltiu v1,a0,0x80 / lw a1,(v0) / beqz v1 while ours computes the sltiu
+   in-place on a0 and branches on a different test. Tried collapsing to
+   a ternary return (regressed to 9 diffs / grew by 4 bytes, reverted).
+   Not registered. */
 /* Look up a history-tree slot by index; NULL if out of range */
 int *UmnHistoryTreeGet(int nNo)
 {

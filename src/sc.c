@@ -514,6 +514,16 @@ int scRMODScript(SCOBJ *o) {
 
 extern void sefDestroyScriptScheduler2(int slot);
 extern char D_004CC7B8[];
+/* TODO: near-miss (LOGIC, 6/41 words) -- the original speculatively
+   hoists the `move a2,s1` (a1 staged for the tracePrint call) above the
+   `bne slot,16` branch test, and similarly reorders the lui/ld/addiu
+   setup for the tracePrint call and the stack-restore epilogue; our
+   build computes everything in its natural post-branch order. Same
+   class as the scGOSUBScript/EtherTreeRightDraw speculative-hoist-
+   across-branch wall. Tried: a trailing memory barrier after the
+   tracePrint call (this is NOT a tail call in the original -- the
+   barrier badly destabilized the whole function, going from 6 to 32+
+   diffs; reverted immediately). Leave as-is. */
 void scDestroyScript2(int slot, int a1) {
     if ((unsigned int)slot >= 16) {
         tracePrint(D_004CC7B8, slot, a1);

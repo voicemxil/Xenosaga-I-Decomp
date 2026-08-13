@@ -47,8 +47,16 @@ void subListMake01(SUB_LIST *list, int id)
 /* TODO: near-match (2/13 words) - the child pointer is at data+8+index*4
    (a 4-byte-stride pointer array, not index*20 as originally guessed; that
    fix alone took this from 4 diffs to 2). Remaining 2 diffs are a pure
-   REGISTER tie-break (sll/addu land in $v0 vs $v1); pinning a fresh local
-   to $2 regressed the whole function (4 diffs, cascading register churn). */
+   REGISTER tie-break (sll/addu land in $v0 vs $v1, in-place reuse in the
+   original vs a fresh reg here); pinning a fresh local to $2 regressed
+   the whole function (4 diffs, cascading register churn). Retried this
+   session with the pin+barrier idiom (register unsigned int idx4
+   __asm__("$2") = index*4; asm("":"+r"(idx4));) on the index*4
+   sub-expression: this function is self-tail-recursive, and the barrier
+   defeated gcc's tail-call-to-loop transform entirely (9 diffs, shrank
+   to 0x2c bytes -- a structurally different, worse function). Reverted
+   immediately. Leave as-is; any fix here must not touch the recursive
+   call's argument evaluation. */
 void sub2JoutoYGet(void *data, float *result)
 {
     unsigned short index = *(unsigned short *)((char *)data + 8);

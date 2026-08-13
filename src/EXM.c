@@ -200,8 +200,20 @@ float EXM_GetShakeRad(void)
     return wind->fShakeRad;
 }
 
-/* TODO: LENGTH 15/13: original retains a duplicated type constant on both
- * sides of the null check; the natural shared assignment is folded. */
+/* TODO: LENGTH 15/13: `li v0,1` for nType=1 is emitted TWICE back-to-back
+ * in the original (words 11-12) -- word11 is the delay slot of the
+ * unconditional `b` that skips the false-branch fallthrough, word12 is
+ * that fallthrough target redoing the same li. This is the compiler
+ * filling an otherwise-wasted delay slot with a redundant copy of the
+ * merge-point store, not source-level duplication -- our build correctly
+ * emits the store once after the if, and the delay slot is a bare nop
+ * instead. Tried: literal `else { pWind->nType = 1; }` duplication
+ * (regressed badly -- grew to 17 words / 14 diffs, a real branch+jump
+ * appears instead of delay-slot reuse); volatile-qualified early store
+ * inside the if plus the normal trailing store (10 diffs, right length
+ * but wrong shape -- the early store lands at the top of the true branch
+ * instead of in the jump's delay slot). Same delay-slot-fill scheduler
+ * class as _ulp/_ratio in libc.c; not source-reachable so far. */
 /* Use a fixed direction for the current wind */
 void EXM_SetDirectionalWind(EXM_VECTOR *pDir)
 {
