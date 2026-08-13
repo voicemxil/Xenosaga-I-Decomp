@@ -175,11 +175,11 @@ void scSetReg(int reg, int val) {
     if ((reg & 0x8000) != 0) {
         reg = scGetReg(reg & 0xFFFF7FFF);
     }
-    if ((unsigned int)reg < 16) {
-        D_0041E7D0[_nowScript].regs[reg] = val;
-    } else {
+    if ((unsigned int)reg >= 16) {
         tracePrint(D_004CC818, reg);
+        return;
     }
+    D_0041E7D0[_nowScript].regs[reg] = val;
 }
 
 /* scGetNumScript: resolve a script operand -- register indirection if the
@@ -365,11 +365,9 @@ void scSetAmbient(SC_AMB_OBJ *o) {
 }
 
 int *scGetRegAdr(int reg) {
-    int *result = 0;
-    if ((unsigned int)reg < 16) {
-        result = &D_0041E7D0[_nowScript].regs[reg];
-    } else {
+    if ((unsigned int)reg >= 16) {
         tracePrint(D_004CC818, reg);
+        return 0;
     }
-    return result;
+    return &D_0041E7D0[_nowScript].regs[reg];
 }

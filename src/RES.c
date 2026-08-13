@@ -151,6 +151,9 @@ char *RES_GetMotBaseName(unsigned short nId)
     return cfMtnList[0].pName;
 }
 
+/* TODO near-match (20 diffs, correct length/structure): the original keeps
+   the destination in $a3 and reuses the table-pointer register $a2 for the
+   foot_name pointer; ours allocates them the other way round. */
 /* Build "XX_" + the current foot step name for the party leader */
 void RES_GetLeaderSeName(char *pName)
 {

@@ -461,6 +461,10 @@ void DefocusMainType05(GAME_DEFOCUS *p, void *pkt)
     sceVif1PkAddDataN(pkt, (void *)0x70000000, 0x1C);
 }
 
+/* TODO near-match (20 diffs, correct length/structure): the original keeps
+   the %hi base in $a0 (reusing the dead nMode parameter) and the 0x24020000
+   constant in $v0, and annuls the first two switch branches (beql) where we
+   emit beq; case order and if/else chains do not flip it. */
 /* Compose a GS TEX0 register for one of the three defocus work buffers */
 u_long GetTex0(int nMode, int nUnk)
 {

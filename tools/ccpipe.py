@@ -31,18 +31,21 @@ CFLAGS29 = "-O2 -G0 -fno-schedule-insns"
 
 def file_settings(basename):
     """(cc, cflags, fixflags) for a source file, per configure.py."""
-    cc, cflags, fix = CC29, CFLAGS29, []
+    # Game code is the default; only Sony SDK translation units use 2.9.
+    # This used to fall back to configure.CC (the SDK compiler) for any file
+    # not yet listed, so checking a NEW file -- the tool's whole purpose --
+    # compiled it with the wrong compiler and reported a byte-perfect
+    # function as "a real code difference".
+    cc, cflags = (CC29, CFLAGS29) if basename.startswith("sce") else (CC96, CFLAGS96)
+    fix = []
     try:
         sys.path.insert(0, ROOT)
-        import configure  # noqa: E402  (module-level dicts only)
-        cc = configure.FILE_CC.get(basename, configure.CC)
-        cflags = configure.FILE_CFLAGS.get(basename, configure.CFLAGS)
+        import configure  # noqa: E402
+        cc = configure.cc_for(basename)
+        cflags = configure.cflags_for(basename)
         fix = configure.FILE_FIX_FLAGS.get(basename, "").split()
     except Exception:
-        if basename.startswith("sce"):
-            cc, cflags = CC29, CFLAGS29
-        else:
-            cc, cflags = CC96, CFLAGS96
+        pass
     return cc, cflags, fix
 
 
