@@ -55,7 +55,6 @@ do {								\
 } while (0)
 
 extern void *memmove (void *, const void *, size_t);
-extern long _strtol_r (struct _reent *, const char *, char **, int);
 extern unsigned long _strtoul_r (struct _reent *, const char *, char **, int);
 extern double _strtod_r (struct _reent *, const char *, char **);
 extern long strtol (const char *, char **, int);
@@ -66,6 +65,23 @@ extern int _raise_r (struct _reent *, int);
 extern void *_signal_r (struct _reent *, int, void *);
 extern int _init_signal_r (struct _reent *);
 extern int __sigtramp_r (struct _reent *, int);
+
+/* newlib's ctype.h bit-table macros (long here is the target's native
+   64-bit register width, not 32 -- see the mprec block below for why
+   that matters elsewhere too). */
+extern const char _ctype_[];
+#define _U 01
+#define _L 02
+#define _N 04
+#define _S 010
+#define isspace(c) ((_ctype_+1)[(unsigned)(c)]&_S)
+#define isdigit(c) ((_ctype_+1)[(unsigned)(c)]&_N)
+#define isalpha(c) ((_ctype_+1)[(unsigned)(c)]&(_U|_L))
+#define isupper(c) ((_ctype_+1)[(unsigned)(c)]&_U)
+
+#define ERANGE 34
+#define LONG_MAX 9223372036854775807L
+#define LONG_MIN (-LONG_MAX-1)
 
 /* &errno for the current reentrancy structure */
 int *
@@ -170,6 +186,84 @@ int
 __sigtramp (int sig)
 {
   return __sigtramp_r (_REENT, sig);
+}
+
+/* string to long, from newlib's strtol.c. TODO: not registered --
+   otherwise a PERFECT instruction-for-instruction match (confirmed by
+   isolating this exact function body in a standalone compile unit,
+   where it matches byte-for-byte including every movz/movn/dsrl/
+   dsll32 and every __umoddi3/__udivdi3/__muldi3 libcall), but here in
+   the full libc.c TU gcc's `.p2align 3,,7` loop-head alignment for
+   the leading `do { c = *s++; } while (isspace(c));` pads in an extra
+   nop because this function's local offset within OUR object isn't a
+   multiple of 8 -- purely a function-position artifact (same class as
+   the resume notes' "R5900 short-loop erratum padding" wall), not a
+   logic difference. Tried relocating within the file (two positions,
+   same result); a true fix would need to control byte-exact offset
+   parity, not source shape. */
+long
+_strtol_r (struct _reent *rptr, const char *nptr, char **endptr, int base)
+{
+  register const char *s = nptr;
+  register unsigned long acc;
+  register int c;
+  register unsigned long cutoff;
+  register int neg = 0, any, cutlim;
+
+  do
+    {
+      c = *s++;
+    }
+  while (isspace (c));
+  if (c == '-')
+    {
+      neg = 1;
+      c = *s++;
+    }
+  else if (c == '+')
+    c = *s++;
+  if ((base == 0 || base == 16) &&
+      c == '0' && (*s == 'x' || *s == 'X'))
+    {
+      c = s[1];
+      s += 2;
+      base = 16;
+    }
+  if (base == 0)
+    base = c == '0' ? 8 : 10;
+
+  cutoff = neg ? -(unsigned long) LONG_MIN : LONG_MAX;
+  cutlim = cutoff % (unsigned long) base;
+  cutoff /= (unsigned long) base;
+  for (acc = 0, any = 0;; c = *s++)
+    {
+      if (isdigit (c))
+	c -= '0';
+      else if (isalpha (c))
+	c -= isupper (c) ? 'A' - 10 : 'a' - 10;
+      else
+	break;
+      if (c >= base)
+	break;
+      if (any < 0 || acc > cutoff || acc == cutoff && c > cutlim)
+	any = -1;
+      else
+	{
+	  any = 1;
+	  acc *= base;
+	  acc += c;
+	}
+    }
+  if (any < 0)
+    {
+      acc = neg ? LONG_MIN : LONG_MAX;
+      rptr->_errno = ERANGE;
+    }
+  else if (neg)
+    acc = -acc;
+  if (endptr != 0)
+    *endptr = (char *) (any ? s - 1 : nptr);
+  return (acc);
 }
 
 /* string to long */
