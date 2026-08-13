@@ -188,3 +188,138 @@ void sefClipViewVolume(void *a, void *b) {
     sefInitClipViewVolume((char *)b + 1264);
     sefClipViewVolumeA(a, b);
 }
+
+/* --- sefExecLineData: progress one "line" scheduler object one frame --- */
+typedef struct {
+    char pad000[0x1C0];
+    unsigned short f1C0;
+    char pad1C2[0x1D0 - 0x1C2];
+    void *f1D0;
+    void *f1D4;
+    void *f1D8;
+    void *f1DC;
+    char pad1E0[0x1E8 - 0x1E0];
+    void *f1E8;
+    void *f1EC;
+    char pad1F0[0x1F4 - 0x1F0];
+    void *f1F4;
+    char pad1F8[0x5F8 - 0x1F8];
+    float f5F8;
+    float f5FC;
+    char pad600[0x802 - 0x600];
+    short f802;
+    short f804;
+    unsigned short f806;
+    char pad808[0x80A - 0x808];
+    unsigned short f80A;
+    unsigned short f80C;
+    char pad80E[0x814 - 0x80E];
+    unsigned short f814;
+    short f816;
+} SEF_LINE;
+
+extern float _gravity;
+extern float _height;
+extern float _colision;
+extern void sefLerpVectorSC(void *a, void *b);
+extern void sefLerpIVector(void *a, void *b);
+extern void sefProgressInt(void *a, void *b);
+extern void sefGetPosition(void *a, void *b, int c);
+extern int sefExecLineGlobalData(void *a, int b);
+extern int sefExecLineLocalData(void *a, int b);
+
+/* TODO: near-miss, 2/106 words differ (register tie-break, unreachable from
+ * C -- matches the "Allocator-order tie-breaks NOT reachable from C" wall).
+ * The very first decrement of f804 is tested via the sll<<16/bgez idiom;
+ * gcc's store-forwarding then reuses that shifted v1 (sra) for the later
+ * reload of f804 inside the f80C/f814-guarded branch, where the original
+ * emits a fresh `lh`. Tried: memory barrier (kills the bnezl delay-slot
+ * fold instead), volatile pointer cast (destabilizes the whole function's
+ * register allocation), flat-pointer-cast store/reload (no effect),
+ * register-pinning icnt to $2 (destabilizes allocation). permute.py
+ * confirms no statement reordering changes the schedule. Not registered in
+ * config/decompiled.txt -- do not add without closing these 2 words. */
+int sefExecLineData(SEF_LINE *p, int mode)
+{
+    unsigned short mode2 = p->f806;
+    short v0;
+    float scale;
+    void *p1D4;
+    int local;
+    p->f802 = -1;
+
+    {
+        int icnt;
+        if (p->f80A != 0) {
+            int val = (unsigned short)p->f804 - 1;
+            p->f804 = val;
+            if ((val << 16) < 0) {
+                if (p->f80C == 0) {
+                    p->f804 = 0;
+                    return 0;
+                }
+                if (p->f814 == 0) {
+                    p->f804 = 0;
+                    return 0;
+                }
+                icnt = *(short *)((char *)p + 0x804);
+            } else {
+                icnt = val;
+            }
+        } else {
+            icnt = p->f804;
+        }
+        if (icnt < 0) {
+            p->f804 = -1;
+        }
+    }
+    v0 = p->f816;
+
+    scale = (float)v0 * 0.01f;
+    _gravity = p->f5F8;
+    _height = p->f5FC;
+    _colision = scale;
+    sefLerpVectorSC((char *)p->f1D0 + 8, (char *)p + 0xE0);
+
+    sefLerpVectorSC((char *)p->f1D8 + 8, (char *)p + 0x100);
+
+    p1D4 = p->f1F4;
+    if (p1D4 != 0) {
+        sefLerpVectorSC((char *)p1D4 + 8, (char *)p + 0x120);
+        sefGetPosition((char *)p + 0xB0, (char *)p + 0x130, *(short *)p->f1F4);
+    }
+    p1D4 = p->f1D4;
+    sefLerpIVector((char *)p1D4 + 4, (char *)p + 0x160);
+
+    sefLerpIVector((char *)p->f1DC + 4, (char *)p + 0x180);
+
+    sefProgressInt(p->f1E8, (char *)p + 0x1AC);
+    sefProgressInt(p->f1EC, (char *)p + 0x1B8);
+
+    if (p->f804 >= 0) {
+        if (sefExecLineGlobalData(p, mode2) == 0) {
+            return 1;
+        }
+    }
+    local = sefExecLineLocalData(p, mode2);
+
+    {
+        register int iw __asm__("$3");
+        iw = p->f806;
+        p->f814 = local;
+        iw = iw + 1;
+        p->f806 = iw;
+        if ((unsigned short)iw == 0x3FF) {
+            if (p->f80A != 0) {
+                p->f806 = 0x3FE;
+            } else {
+                register int diff __asm__("$2") = iw - p->f1C0;
+                p->f806 = diff;
+                if ((unsigned short)diff == 0) {
+                    p->f806 = 1;
+                }
+            }
+        }
+    }
+    return 1;
+}
