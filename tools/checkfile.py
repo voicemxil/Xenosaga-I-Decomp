@@ -127,10 +127,10 @@ def main():
                 print(f"{src}: no {objpath} (run ninja, or drop --built)")
                 continue
         else:
-            cc, cflags, fix = ccpipe.file_settings(base)
+            cc, cflags, fix, asflags = ccpipe.file_settings(base)
             objpath = os.path.join(tmpdir, base.replace(".c", ".o"))
             ok, log = ccpipe.compile_c(src, objpath, cc=cc, cflags=cflags,
-                                       fixflags=fix)
+                                       fixflags=fix, asflags=asflags)
             if not ok:
                 print(f"{src}: COMPILE FAILED\n{log}")
                 grand[2] += 1

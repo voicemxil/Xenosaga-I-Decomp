@@ -42,10 +42,11 @@ def main():
         sys.exit(f"{name} not in original ELF symbol table")
     addr, size = loc
 
-    cc, cflags, fix = ccpipe.file_settings(base)
+    cc, cflags, fix, asflags = ccpipe.file_settings(base)
     tmpdir = tempfile.mkdtemp(prefix="scratchdiff_")
     objpath = os.path.join(tmpdir, base.replace(".c", ".o"))
-    ok, log = ccpipe.compile_c(src, objpath, cc=cc, cflags=cflags, fixflags=fix)
+    ok, log = ccpipe.compile_c(src, objpath, cc=cc, cflags=cflags, fixflags=fix,
+                               asflags=asflags)
     if not ok:
         sys.exit(f"COMPILE FAILED\n{log}")
 

@@ -114,7 +114,8 @@ def _run(job):
     with open(cpath, "w") as f:
         f.write(src)
     ok, log = ccpipe.compile_c(cpath, opath, cc=_ctx["cc"],
-                               cflags=_ctx["cflags"], fixflags=_ctx["fixflags"])
+                               cflags=_ctx["cflags"], fixflags=_ctx["fixflags"],
+                               asflags=_ctx.get("asflags", ""))
     if not ok:
         os.unlink(cpath)
         return orders, None, None, log.strip().split("\n")[0][:160]
@@ -163,6 +164,10 @@ def main():
     ap.add_argument("--max", type=int, default=5040,
                     help="refuse to sweep more orderings than this")
     ap.add_argument("--keep", help="write the best-scoring source here")
+    ap.add_argument("--asflags", default="",
+                    help="extra assembler flags, e.g. --asflags -G0 "
+                         "(gas has its own -G small-data threshold, "
+                         "independent of the compiler's -G)")
     ap.add_argument("--all-scores", action="store_true",
                     help="list every distinct schedule, not just the best")
     args = ap.parse_args()
@@ -207,7 +212,7 @@ def main():
     tmpdir = tempfile.mkdtemp(prefix="permute_")
     ctx = {"chunks": chunks, "blocks": blocks, "tmpdir": tmpdir, "cc": cc,
            "cflags": cflags, "fixflags": fixflags, "fn": args.fn, "size": size,
-           "target": target}
+           "target": target, "asflags": args.asflags}
 
     results = []
     errors = []
@@ -255,7 +260,7 @@ def main():
             f.write(src)
         obj = os.path.join(tmpdir, "best.o")
         ok, _ = ccpipe.compile_c(path, obj, cc=cc, cflags=cflags,
-                                 fixflags=fixflags)
+                                 fixflags=fixflags, asflags=args.asflags)
         if ok:
             e = Elf32(obj)
             off = e.func_symbols()[args.fn]

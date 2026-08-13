@@ -83,6 +83,18 @@ RE_CVT = re.compile(r'^\t(cvt\.[a-z.]+|trunc\.w\.s)[ \t](.*)$')
 RE_FPLOAD = re.compile(r'^\t(li\.s)[ \t]')
 
 
+# Set when the file is assembled with `as -G0` (see configure.py's
+# FILE_ASFLAGS_OVERRIDE / asflags_for). gas's own small-data threshold
+# defaults to -G8 regardless of what -G was passed to gcc, so a li.s
+# whose constant has non-zero low 16 bits normally expands as a .lit4
+# %gp_rel LOAD (no hazard) -- but at `as -G0` gas can never place it in
+# .lit4, so it ALWAYS expands to lui+ori+mtc1 and DOES carry the hazard.
+# Found on libm.c's floorf: with -G0 passed through to the assembler,
+# the huge_f li.s (low16 = 0xf2ca, nonzero) still needs the nop the
+# unconditional low16-zero heuristic below was built to skip.
+ASSUME_NO_LIT4 = False
+
+
 def fp_hazard_dest(line):
     """FP register written by an mtc1-class instruction, or None.
 
@@ -91,14 +103,18 @@ def fp_hazard_dest(line):
     mtc1 just wrote. (CheckSlope has `mtc1 $zero,$f5` followed directly by
     `mul.s $f1,$f1,$f0` with no nop; SEQ_motion has `mtc1 $v1,$f1` + nop +
     `mul.s $f1,$f1,$f20`.) A li.s whose constant has non-zero low 16 bits
-    is expanded by gas as a .lit4 LOAD, not lui+mtc1, so it carries no
-    hazard at all.
+    is normally expanded by gas as a .lit4 LOAD, not lui+mtc1, so it
+    carries no hazard at all -- UNLESS the file is assembled at `as -G0`
+    (ASSUME_NO_LIT4), in which case it always expands to lui+ori+mtc1 and
+    always carries the hazard, low bits or not.
     """
     m = re.match(r'^\tmtc1\t\$\w+,(\$f\d+)', line)
     if m:
         return m.group(1)
     m = re.match(r'^\tli\.s\t(\$f\d+),\s*(\S+)', line)
     if m:
+        if ASSUME_NO_LIT4:
+            return m.group(1)
         try:
             bits = struct.unpack('<I', struct.pack('<f', float(m.group(2))))[0]
         except ValueError:
@@ -466,11 +482,17 @@ if __name__ == "__main__":
                         default=None, metavar="FUNCS",
                         help="move a store gcc placed in a leaf return's "
                              "delay slot to before the branch instead")
+    parser.add_argument("--as-g0", action="store_true",
+                        help="file is assembled with `as -G0` (see "
+                             "configure.py asflags_for) -- li.s float "
+                             "literals never land in .lit4, so they always "
+                             "carry the mtc1 COP1 hazard")
     args = parser.parse_args()
     def scope(v):
         if v is None:
             return None
         return frozenset(f for f in v.split(',') if f)
 
+    ASSUME_NO_LIT4 = args.as_g0
     main(args.path, set(args.omit_hazard), scope(args.barrier_return_store),
          scope(args.hoist_return_store))

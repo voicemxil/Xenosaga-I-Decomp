@@ -77,8 +77,41 @@ def cc_for(name):
     return SDK_CC if is_sdk(name) else CC96
 
 
+# Per-file -G override for game code that is otherwise correctly built
+# with the 2.96 compiler but was NOT built at -G8. Confirmed on libm.c:
+# floorf's huge_f/tiny_f float constants are loaded via an inline
+# lui/ori/mtc1 (li.s) sequence in the original, not the %gp_rel .lit4
+# load -G8 produces -- and the -G0 build also reproduces the original's
+# v1 (not v0) register choice for the initial mfc1. Register-save frame
+# stride stays 8 bytes/reg (2.96), ruling out the SDK 2.9-ee compiler --
+# this is a lone -G threshold difference, not a compiler-family swap.
+FILE_CFLAGS_OVERRIDE = {
+    "libm.c": "-O2 -G0",
+}
+
+
 def cflags_for(name):
-    return SDK_CFLAGS if is_sdk(name) else "-O2 -G8"
+    if is_sdk(name):
+        return SDK_CFLAGS
+    return FILE_CFLAGS_OVERRIDE.get(name, "-O2 -G8")
+
+
+# The ASSEMBLER also has its own small-data threshold (default -G8, same
+# as binutils gas's built-in default) that is INDEPENDENT of the -G value
+# passed to the compiler. A `li.s`/`li.d` float/double immediate macro
+# only expands to inline lui+ori+mtc1 when gas's own threshold says the
+# constant does not qualify for .lit4/.lit8 pooling -- passing -G0 to gcc
+# alone leaves gas still pooling it via %gp_rel, silently undoing the
+# compiler-side flag. Found on libm.c's floorf: huge_f/tiny_f only lose
+# their .lit4 gp-relative load and match the original's inline immediate
+# once BOTH cc and as see -G0.
+FILE_ASFLAGS_OVERRIDE = {
+    "libm.c": "-G0",
+}
+
+
+def asflags_for(name):
+    return FILE_ASFLAGS_OVERRIDE.get(name, "")
 
 
 # xglVector's original object omits some load-delay nops that are present
@@ -110,7 +143,10 @@ FILE_FIX_FLAGS = {
     # reorder pass steals that copy into the jr $31 delay slot, but the
     # original ee-as build left it as three separate instructions (copy,
     # branch, genuine nop). See RE_RETURN_MOVE in fix_cc_asm.py.
-    "libm.c": "--barrier-return-store fabs,__ieee754_fmod",
+    # --as-g0: libm.c is also assembled with `as -G0` (asflags_for below),
+    # which changes when a li.s float literal carries the mtc1 COP1 hazard
+    # nop -- see fix_cc_asm.py's ASSUME_NO_LIT4 comment.
+    "libm.c": "--barrier-return-store fabs,__ieee754_fmod --as-g0",
 }
 
 
@@ -207,13 +243,14 @@ def generate_ninja(asm_files, src_files, asset_files):
         f.write(f"cflags = {CFLAGS}\n")
         f.write(f"cc = {CC}\n\n")
         f.write("fixflags =\n\n")
+        f.write("asflags =\n\n")
 
         f.write(f"rule cc\n")
         # tools/fix_cc_asm.py post-processes the compiler asm so the modern
         # assembler reproduces the original ee-as encodings (move->daddu,
         # .set mips1 wraps for la/mem-macros/FP conversions, conditional
         # li.s hazard nop).
-        f.write(f"  command = $cc $cflags -S -o $out.s $in && python3 tools/fix_cc_asm.py $out.s $fixflags && {AS} {CC_ASFLAGS} -o $out $out.s\n")
+        f.write(f"  command = $cc $cflags -S -o $out.s $in && python3 tools/fix_cc_asm.py $out.s $fixflags && {AS} {CC_ASFLAGS} $asflags -o $out $out.s\n")
         f.write(f"  description = CC $in\n\n")
 
         f.write(f"rule ld\n")
@@ -243,6 +280,8 @@ def generate_ninja(asm_files, src_files, asset_files):
             f.write(f"  cc = {cc_for(src.name)}\n")
             if src.name in FILE_FIX_FLAGS:
                 f.write(f"  fixflags = {FILE_FIX_FLAGS[src.name]}\n")
+            if asflags_for(src.name):
+                f.write(f"  asflags = {asflags_for(src.name)}\n")
 
         for asset in asset_files:
             obj = BUILD_DIR / asset.with_suffix(".o")

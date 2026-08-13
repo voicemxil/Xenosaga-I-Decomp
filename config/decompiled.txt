@@ -1580,4 +1580,6 @@ sqrtf = 0x003240F8, 0x14; // libm.c
 tanf = 0x00323FC0, 0x78; // libm.c
 __ieee754_fmodf = 0x00326D68, 0x1D0; // libm.c
 fabs = 0x003296E8, 0x34; // libm.c
+scalbnf = 0x00329DE8, 0xC8; // libm.c
+atanf = 0x00329B20, 0x29C; // libm.c
 UmnEventTextInit = 0x00A0F650, 0x24; // Umn.c
