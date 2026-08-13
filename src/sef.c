@@ -137,3 +137,54 @@ void sefSearchMapperIndex(void *p) {
     srsAnalyzeEftNo(p, &a, &b);
     sefSearchMapperIndex2(p, a, b);
 }
+
+extern int sefRandSeed;
+extern float D_004D82D8;
+/* Classic LCG: seed = seed*0x41C64E6D + 12345; keep bits 30..16 as a 0..0x7FFF
+ * draw, scale by 1/32767. */
+float sefRandf(void) {
+    sefRandSeed = sefRandSeed * 0x41C64E6D + 12345;
+    return (float)(((unsigned int)sefRandSeed >> 16) & 0x7FFF) * D_004D82D8;
+}
+
+extern int sefCnvEtEffectNo(int a);
+extern void svFileLoadScript(int a, int b);
+void sefLoadEffect(int a0) {
+    if (a0 > 0) {
+        int v0 = sefCnvEtEffectNo(a0);
+        svFileLoadScript(0, v0);
+    }
+}
+
+extern void sefExecEffect(void);
+void sefProgressEffect(int a0) {
+    if (a0 > 0) {
+        do {
+            sefExecEffect();
+        } while (--a0 != 0);
+    }
+}
+
+typedef struct { char pad[0x10]; int nFlags; } SEF_GLS;
+extern SEF_GLS GameLoopState;
+extern short _initialize;
+extern void svDrawScheduler2D(void);
+void sefDrawEffect2D(void) {
+    if (_initialize != 0 && (GameLoopState.nFlags & 0x04000000) == 0) {
+        svDrawScheduler2D();
+    }
+}
+
+extern void svDrawScheduler3D(void);
+void sefDrawEffect3D(void) {
+    if (_initialize != 0 && (GameLoopState.nFlags & 0x04000000) == 0) {
+        svDrawScheduler3D();
+    }
+}
+
+extern void sefInitClipViewVolume(void *p);
+extern void sefClipViewVolumeA(void *p, void *q);
+void sefClipViewVolume(void *a, void *b) {
+    sefInitClipViewVolume((char *)b + 1264);
+    sefClipViewVolumeA(a, b);
+}

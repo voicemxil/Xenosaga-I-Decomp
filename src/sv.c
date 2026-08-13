@@ -20,3 +20,52 @@ void svDrawScheduler(void) {
 extern int _imageList[];
 extern void *memset(void *, int, unsigned int);
 void svImageListCreate(void) { memset(_imageList, 0, 0x241C); }
+
+extern void sdvDrawAlters(void);
+void svDrawAlters(void) {
+    if (_draw3D == 0) {
+        sdvDrawAlters();
+    }
+}
+
+extern int _scMslCate;
+extern void MEfObjExec2nd(int a);
+void svDrawMissile(int a) {
+    if (_draw3D == 0 && _scMslCate == a) {
+        MEfObjExec2nd(a);
+    }
+}
+
+extern void svDrawSchedulerParticle(void);
+void svDrawScheduler2D(void) {
+    if (_nEffect2D != 0) {
+        _nowImage = 0;
+        _draw3D = 1;
+        svDrawSchedulerParticle();
+    }
+}
+
+typedef struct { char pad[0x14]; short flag; } SV_MAPPER_HDR;
+extern void svImageListDestroy(void *p);
+void svDeleteImageMapper(int idx) {
+    SV_MAPPER_HDR *p = (SV_MAPPER_HDR *)svGetTypeList(idx);
+    if (p->flag != 0) {
+        svImageListDestroy(p);
+    }
+}
+
+int svGetSizeBit(int flags) {
+    int bit = 2;
+    int n = 1;
+    for (;;) {
+        if ((flags & bit) != 0) {
+            return n;
+        }
+        n++;
+        if (n >= 32) {
+            return 0;
+        }
+        bit <<= 1;
+    }
+}
+

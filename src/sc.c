@@ -144,3 +144,223 @@ int scGetAdrScript(SCOBJ *o) {
     }
     return v;
 }
+
+extern void tracePrint(char *fmt, ...);
+extern char D_004CC818[];
+extern char D_004CC850[];
+
+/* scGetCmdScript: reads the current opcode word for the running task,
+ * advancing its cmdBuf[field54] cursor (a halfword index into the
+ * current slot's script table) by one each call. */
+int scGetCmdScript(SCOBJ *o) {
+    short result = 0;
+    if (o->cmdBuf[o->field54] != 0) {
+        result = *(short *)((char *)D_0041E7D0[_nowScript].pTable
+                             + o->cmdBuf[o->field54] * 2);
+    }
+    o->cmdBuf[o->field54]++;
+    return result;
+}
+
+/* Indirect register write: reg with bit 0x8000 set means "the register
+ * number is itself stored in register (reg & ~0x8000)". */
+void scSetReg(int reg, int val) {
+    if ((reg & 0x8000) != 0) {
+        reg = scGetReg(reg & 0xFFFF7FFF);
+    }
+    if ((unsigned int)reg < 16) {
+        D_0041E7D0[_nowScript].regs[reg] = val;
+    } else {
+        tracePrint(D_004CC818, reg);
+    }
+}
+
+/* scGetNumScript: resolve a script operand -- register indirection if the
+ * high bit is set, else a 14-bit unsigned immediate. */
+int scGetNumScript(SCOBJ *o) {
+    int v1 = scGetCmdScript(o);
+    if ((v1 & 0x8000) == 0) {
+        return (short)scGetReg(v1);
+    }
+    if ((v1 & 0x4000) == 0) {
+        v1 &= 0x3FFF;
+    }
+    return v1;
+}
+
+/* Same D_0041E7D0[_nowScript].pTable + ofs*2 shape as scAdrToImm, using the
+ * pending cmdBuf slot as the offset instead of a resolved operand. */
+void *scGetCmdAdrScript(SCOBJ *o) {
+    void *result = 0;
+    int v1 = o->cmdBuf[o->field54];
+    if (v1 != 0) {
+        result = (char *)D_0041E7D0[_nowScript].pTable + v1 * 2;
+    }
+    return result;
+}
+
+int scRETURNScript(SCOBJ *o) {
+    int n = o->field54;
+    if (n > 0) {
+        o->field54 = n - 1;
+        o->cmdBuf[n] = 0;
+    } else {
+        tracePrint(D_004CC850);
+    }
+    return 1;
+}
+
+void *scGetAdrImmScript(SCOBJ *o) {
+    int v1 = scGetAdrScript(o);
+    void *result = (void *)v1;
+    if (v1 != 0) {
+        result = (char *)D_0041E7D0[_nowScript].pTable + v1 * 2;
+    }
+    return result;
+}
+
+int scGetRegScript(SCOBJ *o) {
+    int v1 = scGetCmdScript(o);
+    int result;
+    if ((v1 & 0x8000) != 0) {
+        result = (short)scGetReg(v1 & 0xFFFF7FFF);
+    } else {
+        result = v1;
+    }
+    return result;
+}
+
+/* Same 0x450-stride slot table as SC_SLOT, reaching a short field just past
+ * the regs[16] array (offset 0x46) that SC_SLOT's own padding covers. */
+typedef struct { char pad[0x46]; short field46; char pad2[0x450 - 0x48]; } SC_SLOT_REVE;
+extern SC_SLOT_REVE D_0041E7D0_reve[] __asm__("D_0041E7D0");
+int scREVEScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    scSetReg(reg, D_0041E7D0_reve[_nowScript].field46);
+    return 1;
+}
+
+int scRADDScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    int a = scGetNumScript(o);
+    scSetReg(reg, scGetReg(reg) + a);
+    return 1;
+}
+
+int scRSUBScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    int a = scGetNumScript(o);
+    scSetReg(reg, scGetReg(reg) - a);
+    return 1;
+}
+
+int scR_ANDScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    int a = scGetNumScript(o);
+    scSetReg(reg, scGetReg(reg) & a);
+    return 1;
+}
+
+int scR_ORScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    int a = scGetNumScript(o);
+    scSetReg(reg, scGetReg(reg) | a);
+    return 1;
+}
+
+int scR_XORScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    int a = scGetNumScript(o);
+    scSetReg(reg, scGetReg(reg) ^ a);
+    return 1;
+}
+
+int scRMULScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    int a = scGetNumScript(o);
+    scSetReg(reg, scGetReg(reg) * a);
+    return 1;
+}
+
+int scRSETScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    int a = scGetNumScript(o);
+    scSetReg(reg, a);
+    return 1;
+}
+
+int scRDECScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    scSetReg(reg, scGetReg(reg) - 1);
+    return 1;
+}
+
+int scRINCScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    scSetReg(reg, scGetReg(reg) + 1);
+    return 1;
+}
+
+int scR_NEGScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    scSetReg(reg, -scGetReg(reg));
+    return 1;
+}
+
+int scR_NOTScript(SCOBJ *o) {
+    int reg = scGetCmdScript(o);
+    scSetReg(reg, ~scGetReg(reg));
+    return 1;
+}
+
+typedef struct { char pad[0x5A]; short field5A; char pad2[2]; short field5E; } SC_WAITCNT_OBJ;
+int scWAITCNTScript(SC_WAITCNT_OBJ *o) {
+    int n = scGetNumScript((SCOBJ *)o);
+    int result;
+    if (n > 0) {
+        o->field5E = n;
+        o->field5A = 1;
+        result = 2;
+    } else {
+        result = 1;
+    }
+    return result;
+}
+
+extern void scDeleteTaskAll(int a);
+extern void scDeleteTask(int a, int b);
+extern int _nowEvent;
+int scABORTScript(SCOBJ *o) {
+    int n = scGetNumScript(o);
+    if (n < 0) {
+        scDeleteTaskAll(_nowEvent);
+    } else {
+        scDeleteTask(_nowScript, n);
+    }
+    return 1;
+}
+
+typedef struct { unsigned short flags; char pad[0x44 - 2]; short field44; } SC_AMB_OBJ;
+extern int _nowEvent;
+extern void sdvSetAmbState(int a, int b);
+extern void sdvSetAmbState2(int a, int b);
+void scSetAmbient(SC_AMB_OBJ *o) {
+    if (_nowEvent == 0) {
+        int v = o->field44;
+        if ((o->flags & 0x100) != 0) {
+            sdvSetAmbState2(1, v);
+        } else {
+            sdvSetAmbState(1, v);
+        }
+    }
+}
+
+int *scGetRegAdr(int reg) {
+    int *result = 0;
+    if ((unsigned int)reg < 16) {
+        result = &D_0041E7D0[_nowScript].regs[reg];
+    } else {
+        tracePrint(D_004CC818, reg);
+    }
+    return result;
+}

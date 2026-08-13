@@ -98,6 +98,11 @@ RE_FP_BRANCH_LIKELY = re.compile(r'^\tbc1[ft]l[ \t]')
 RE_SQRT = re.compile(r'^\tsqrt\.s\t\$f(\d+),\$f(\d+)[ \t]*$')
 # A leaf return: `j $31` or `jr $ra`/`jr $31`.
 RE_RETURN = re.compile(r'^\t(j\t\$31|jr\t\$(ra|31))\b')
+# Stores that gas may steal into a leaf return's delay slot. Whether the
+# original did that is function-specific, so this is opt-in per file via
+# --barrier-return-store rather than a blanket rule: most functions here
+# legitimately DO end with a store in the delay slot.
+RE_STORE = re.compile(r'^\t(sw|sh|sb|sd|swc1|s\.s|sq)[ \t]')
 
 
 def wrap_mips1(text):
@@ -131,7 +136,7 @@ def previous_insn(lines, idx):
     return ""
 
 
-def main(path, omitted_hazards):
+def main(path, omitted_hazards, barrier_return_store=False):
     with open(path) as f:
         lines = f.read().split('\n')
 
@@ -165,6 +170,12 @@ def main(path, omitted_hazards):
         m_big = RE_MEM_BIGOFF.match(line)
         if m_big and abs(int(m_big.group(3))) > 32767:
             out.append(wrap_mips1(line))
+            continue
+
+        if (barrier_return_store and RE_STORE.match(line)
+                and RE_RETURN.match(following)):
+            out.append("\t.set push\n\t.set noreorder\n" + line +
+                       "\n\t.set pop")
             continue
 
         if RE_LA.match(line) or RE_MEM.match(line) or RE_CVT.match(line):
@@ -220,5 +231,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("path")
     parser.add_argument("--omit-hazard", action="append", default=[])
+    parser.add_argument("--barrier-return-store", action="store_true",
+                        help="keep a trailing store out of a leaf return delay slot")
     args = parser.parse_args()
-    main(args.path, set(args.omit_hazard))
+    main(args.path, set(args.omit_hazard), args.barrier_return_store)

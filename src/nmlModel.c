@@ -1,5 +1,11 @@
 /* Normal-map model rendering global state accessors */
 
+typedef int TI __attribute__((mode(TI)));
+typedef union {
+    float f[4];
+    TI q;
+} VEC4;
+
 typedef struct {
     int nR;                 /* 0x00 */
     int nG;                 /* 0x04 */
@@ -41,7 +47,8 @@ typedef struct {
 } PIXEL_ALPHA;
 
 typedef struct {
-    char pad0[0x1D0];
+    char pad0[0x1C0];
+    VEC4 uFogCol1;           /* 0x1C0 */
     float aFogDist[20];     /* 0x1D0 */
     float fTransparency2;   /* 0x220 */
     float fReflTransparency;/* 0x224 */
@@ -90,6 +97,11 @@ float s_aShapeWeight[32];
 int s_aMapLast[12];
 short s_aMapShadowParts[8];
 
+VEC4 s_inShadowVec;
+VEC4 s_inGblPos;
+VEC4 s_inGblFogCol;
+int s_nShadowVec;
+
 void *s_pMapLast;
 int s_nToumeiNum;
 int s_nMapShadowParts;
@@ -110,6 +122,21 @@ int s_nRenderCancelOld;
 
 void INIT_BACK_BUFFER(void);
 void nmlModelFogPara(float *pPara, float fNear, float fFar, float fMin, float fMax);
+void INIT_FADE_CONTROL(void *pFade);
+void CLEAR_LAYOUT_MODEL(void *pLayout);
+void CLEAR_PROREAL(void *pProReal);
+void CLEAR_MAP_HANDLE(void *pMapHandle);
+void CLEAR_MODEL_ENTRY(void);
+void FLUSH_MODELSYSTEM(void);
+void FLUSH_ALPHA_GROUP(void);
+void FLUSH_MAP_HANDLE(void *pMapHandle);
+void FLUSH_PARENT_BUF(void);
+void FLUSH_BACK_BUFFER(void);
+
+extern char s_inProReal[];
+
+VEC4 s_inGblPointP[3];
+VEC4 s_inGblPointC[4];
 
 /* Reset the back-buffer request state */
 void nmlModelSetBackBufferClear(void)
@@ -207,10 +234,26 @@ void nmlModelSendPacketChangeSignal(void)
     s_inBackBuffer.nSignal = 0;
 }
 
+/* Reset the back buffer and all four fade controllers */
+void nmlModelSendSignalMovieStart(void)
+{
+    INIT_BACK_BUFFER();
+    INIT_FADE_CONTROL(&s_inFadeIn);
+    INIT_FADE_CONTROL(&s_inFadeOut);
+    INIT_FADE_CONTROL(&s_inActiveFadeIn);
+    INIT_FADE_CONTROL(&s_inActiveFadeOut);
+}
+
 /* Set the MPEG2 cross-fade duration */
 void nmlModelSetMpeg2CrossFadeTime(int time)
 {
     s_inBackBuffer.nCrossFadeTime = time;
+}
+
+/* Add a render-level flag to the layout status2 word */
+void nmlModelSetRenderLevel(int level)
+{
+    s_inLayout.nStatus2 |= level;
 }
 
 /* Lock fade-outs */
@@ -296,6 +339,23 @@ void nmlModelSetFadeInDispose(void)
     s_inFadeIn.nDispose = 1;
 }
 
+/* Start a fade-in over the given time with the given color (x255 scale) */
+/* TODO: near-miss (SCHEDULING, 2 diffs) -- instruction sequence matches the
+ * original exactly, but gas's automatic delay-slot fill swaps the final
+ * swc1 into the jr $ra delay slot (original leaves the delay slot as a
+ * genuine nop, with the swc1 issued before the branch). Same class of
+ * issue as the TI-mode lq/sq near-misses above -- a trailing independent
+ * store before a leaf return keeps getting pulled into the delay slot. */
+void nmlModelSetFadeInInterrupt(int time, float r, float g, float b)
+{
+    s_inFadeIn.nUnkC = 0;
+    s_inFadeIn.nTimeMax = time;
+    s_inFadeIn.nTime = time;
+    s_inFadeIn.nR = (int)(r * 255.0f);
+    s_inFadeIn.nG = (int)(g * 255.0f);
+    s_inFadeIn.nB = (int)(b * 255.0f);
+}
+
 /* Return whether none of the four fade controllers is currently active */
 int nmlModelGetFadeLevel(void)
 {
@@ -307,6 +367,19 @@ int nmlModelGetFadeLevel(void)
     level = (s_inActiveFadeIn.nTime < 0) ? level : 1;
     level = (s_inActiveFadeOut.nTime < 0) ? level : 1;
     return level;
+}
+
+/* Copy the global position into pOut, forcing w = 1.0 */
+/* TODO: near-miss (LOGIC, 5 diffs) -- gcc 2.96 schedules the lq load ahead
+ * of the two lui address computations regardless of source statement order;
+ * the original keeps both lui's together before the load. Every natural
+ * ordering tried gives the same schedule -- looks like a scheduler
+ * tie-break, not a source issue. See nmlModelSetShadowVec/MulColor/FogCol/
+ * GlobalFogCol below for the same wall on TI-mode lq/sq copies. */
+void nmlModelGetGblPosition(void *pOut)
+{
+    ((VEC4 *)pOut)->q = s_inGblPos.q;
+    ((float *)pOut)[3] = 1.0f;
 }
 
 /* Configure the back buffer for a battle transition */
@@ -393,6 +466,16 @@ void nmlModelSetShadowHeight(float height)
     s_inLayout.fShadowHeight = height;
     s_inLayout.nShadowHeightOn = 1;
 }
+
+/* Set the shadow direction vector */
+/* TODO: near-miss (LOGIC, 5 diffs) -- same TI lq/sq scheduling wall as
+ * nmlModelGetGblPosition. */
+void nmlModelSetShadowVec(void *vec)
+{
+    s_inShadowVec.q = ((VEC4 *)vec)->q;
+    s_nShadowVec = 1;
+}
+
 
 /* Flag the current model as a proreal texture target */
 void nmlModelSetTexProreal(void)
@@ -550,11 +633,34 @@ void nmlModelSetMatrix(void *matrix)
     s_inLayout.pMatrix = matrix;
 }
 
+/* Copy a multiplier color into the layout (aFogDist overlay) */
+/* TODO: near-miss (LOGIC, 5 diffs) -- same TI lq/sq scheduling wall. */
+void nmlModelSetMulColor(void *color)
+{
+    ((VEC4 *)&s_inLayout.aFogDist[12])->q = ((VEC4 *)color)->q;
+}
+
+/* Set the fog color for the current model */
+/* TODO: near-miss (LENGTH, 9 diffs) -- same TI lq/sq scheduling wall. */
+void nmlModelSetFogCol(void *color)
+{
+    s_inLayout.uFogCol1.q = ((VEC4 *)color)->q;
+    s_inLayout.nStatus |= 0x2;
+}
+
 /* Set the fog distance parameters for the current model */
 void nmlModelSetFogDist(float fNear, float fFar, float fMin, float fMax)
 {
     nmlModelFogPara(s_inLayout.aFogDist, fNear, fFar, fMin, fMax);
     s_inLayout.nStatus |= 0x2;
+}
+
+/* Set the global fog color */
+/* TODO: near-miss (LOGIC, 10 diffs) -- same TI lq/sq scheduling wall. */
+void nmlModelSetGlobalFogCol(void *color)
+{
+    s_inGblFogCol.q = ((VEC4 *)color)->q;
+    s_inLayout.nStatus |= 0x1000000;
 }
 
 /* Set the global fog distance parameters */
@@ -610,4 +716,24 @@ void nmlModelSetMapLastEntry(void *pData, int no)
 void nmlModelSetMapLastInit(void)
 {
     s_nMapLast = 0;
+}
+
+/* Clear the layout, proreal, map-handle and model-entry state */
+void nmlModelClear(void)
+{
+    CLEAR_LAYOUT_MODEL(&s_inLayout);
+    CLEAR_PROREAL(s_inProReal);
+    CLEAR_MAP_HANDLE(&s_inMapHandle);
+    CLEAR_MODEL_ENTRY();
+}
+
+/* Flush every render subsystem, then clear the model state */
+void nmlModelFlushClear(void)
+{
+    FLUSH_MODELSYSTEM();
+    FLUSH_ALPHA_GROUP();
+    FLUSH_MAP_HANDLE(&s_inMapHandle);
+    FLUSH_PARENT_BUF();
+    FLUSH_BACK_BUFFER();
+    nmlModelClear();
 }

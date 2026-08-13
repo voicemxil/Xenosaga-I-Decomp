@@ -139,6 +139,18 @@ void GamePauseDispCf(void)
     GamePauseDispBG();
 }
 
+extern int F2I(float f);
+
+/* Set the player movement speed thresholds */
+void GameCfPlayerMoveParamSet(float walk, float run, float vectorRate)
+{
+    WALK_THRESHOLD_I = F2I(walk);
+    WALK_THRESHOLD_F = walk;
+    RUN_THRESHOLD_I = F2I(run);
+    RUN_THRESHOLD_F = run;
+    VECTOR_RATE = vectorRate;
+}
+
 /* Initialise the player movement speed thresholds */
 void GameCfPlayerMoveInit(void)
 {
