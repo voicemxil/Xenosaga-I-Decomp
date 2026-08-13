@@ -328,3 +328,30 @@ void SEQ_motionUnit(UNIT *u)
         }
     }
 }
+
+/* Rotation command state used when an actor turns toward another actor. */
+typedef struct {
+    void *pTarget;                  /* 0x00 */
+    u8 pad04[0x10];                 /* 0x04 */
+    int nFrames;                    /* 0x14 */
+    u8 pad18[0x4];                  /* 0x18 */
+    int nFlags;                     /* 0x1C */
+} SEQ_ROT_TARGET;
+
+extern void *D_00348684[3];
+void SEQ_rotate(ACTOR *);
+void ACT_setMotion(ACTOR *, int);
+
+/* Begin the fixed turn-to-player sequence. */
+void SEQ_setRotY2Player(ACTOR *a)
+{
+    SEQUENCE *p = &actSequence[a->nSerial];
+    SEQ_ROT_TARGET *r = (SEQ_ROT_TARGET *)&p->rot;
+
+    p->pFunc = SEQ_rotate;
+    r->pTarget = D_00348684[0];
+    p->nFlags |= 4;
+    r->nFrames = 10;
+    r->nFlags |= 2;
+    ACT_setMotion(a, 7);
+}

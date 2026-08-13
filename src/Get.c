@@ -206,22 +206,19 @@ void Get_MiddlePoint(VECTOR *from, VECTOR *to, short current, short total,
     }
 }
 
-/* TODO: near-match (SCHEDULING) - this has the exact instruction multiset,
- * but GCC orders the x and z scale/multiply/store sequence differently from
- * the original. Find the original expression/local-variable order. */
 /* Produce a planar step from one point toward another. */
 void Get_One_Step(VECTOR *from, VECTOR *to, VECTOR *result, float amount)
 {
     float dx = to->x - from->x;
     float dz = to->z - from->z;
     float scale = 1.0f / Get_Distance(from, to);
-    float z_step = dz * scale * amount;
     float x_step = dx * scale * amount;
+    float z_step = dz * scale * amount;
 
     result->y = 0.0f;
     result->w = 1.0f;
-    result->z = z_step;
     result->x = x_step;
+    result->z = z_step;
 }
 
 /* Project a point by an angle and planar distance */

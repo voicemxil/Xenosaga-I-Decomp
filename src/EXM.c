@@ -199,3 +199,66 @@ float EXM_GetShakeRad(void)
 {
     return wind->fShakeRad;
 }
+
+/* TODO: LENGTH 15/13: original retains a duplicated type constant on both
+ * sides of the null check; the natural shared assignment is folded. */
+/* Use a fixed direction for the current wind */
+void EXM_SetDirectionalWind(EXM_VECTOR *pDir)
+{
+    EXM_WIND *pWind = wind;
+
+    if (pDir) {
+        pWind->vDir = *pDir;
+    }
+    pWind->nType = 1;
+}
+
+/* TODO: LENGTH 15/13: original retains a duplicated type constant on both
+ * sides of the null check; the natural shared assignment is folded. */
+/* Use a point source for the current wind */
+void EXM_SetPointWind(EXM_VECTOR *pPos)
+{
+    EXM_WIND *pWind = wind;
+
+    if (pPos) {
+        pWind->vDir = *pPos;
+    }
+    pWind->nType = 2;
+}
+
+int exm_skirt_collision_part;
+
+extern void CheckSkirtCollisionSub(void *, void *, void *, int);
+
+/* Check each active skirt collision section */
+void EXM_CheckSkirtCollision(void *pModel, void *pBone, void *pSkirt, int nFlag)
+{
+    if (nFlag & 0x80) {
+        exm_skirt_collision_part = 4;
+        CheckSkirtCollisionSub(pModel, pBone, pSkirt, nFlag);
+        exm_skirt_collision_part = 5;
+        CheckSkirtCollisionSub(pModel, pBone, pSkirt, nFlag);
+        return;
+    }
+
+    if (nFlag & 0x100) {
+        exm_skirt_collision_part = 6;
+        CheckSkirtCollisionSub(pModel, pBone, pSkirt, nFlag);
+        exm_skirt_collision_part = 7;
+        CheckSkirtCollisionSub(pModel, pBone, pSkirt, nFlag);
+        return;
+    }
+
+    exm_skirt_collision_part = 0;
+    CheckSkirtCollisionSub(pModel, pBone, pSkirt, nFlag);
+    exm_skirt_collision_part = 1;
+    CheckSkirtCollisionSub(pModel, pBone, pSkirt, nFlag);
+
+    if (nFlag & 0x8000) {
+        exm_skirt_collision_part = 2;
+        CheckSkirtCollisionSub(pModel, pBone, pSkirt, nFlag);
+        exm_skirt_collision_part = 3;
+        CheckSkirtCollisionSub(pModel, pBone, pSkirt, nFlag);
+        return;
+    }
+}

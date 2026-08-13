@@ -216,8 +216,6 @@ int HitCheckContainerPosSize(void *position, int excluded, float size)
 }
 
 /* Find a collidable map unit belonging to another team. */
-/* TODO: REGISTER near-match: the natural byte-base-plus-offset expression emits
- * addu $a1,$fp,$s3; the original's sole difference is addu $a1,$s3,$fp. */
 int HitCheckUwamono(void *position)
 {
     HitUwamonoView *view = (HitUwamonoView *)(D_0047AEC0 - 0x100);
@@ -234,7 +232,7 @@ int HitCheckUwamono(void *position)
         if (view->team == ((HitProbe *)position)->team) {
             goto next;
         }
-        unit = (HitMapUnit *)((char *)base + offset);
+        unit = (HitMapUnit *)((unsigned int)offset + (unsigned int)base);
         status = *(unsigned int *)((char *)view - 0xA0);
         if (status & 0x20000) {
             goto next;
