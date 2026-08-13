@@ -1961,3 +1961,179 @@ sqrtf (float x)
 {
   return __ieee754_sqrtf (x);
 }
+
+/* ------------------------------------------------------------------ */
+/* k_sinf.c                                                           */
+/* ------------------------------------------------------------------ */
+
+static const float
+  half_kf = 5.0000001490e-01,	/* 0x3f000000 */
+  S1f = -1.6666667536e-01,	/* 0xbe2aaaab */
+  S2f = 8.3333340008e-03,	/* 0x3c088889 */
+  S3f = -1.9841270478e-04,	/* 0xb9500d01 */
+  S4f = 2.7557314866e-06,	/* 0x3638ef1b */
+  S5f = -2.5050760133e-08,	/* 0xb2d72f34 */
+  S6f = 1.5896910524e-10;	/* 0x2f2ec9d3 */
+
+float
+__kernel_sinf (float x, float y, int iy)
+{
+  float z, r, v;
+  __int32_t ix;
+  GET_FLOAT_WORD (ix, x);
+  ix &= 0x7fffffff;		/* high word of x */
+  if (ix < 0x32000000)		/* |x| < 2**-27 */
+    {
+      if ((int) x == 0)
+	return x;
+    }				/* generate inexact */
+  z = x * x;
+  v = z * x;
+  r = S2f + z * (S3f + z * (S4f + z * (S5f + z * S6f)));
+  if (iy == 0)
+    return x + v * (S1f + z * r);
+  else
+    return x - ((z * (half_kf * y - v * r) - y) - v * S1f);
+}
+
+/* ------------------------------------------------------------------ */
+/* k_cosf.c                                                           */
+/* ------------------------------------------------------------------ */
+
+static const float
+  one_cf = 1.0,
+  C1f = 4.1666668840e-02,	/* 0x3d2aaaab */
+  C2f = -1.3888889516e-03,	/* 0xbab60b61 */
+  C3f = 2.4801588097e-05,	/* 0x37d00d01 */
+  C4f = -2.7557315008e-07,	/* 0xb493f27c */
+  C5f = 2.0875723927e-09,	/* 0x310f74f6 */
+  C6f = -1.1359647814e-11;	/* 0xad47d74e */
+
+float
+__kernel_cosf (float x, float y)
+{
+  float a, hz, z, r, qx;
+  __int32_t ix;
+  GET_FLOAT_WORD (ix, x);
+  ix &= 0x7fffffff;		/* ix = |x|'s high word */
+  if (ix < 0x32000000)
+    {				/* if x < 2**27 */
+      if (((int) x) == 0)
+	return one_cf;		/* generate inexact */
+    }
+  z = x * x;
+  r = z * (C1f + z * (C2f + z * (C3f + z * (C4f + z * (C5f + z * C6f)))));
+  if (ix < 0x3e99999a)		/* if |x| < 0.3 */
+    return one_cf - ((float) 0.5 * z - (z * r - x * y));
+  else
+    {
+      if (ix > 0x3f480000)
+	{			/* x > 0.78125 */
+	  qx = (float) 0.28125;
+	}
+      else
+	{
+	  SET_FLOAT_WORD (qx, ix - 0x01000000);	/* x/4 */
+	}
+      hz = (float) 0.5 * z - qx;
+      a = one_cf - qx;
+      return a - (hz - (z * r - x * y));
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* k_tanf.c                                                           */
+/* ------------------------------------------------------------------ */
+
+static const float
+  one_t = 1.0,
+  pio4_t = 7.8539814055e-01,	/* 0x3f490fda */
+  pio4lo_t = 3.7748947967e-08,	/* 0x33222168 */
+  Tt[] = {
+  3.3333335072e-01,		/* 0x3eaaaaab */
+  1.3333334401e-01,		/* 0x3e088889 */
+  5.3968255408e-02,		/* 0x3d5d0dd1 */
+  2.1869488526e-02,		/* 0x3cb327a4 */
+  8.8632397819e-03,		/* 0x3c11371f */
+  3.5920790979e-03,		/* 0x3b6b6916 */
+  1.4562094875e-03,		/* 0x3abede48 */
+  5.8804127912e-04,		/* 0x3a1a26c8 */
+  2.4646314705e-04,		/* 0x398137b9 */
+  7.8179446064e-05,		/* 0x38a3f445 */
+  7.1407253927e-05,		/* 0x3895c07a */
+  -1.8558638203e-05,		/* 0xb79bae5f */
+  2.5907306281e-05,		/* 0x37d95384 */
+};
+
+float
+__kernel_tanf (float x, float y, int iy)
+{
+  float z, r, v, w, s;
+  __int32_t ix, hx;
+  GET_FLOAT_WORD (hx, x);
+  ix = hx & 0x7fffffff;		/* high word of |x| */
+  if (ix < 0x31800000)		/* x < 2**-28 */
+    {
+      if ((int) x == 0)
+	{			/* generate inexact */
+	  if ((ix | (iy + 1)) == 0)
+	    return one_t / fabsf (x);
+	  else
+	    return (iy == 1) ? x : -one_t / x;
+	}
+    }
+  if (ix >= 0x3f2ca140)
+    {				/* |x|>=0.6744 */
+      if (hx < 0)
+	{
+	  x = -x;
+	  y = -y;
+	}
+      z = pio4_t - x;
+      w = pio4lo_t - y;
+      x = z + w;
+      y = 0.0;
+    }
+  z = x * x;
+  w = z * z;
+  /* Break x^5*(T[1]+x^2*T[2]+...) into
+   *   x^5(T[1]+x^4*T[3]+...+x^20*T[11]) +
+   *   x^5(x^2*(T[2]+x^4*T[4]+...+x^22*[T12]))
+   */
+  r = Tt[1] + w * (Tt[3] + w * (Tt[5] + w * (Tt[7] + w * (Tt[9]
+							  + w * Tt[11]))));
+  v = z * (Tt[2] + w * (Tt[4] + w * (Tt[6] + w * (Tt[8] + w * (Tt[10]
+							       +
+							       w *
+							       Tt[12])))));
+  s = z * x;
+  r = y + z * (s * (r + v) + y);
+  r += Tt[0] * s;
+  w = x + r;
+  if (ix >= 0x3f2ca140)
+    {
+      v = (float) iy;
+      return (float) (1 - ((hx >> 30) & 2)) * (v - (float) 2.0 * (x -
+								 (w * w /
+								  (w + v) -
+								  r)));
+    }
+  if (iy == 1)
+    return w;
+  else
+    {				/* if allow error up to 2 ulp,
+				   simply return -1.0/(x+r) here */
+      /*  compute -1.0/(x+r) accurately */
+      float a, t;
+      __int32_t i;
+      z = w;
+      GET_FLOAT_WORD (i, z);
+      SET_FLOAT_WORD (z, i & 0xfffff000);
+      v = r - (z - x);		/* z+v = r+x */
+      t = a = -(float) 1.0 / w;	/* a = -1.0/w */
+      GET_FLOAT_WORD (i, t);
+      SET_FLOAT_WORD (t, i & 0xfffff000);
+      s = (float) 1.0 + t * z;
+      return t + a * (s + t * v);
+    }
+}

@@ -332,9 +332,16 @@ int s_nReflRotType;
 float s_inReflRotY;
 float s_inReflRotX;
 
-/* Rebuild and send the reflection rotation matrix (type 1: identity,
- * type 2: Y-then-X rotation) when pModel's flag bit or the cached type
- * changes; a no-op when the cached type is already current */
+/* TODO: near-miss (18/54 words, LOGIC/register). Logic, field offsets,
+ * and call sequence verified against asm. Original's `li s0,1; li s1,2;
+ * movn s0,s1,cond` keeps s0=1 as the kept/default value and s1=2 as the
+ * override, with the SECOND textual branch (nType==1) jumping forward
+ * to a block placed AFTER the nType==2 code -- i.e. the else-if order is
+ * inverted from what a plain top-down `if/else if` naturally lays out.
+ * Writing the source with nType==2 checked first reproduces that branch
+ * layout but flips which of s0/s1 gets the default vs override value;
+ * every natural pairing of (check order) x (default-value order) tried
+ * fixes one half and breaks the other. */
 void nmlPacketAddReflRot(void *pModel)
 {
     u_int aMtx[16];
@@ -345,12 +352,7 @@ void nmlPacketAddReflRot(void *pModel)
         nType = 2;
     }
     s_pPacket = xglPacketGetCurrent();
-    if (nType == 1) {
-        if (s_nReflRotType == nType) {
-            return;
-        }
-        xglMatrixUnit(aMtx);
-    } else if (nType == 2) {
+    if (nType == 2) {
         if (s_nReflRotType == nType) {
             return;
         }
@@ -358,6 +360,11 @@ void nmlPacketAddReflRot(void *pModel)
         xglMatrixStackRotY(s_inReflRotY);
         xglMatrixStackRotX(s_inReflRotX);
         xglMatrixStackSave(aMtx);
+    } else if (nType == 1) {
+        if (s_nReflRotType == nType) {
+            return;
+        }
+        xglMatrixUnit(aMtx);
     }
     sceVif1PkCnt(s_pPacket, 0);
     sceVif1PkOpenUpkCode(s_pPacket, 0x3EC, 0x6C, 1, 1);
@@ -380,5 +387,33 @@ void nmlPacketAddGifTagStandard(int nA, int nB)
     aTag[3] = 0;
     sceVif1PkOpenUpkCode(s_pPacket, 0x3F3, 0x6C, 1, 1);
     sceVif1PkAddUpkData128(s_pPacket, *(TI *)aTag);
+    sceVif1PkCloseUpkCode(s_pPacket);
+}
+
+extern unsigned short D_004A90FA;
+
+/* TODO: near-miss (33/46 words, LENGTH). Logic, field offsets and the
+ * pi-override condition are verified against asm. Original schedules
+ * the independent D_004A90FA load+shift LATE (right before its compare,
+ * after the pModel+0x70 quadword copy); gcc here always hoists that
+ * independent load earlier regardless of C statement order or pointer
+ * staging -- looks like a pure scheduler tie-break. */
+void nmlPacketAddScreen(void *pModel)
+{
+    u_int aBuf[4];
+    char *pSrc;
+
+    s_pPacket = xglPacketGetCurrent();
+    sceVif1PkCnt(s_pPacket, 0);
+    pSrc = (char *)pModel + 0x70;
+    *(TI *)aBuf = *(TI *)pSrc;
+    if ((D_004A90FA << 5) != 0x3800) {
+        ((float *)aBuf)[3] = 3.141592741f;
+    }
+    sceVif1PkOpenUpkCode(s_pPacket, 0x3C7, 0x6C, 1, 1);
+    sceVif1PkAddUpkData128(s_pPacket, *(TI *)aBuf);
+    sceVif1PkCloseUpkCode(s_pPacket);
+    sceVif1PkOpenUpkCode(s_pPacket, 0x3C6, 0x6C, 1, 1);
+    sceVif1PkAddUpkData128(s_pPacket, *(TI *)((char *)pModel + 0x80));
     sceVif1PkCloseUpkCode(s_pPacket);
 }
