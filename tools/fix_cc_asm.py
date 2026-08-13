@@ -296,22 +296,25 @@ def main(path, omitted_hazards, barrier_return_store=None,
             if RE_CVT.match(line) and re.match(r'^\t(jal|j)\t[A-Za-z_]', following):
                 out.append(wrap_mips1_noreorder(line))
                 continue
+            # A conversion immediately before a leaf return is a case gas's
+            # own delay-slot-fill (active whenever the block isn't
+            # `.set noreorder`) can steal into the jr's delay slot, bumping
+            # the compiler's real delay-slot instruction (e.g. mul.s using
+            # the converted value) out of place. Barrier it with noreorder
+            # instead of padding a literal nop after it: sefRandf has this
+            # exact mtc1->cvt->jr/mul.s shape with NO extra nop in the
+            # original, so the fix must be "stop gas reordering", not "add
+            # a byte to compensate for a steal that noreorder would have
+            # prevented for free".
+            if RE_CVT.match(line) and RE_RETURN.match(following):
+                out.append(wrap_mips1_noreorder(line))
+                continue
             m_mem = RE_MEM.match(line)
             if m_mem and m_mem.group(1) in LOAD_OPS:
                 wrapped = wrap_mips1_noreorder(line)
             else:
                 wrapped = wrap_mips1(line)
             if needs_hazard_nop:
-                wrapped += "\n\tnop"
-            # Modern gas otherwise moves a conversion fed by mtc1 into a
-            # following return delay slot; the original assembler kept it
-            # in place after the mtc1 hazard nop. This only applies when a
-            # leaf return actually follows -- applying it unconditionally
-            # inserted a nop the original does not have (seen in MAP and
-            # Enemy, reported independently by two agents).
-            if (RE_CVT.match(line)
-                    and re.match(r'^\tmtc1[ \t]', previous_insn(lines, i))
-                    and RE_RETURN.match(following)):
                 wrapped += "\n\tnop"
             out.append(wrapped)
             continue
