@@ -27,8 +27,12 @@ MEM_OPS = ("sw", "sh", "sb", "swc1", "lw", "lh", "lb", "lbu", "lhu",
 
 RE_MOVE = re.compile(r'\tmove\t(\$[0-9a-z]+),(\$[0-9a-z]+)')
 RE_LA = re.compile(r'^\tla[ \t](.*)$')
+# Symbol operands can be named globals (`foo($2)`) or compiler-generated
+# local labels (`$L41($2)`, most commonly jump tables).  Both are assembler
+# macros whose indexed address expansion must use the original ee-as 32-bit
+# `addu`, not modern gas's `daddu`.
 RE_MEM = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS) +
-                    r')[ \t]([^,]*),([A-Za-z_.].*)$')
+                    r')[ \t]([^,]*),((?:[A-Za-z_.]|\$L).*)$')
 # Same load/store macro, but against a numeric absolute address (e.g.
 # `sw $4,1879048248` from `((S *)0x70000038)->f = x`). No parentheses, so
 # it is a macro to expand rather than a plain register-offset access.

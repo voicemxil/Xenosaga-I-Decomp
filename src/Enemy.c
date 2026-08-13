@@ -132,6 +132,7 @@ void xglSoundEffectStopID(int, int);
 void xglSoundEffectStopDirect(int);
 void xglSoundEffectPosID(int, float *, int, int);
 void SsdFadeoutEffect(int, int, int);
+int xglSRand(void);
 void TM_Enemy_Move_Step(int, float *, float);
 void ACT_setMotion2(ACTOR *, int, int);
 int xglCdReadFile(char *, void *, int, int);
@@ -147,11 +148,12 @@ extern char *AdrsEnemySphere;
 extern char *AdrsEnemySquare;
 
 /* React to an explosion hit: stop, face the player and pick a recovery action
-   TODO: near-miss - one spurious `andi 0xff` after the flag test and a $v0/$v1
-   tie-break on the GameLoopState base register */
+   TODO: near-miss - only the GameLoopState address-base register differs
+   ($v0 from gcc versus $v1 in the original) */
 void Enemy_Damage_Explosion(ACTOR *a)
 {
     ENEPC *p;
+    int nFlag;
 
     p = &enepc[a->nSerial];
     p->fMove[0] = 0.0f;
@@ -160,7 +162,8 @@ void Enemy_Damage_Explosion(ACTOR *a)
     a->fAngle = Get_Angle(&a->fPos[0], &GameLoopState.pPlayer->fPos[0]);
     if ((short)p->nWait++ >= p->nWaitLimit) {
         a->nFlags &= ~0x800000;
-        if (p->nUnk006A & 1) {
+        nFlag = p->nUnk006A;
+        if (nFlag & 1) {
             Enemy_ActionReady(a, 7);
         } else {
             Enemy_ActionReady(a, 6);
@@ -234,6 +237,62 @@ void Enemy_Found(ACTOR *a)
     }
     if (a->nAlive != 0x2201) {
         a->fAngle = Get_Angle(&a->fPos[0], &GameLoopState.pPlayer->fPos[0]);
+    }
+}
+
+/* Hold a paused enemy until its wait expires, then choose its next action */
+void Enemy_Pause(ACTOR *a)
+{
+    ACTOR *pActor;
+    ENEPC *p;
+    int nRandom;
+
+    p = enepc;
+    p += a->nSerial;
+    pActor = a;
+    if ((u8)((u8)p->nType + 251) < 2) {
+        if (pActor->nFlags & 0x400000) {
+            pActor->fAngle = Get_Angle(&pActor->fPos[0], &GameLoopState.pPlayer->fPos[0]);
+        }
+    }
+    if (p->nWaitLimit - 1 <= (short)p->nWait++) {
+        switch ((u8)p->nType) {
+        case 1:
+        case 2:
+        case 3:
+        case 8:
+        case 9:
+            Enemy_ActionReady(pActor, 1);
+            break;
+        case 5:
+        case 6:
+            Enemy_ActionReady(pActor, 4);
+            if (p->nStatus & 0x10) {
+                p->nUnk0040 += 2;
+            }
+            break;
+        case 12:
+            Enemy_ActionReady(pActor, 14);
+            break;
+        case 13:
+            Enemy_ActionReady(pActor, 15);
+            break;
+        case 4:
+        case 7:
+        case 10:
+        case 11:
+        default:
+            nRandom = (u16)(xglSRand() & 1);
+            switch (nRandom) {
+            case 0:
+                Enemy_ActionReady(pActor, 4);
+                break;
+            case 1:
+                Enemy_ActionReady(pActor, 2);
+                break;
+            }
+            break;
+        }
     }
 }
 
@@ -367,17 +426,18 @@ void Enemy_Command_Motion(ACTOR *a, int nMotion, char nLoop, int nIn, int nOut,
     }
 }
 
-/* Change an enemy's freeze mode, saving and restoring its motion speed 
-   TODO: near-miss - gcc leaves the beq delay slot empty where the original filled it with the lbu reload (plus a knock-on alignment nop) */
+/* Change an enemy's freeze mode, saving and restoring its motion speed */
 void Enemy_Command_Freeze(ACTOR *a, int nMode)
 {
     ENEPC *p;
+    u8 nFreeze;
 
     p = &enepc[a->nSerial];
+    nFreeze = (u8)p->nFreeze;
     if (p->nFreeze == nMode) {
         return;
     }
-    if ((u_int)((u8)p->nFreeze - 1) < 3 && (u_int)(nMode - 1) < 3) {
+    if ((u_int)(nFreeze - 1) < 3 && (u_int)(nMode - 1) < 3) {
         return;
     }
     p->nFreeze = nMode;
@@ -639,4 +699,36 @@ void Enemy_LoadPreset(void *pBuf, char *pName)
     strcat(aPath, ".dat");
     AdrsEnemyPreset = pBuf;
     xglCdReadFile(aPath, pBuf, 0, 0);
+}
+
+extern u16 D_00490DB8[];
+float Get_Distance3D(float *, float *);
+void Check_Discovery(ACTOR *);
+
+/* Alert nearby enemies that can hear a sound at the supplied position
+   TODO: near-miss - exact instruction count and control flow, but gcc hoists
+   actor+0x128 and enepc+0x38AC as separate induction bases.  The original
+   keeps actor and nested-work pointers plus byte offsets, then materializes
+   the enepc base after Get_Distance3D; this cascades through the saved regs. */
+void Enemy_FindByEar(ACTOR *pIgnore, float *pPos)
+{
+    ACTOR *pActor;
+    float fDistance;
+    short i;
+
+    if ((D_00490DB8[0] & 0x200) == 0) {
+        for (i = 0; i < 64; i++) {
+            pActor = &actor[i];
+            if (pIgnore != pActor) {
+                if (*(float *)((char *)&actor[i] + 0x128) != 0.0f) {
+                    fDistance = Get_Distance3D(pPos, &pActor->fPos[0]);
+                    if (enepc[i].nFreeze == 0 &&
+                        *(short *)((char *)&enepc[i] + 0x38AC) <= 0 &&
+                        fDistance < *(float *)((char *)&actor[i] + 0x128)) {
+                        Check_Discovery(pActor);
+                    }
+                }
+            }
+        }
+    }
 }

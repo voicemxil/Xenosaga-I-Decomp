@@ -1417,3 +1417,5 @@ EXM_CheckSkirtCollision = 0x0031D4E0, 0x15C; // EXM.c
 Get_One_Step = 0x002D7AE0, 0x94; // Get.c
 INIT_BACK_BUFFER = 0x0022E4A0, 0x34; // INIT.c
 HitCheckUwamono = 0x002C4150, 0x100; // Hit.c
+Enemy_Pause = 0x002CCF98, 0x1BC; // Enemy.c
+Enemy_Command_Freeze = 0x002D2E98, 0xDC; // Enemy.c
