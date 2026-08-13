@@ -78,6 +78,12 @@ typedef DItype intfrac;
    #ifdef/#else blocks. Sony built this file without denormal support. */
 #define NO_DENORMALS 1
 
+/* __pack_d's repeated load-mask-or-store triples (a2 &= ~fieldmask;
+   a2 |= fieldbits; ... x3, once per field) are the bitfield-store
+   codegen shape, not the plain-shift dst.value_raw |= ... form -- so
+   Sony's target tm.h defines this. */
+#define FLOAT_BIT_ORDER_MISMATCH 1
+
 #define INLINE __inline__
 
 /* Preserve the sticky-bit when shifting fractions to the right.  */
@@ -118,6 +124,16 @@ typedef union
   FLO_type value;
   fractype value_raw;
   halffractype words[2];
+
+#ifdef FLOAT_BIT_ORDER_MISMATCH
+  struct
+    {
+      fractype fraction:FRACBITS __attribute__ ((packed));
+      unsigned int exp:EXPBITS __attribute__ ((packed));
+      unsigned int sign:1 __attribute__ ((packed));
+    }
+  bits;
+#endif
 }
 FLO_union_type;
 
@@ -272,9 +288,15 @@ pack_d ( fp_number_type *  src)
 	}
     }
 
+#ifdef FLOAT_BIT_ORDER_MISMATCH
+  dst.bits.fraction = fraction;
+  dst.bits.exp = exp;
+  dst.bits.sign = sign;
+#else
   dst.value_raw = fraction & ((((fractype)1) << FRACBITS) - (fractype)1);
   dst.value_raw |= ((fractype) (exp & ((1 << EXPBITS) - 1))) << FRACBITS;
   dst.value_raw |= ((fractype) (sign & 1)) << (FRACBITS | EXPBITS);
+#endif
 
   return dst.value;
 }

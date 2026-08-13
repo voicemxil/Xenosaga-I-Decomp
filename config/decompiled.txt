@@ -1600,3 +1600,5 @@ litodp = 0x0032C360, 0xB8; // fpbit.c
 fptodp = 0x0032BB88, 0x3C; // fpbit.c
 
 __unpack_d = 0x0032DDA0, 0xAC; // fpbit.c
+
+__pack_d = 0x0032DC88, 0x118; // fpbit.c
