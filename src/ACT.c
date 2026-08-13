@@ -333,8 +333,20 @@ int ACT_setArms(ACTOR *a, ACTOR *b, int nMode, int nFlags)
 {
     int nJoint;
 
-    /* TODO: near-miss - emits bnel where the original has bne with a
-       duplicated delay slot; every other instruction matches */
+    /* TODO: near-miss - single-instruction diff: emits bnel where the
+       original has plain bne for the "nMode == 0x108" check; every other
+       instruction (incl. register alloc and store/arg order) is byte-
+       identical. gcc 2.96 chooses bnel here because the delay-slot store
+       (move v0,s0, staging the return value) is dead on the not-taken path
+       (a later "move v0,s0" at the merge point overwrites it), so it's safe
+       to annul. 10 source variants tried this session (else-if, split ifs,
+       early-return before the check, switch on nMode, register-pinned
+       compare temp at $2, asm memory barrier, redundant nResult local) -
+       all either reproduce this exact bnel or, when they do get plain bne
+       (via an early "if (nMode != 0x108) return" form), break register
+       allocation ($2->$3) and call-argument evaluation order elsewhere.
+       Looks like a genuine gcc branch-likely cost heuristic tied to CFG
+       shape, not reachable from C. Do not re-attempt without a new idiom. */
     if ((nMode & 0xFF00) == 0) {
         nJoint = ACT_jointGetAccessories(b, nMode);
         if (nJoint > 0) {

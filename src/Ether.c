@@ -309,7 +309,16 @@ void EtherTreeTargetChange(unsigned int id, int setBase)
 }
 
 /* TODO: near-match (LOGIC) - one opcode differs: gcc emits beqzl for the
- * mode test while the original uses beqz with the loop test in its slot. */
+ * mode test while the original uses beqz. Root cause matches the
+ * ACT_setArms wall: the mode-check's delay slot (the loop's "i < 2" test)
+ * is dead on the not-taken/fallthrough path (subRightDraw's call site
+ * recomputes it right after returning), so 2.96 uses the annulling branch
+ * to skip it there; the original just re-executes it redundantly. The
+ * flags-check branch just above stays plain beqz because ITS delay slot is
+ * the i++ increment, which is never dead. Tried: continue-style early-exit
+ * (identical codegen to &&), an asm barrier on `i` before the call (made it
+ * worse, 4 diffs). Same class of unreachable-from-C annulment heuristic as
+ * ACT_setArms; do not re-attempt without a new idiom for that wall. */
 /* Draw each active ether-tree right-panel slot */
 void EtherTreeRightDraw(void)
 {

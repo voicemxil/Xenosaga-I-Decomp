@@ -396,7 +396,6 @@ void MAP_updateUnitMotion(MAPUNIT *pUnit)
 {
 }
 
-/* TODO: near-miss - the two %hi base loads come out in the opposite order */
 /* Call a handler for every unit belonging to one sequence group */
 int MAP_callUnitGroup(int nGroup, void (*pFunc)(MAPUNIT *))
 {
@@ -405,8 +404,12 @@ int MAP_callUnitGroup(int nGroup, void (*pFunc)(MAPUNIT *))
     int i;
 
     if (pFunc != 0) {
-        pUnit = MapUnit;
-        pSeq = unitSequence;
+        register MAPUNIT *pU __asm__("$2");
+        register UNITSEQ *pS __asm__("$3");
+        pS = unitSequence;
+        pU = MapUnit;
+        pUnit = pU;
+        pSeq = pS;
         for (i = 0x3F; i >= 0; i--) {
             if (pSeq->nGroup == nGroup) {
                 pFunc(pUnit);

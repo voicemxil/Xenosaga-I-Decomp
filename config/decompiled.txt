@@ -1337,6 +1337,7 @@ Java_xeno_Stage_setFade__IIFFF = 0x00304FF0, 0xF4; // Java_Stage.c
 Java_xeno_Stage_setEventFade__IFFFIFFF = 0x003050E8, 0x68; // Java_Stage.c
 Java_xeno_Stage_setBgColor__FFF = 0x00305320, 0xFC; // Java_Stage.c
 MAP_drawUnitItemBox = 0x002C7310, 0xA0; // MAP.c
+MAP_callUnitGroup = 0x00320858, 0x84; // MAP.c
 Enemy_Command_Sac_Turn = 0x002D33F8, 0xD8; // Enemy.c
 Java_xeno_vm_Thread_setTarget__Ljava_lang_Object_Ljava_lang_String_ = 0x002F6588, 0x78; // Java_vm.c
 Java_xeno_Chr_setArgs__III = 0x002FEFF0, 0x90; // Java_Chr.c
