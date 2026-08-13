@@ -1359,6 +1359,7 @@ xglVectorNormal = 0x002297E8, 0x28; // xglVector
 xglVectorMulMat = 0x002299F0, 0x30; // xglVector
 xglHddDummyCB = 0x002271A0, 0x8; // xglHdd
 xglLightCalcMatrix = 0x0022ADE0, 0x5C; // xglLight
+xglLightIntensityAmbient = 0x0022ACE8, 0x10; // xglLight
 xglLightDirection = 0x0022AD20, 0x3C; // xglLight
 DefocusMainType01 = 0x0024E2C0, 0x198; // Defocus
 DefocusMainType02 = 0x0024E458, 0x144; // Defocus

@@ -102,6 +102,18 @@ RE_FP_BRANCH_LIKELY = re.compile(r'^\tbc1[ft]l[ \t]')
 RE_SQRT = re.compile(r'^\tsqrt\.s\t\$f(\d+),\$f(\d+)[ \t]*$')
 # A leaf return: `j $31` or `jr $ra`/`jr $31`.
 RE_RETURN = re.compile(r'^\t(j\t\$31|jr\t\$(ra|31))\b')
+# A store gcc's own RTL scheduler (not gas) placed in a leaf return's
+# delay slot -- e.g. `j $31 / sq $2,0($4)`. The original ee-as build
+# instead keeps the store BEFORE the branch, with a genuine nop in the
+# delay slot (same fingerprint as the TI-mode lq/sq near-misses and the
+# swc1-after-mul cases: an independent trailing store keeps getting
+# pulled forward). This is a pure position swap -- a delay-slot
+# instruction executes unconditionally exactly once either way, so
+# moving it immediately before the branch (with the branch's own delay
+# slot now a nop) is semantically identical. Opt-in per file, since most
+# functions legitimately want the store in the delay slot.
+RE_RETURN_DELAY_STORE = re.compile(
+    r'^\t(sw|sh|sb|sd|swc1|s\.s|sq)[ \t]')
 # Stores that gas may steal into a leaf return's delay slot. Whether the
 # original did that is function-specific, so this is opt-in per file via
 # --barrier-return-store rather than a blanket rule: most functions here
@@ -140,9 +152,36 @@ def previous_insn(lines, idx):
     return ""
 
 
-def main(path, omitted_hazards, barrier_return_store=False):
+def hoist_return_delay_stores(lines):
+    """Swap an immediately-adjacent `j $31` / store pair so the store
+    comes first and the delay slot is left as a plain nop. Only handles
+    the case where the store is the literal next line after the branch
+    (i.e. really is gcc's own delay-slot fill, not something separated
+    by directives) -- that is the only shape gcc actually emits."""
+    out = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        if (RE_RETURN.match(line) and i + 1 < n
+                and RE_RETURN_DELAY_STORE.match(lines[i + 1])):
+            out.append(lines[i + 1])
+            out.append(line)
+            out.append('\tnop')
+            i += 2
+            continue
+        out.append(line)
+        i += 1
+    return out
+
+
+def main(path, omitted_hazards, barrier_return_store=False,
+         hoist_return_store=False):
     with open(path) as f:
         lines = f.read().split('\n')
+
+    if hoist_return_store:
+        lines = hoist_return_delay_stores(lines)
 
     out = []
     for i, line in enumerate(lines):
@@ -237,5 +276,9 @@ if __name__ == "__main__":
     parser.add_argument("--omit-hazard", action="append", default=[])
     parser.add_argument("--barrier-return-store", action="store_true",
                         help="keep a trailing store out of a leaf return delay slot")
+    parser.add_argument("--hoist-return-store", action="store_true",
+                        help="move a store gcc placed in a leaf return's "
+                             "delay slot to before the branch instead")
     args = parser.parse_args()
-    main(args.path, set(args.omit_hazard), args.barrier_return_store)
+    main(args.path, set(args.omit_hazard), args.barrier_return_store,
+         args.hoist_return_store)

@@ -89,6 +89,11 @@ FILE_FIX_FLAGS = {
     # slots before comparisons and additions.
     "EXM.c": "--omit-hazard c.lt.s --omit-hazard add.s",
     "MATRIX.c": "--omit-hazard mul.s --omit-hazard add.s",
+    # xglLightIntensityAmbient: gcc's own scheduler puts the trailing sq
+    # in the jr $31 delay slot; the original keeps it before the branch
+    # with a genuine nop in the slot. No other function in this file has
+    # a legitimate delay-slot store, so the swap is safe file-wide here.
+    "xglLight.c": "--hoist-return-store",
 }
 
 

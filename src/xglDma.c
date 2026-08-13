@@ -153,8 +153,8 @@ void xglDmaMFIFOSetup(u_int nAddr, u_int nSize, int nCh)
         pChan = tbl_00490D60[nCh];
         nCtrl = *(vu_int *)0x1000E000;
         nRingReg = 0x1000D010;
-        *(vu_int *)0x1000E050 = nAddr;
         *(vu_int *)0x1000E000 = nCtrl | 0xC;
+        *(vu_int *)0x1000E050 = nAddr;
         *(vu_int *)0x1000E040 = nSize - 0x10;
         mfifo_drain = pChan;
         *(vu_int *)nRingReg = nAddr;

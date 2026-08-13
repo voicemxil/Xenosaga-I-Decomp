@@ -30,10 +30,6 @@ static unsigned int sIntensity1_3[4] __asm__("sIntensity1.3") = {
     0x3F800000, 0x3F800000, 0x3F800000, 0x3F800000,
 };
 
-/* TODO: near-miss (2/4 words differ, SCHEDULING) - 2.96 schedules the sq
- * into the jr delay slot here; the original keeps sq before jr with a
- * genuine nop in the delay slot. Every natural single-statement form
- * gets the same reschedule. */
 /* Copy a light's ambient color quadword verbatim */
 void xglLightIntensityAmbient(void *pLight, void *pSrc)
 {
