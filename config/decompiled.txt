@@ -1594,3 +1594,5 @@ __fpcmp_parts_d = 0x0032DE50, 0x120; // fpbit.c
 dpcmp = 0x0032C310, 0x4C; // fpbit.c
 dptoli = 0x0032C418, 0x9C; // fpbit.c
 dptofp = 0x0032C4E8, 0x54; // fpbit.c
+
+litodp = 0x0032C360, 0xB8; // fpbit.c

@@ -212,6 +212,16 @@ def synth_li_d(reg, bits):
     if bits == 0:
         return [f"\tmove\t{reg},$0"]
     tz = (bits & -bits & 0xFFFFFFFFFFFFFFFF).bit_length() - 1
+    # The real li.d/dli macro expansion works in 16-bit halfwords (it's
+    # built from the same lui/ori/dsll primitives as the 32-bit li macro,
+    # just applied per-halfword), not by stripping every trailing zero
+    # BIT. Rounding down to the nearest halfword boundary matches gas's
+    # actual behavior; stripping further can pick a shorter-looking but
+    # wrong encoding when the low halfword's zero run isn't 16-aligned
+    # (e.g. -2147483648.0 = 0xc1e0000000000000: raw tz=53 gives sig=0x60f
+    # shift=53, but the real object uses sig=0xc1e0 shift=48). Any value
+    # whose raw tz is already a multiple of 16 is unaffected.
+    tz -= tz % 16
     sig = bits >> tz
     if sig.bit_length() <= 32:
         out = synth_load32(reg, sig)
