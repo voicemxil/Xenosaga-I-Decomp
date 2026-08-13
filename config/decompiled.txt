@@ -1585,3 +1585,12 @@ atanf = 0x00329B20, 0x29C; // libm.c
 UmnEventTextInit = 0x00A0F650, 0x24; // Umn.c
 __ieee754_fmod = 0x00324B78, 0x41C; // libm.c
 _dtoa_r = 0x003340B8, 0x1264;
+
+_fpadd_parts = 0x0032BBC8, 0x25C; // fpbit.c
+dpadd = 0x0032BE28, 0x58; // fpbit.c
+dpsub = 0x0032BE80, 0x64; // fpbit.c
+dpdiv = 0x0032C198, 0x174; // fpbit.c
+__fpcmp_parts_d = 0x0032DE50, 0x120; // fpbit.c
+dpcmp = 0x0032C310, 0x4C; // fpbit.c
+dptoli = 0x0032C418, 0x9C; // fpbit.c
+dptofp = 0x0032C4E8, 0x54; // fpbit.c
