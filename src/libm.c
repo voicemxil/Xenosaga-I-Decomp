@@ -1063,6 +1063,34 @@ __ieee754_rem_pio2 (double x, double *y)
 /* s_sin.c / s_cos.c                                                  */
 /* ------------------------------------------------------------------ */
 
+/* BLOCKED (2026-08-13, same root cause as _dtoa_r in src/libc.c -- read
+   that comment first): the `x - x` NaN/Inf path below is a `double`
+   subtraction, and R5900 has no double-precision FPU, so the ORIGINAL
+   lowers it to a call into a renamed GCC fp-bit.c soft-double library
+   (`dpsub` at 0x0032be80, confirmed by disassembly -- word 62 of sin's
+   77-word body is `jal dpsub`). Our current toolchain instead emits an
+   unresolved unnamed soft-float libcall for the same subtraction, so
+   the shapes diverge (39/77 words differ, triage: LOGIC, a real
+   difference). This is not fixable by editing sin/cos alone.
+
+   This generalizes: EVERY double-precision function in this file whose
+   diff involves real double arithmetic (not just bit-twiddling via
+   GET_HIGH_WORD/SET_LOW_WORD etc.) is probably blocked the same way --
+   at minimum sin, cos, floor, scalbn, atan, __ieee754_acos,
+   __ieee754_pow, __kernel_sin, __kernel_cos, __kernel_rem_pio2,
+   __ieee754_rem_pio2 all show LENGTH/LOGIC diffs consistent with this.
+   The float (single-precision) kernels are NOT affected -- R5900 has a
+   real single-precision FPU -- but several of those (__kernel_sinf,
+   __ieee754_atan2f, floorf) are separately blocked by the mtc1
+   hazard-chaining wall documented above main(); do not conflate the
+   two walls when triaging a float-kernel near-miss.
+
+   Closing this needs the fp-bit adaptation project described in
+   src/libc.c's _dtoa_r comment (dpadd/dpsub/dpmul/dpdiv/dpcmp/litodp/
+   dptoli + __pack_d/__unpack_d/_fpadd_parts), done once and shared by
+   both files. Budget it as its own session; do not attempt piecemeal
+   inside a single function's diff. */
+
 double
 sin (double x)
 {
