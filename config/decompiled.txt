@@ -1338,3 +1338,7 @@ DefocusMainType03 = 0x0024E5A0, 0x18C; // Defocus
 DefocusMainType05 = 0x0024E730, 0x174; // Defocus
 DefocusMainType06 = 0x0024E8A8, 0x104; // Defocus
 DefocusMain = 0x0024FDA8, 0xC8; // Defocus
+scGetNumScript = 0x002EA488, 0x58; // sc
+scRETURNScript = 0x002EA890, 0x4C; // sc
+scWAITCNTScript = 0x002EB2E8, 0x40; // sc
+scGetRegAdr = 0x002EBC80, 0x60; // sc
