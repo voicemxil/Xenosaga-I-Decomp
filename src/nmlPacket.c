@@ -323,6 +323,49 @@ int nmlPacketDirectData(void *pData, int nSize)
     return 0;
 }
 
+void xglMatrixUnit(void *pDst);
+void xglMatrixStackUnit(void);
+void xglMatrixStackRotY(float);
+void xglMatrixStackRotX(float);
+void xglMatrixStackSave(void *pMtx);
+int s_nReflRotType;
+float s_inReflRotY;
+float s_inReflRotX;
+
+/* Rebuild and send the reflection rotation matrix (type 1: identity,
+ * type 2: Y-then-X rotation) when pModel's flag bit or the cached type
+ * changes; a no-op when the cached type is already current */
+void nmlPacketAddReflRot(void *pModel)
+{
+    u_int aMtx[16];
+    int nType;
+
+    nType = 1;
+    if ((*(int *)((char *)pModel + 0xC0) & 0x2000) != 0) {
+        nType = 2;
+    }
+    s_pPacket = xglPacketGetCurrent();
+    if (nType == 1) {
+        if (s_nReflRotType == nType) {
+            return;
+        }
+        xglMatrixUnit(aMtx);
+    } else if (nType == 2) {
+        if (s_nReflRotType == nType) {
+            return;
+        }
+        xglMatrixStackUnit();
+        xglMatrixStackRotY(s_inReflRotY);
+        xglMatrixStackRotX(s_inReflRotX);
+        xglMatrixStackSave(aMtx);
+    }
+    sceVif1PkCnt(s_pPacket, 0);
+    sceVif1PkOpenUpkCode(s_pPacket, 0x3EC, 0x6C, 1, 1);
+    sceVif1PkAddUpkData128N(s_pPacket, aMtx, 3);
+    sceVif1PkCloseUpkCode(s_pPacket);
+    s_nReflRotType = nType;
+}
+
 /* Add a standard (non-textured) GIF tag with the given PRIM/NREG-ish
  * fields packed into word 1 */
 void nmlPacketAddGifTagStandard(int nA, int nB)
