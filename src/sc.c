@@ -503,3 +503,17 @@ int scRMODScript(SCOBJ *o) {
     }
     return 1;
 }
+
+extern void sefDestroyScriptScheduler2(int slot);
+extern char D_004CC7B8[];
+void scDestroyScript2(int slot, int a1) {
+    if ((unsigned int)slot >= 16) {
+        tracePrint(D_004CC7B8, slot, a1);
+        return;
+    }
+    sefDestroyScriptScheduler2(slot);
+    if (D_0041E7D0[slot].pTable == 0) {
+        return;
+    }
+    scDeleteTask(slot, a1);
+}
