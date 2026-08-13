@@ -61,12 +61,6 @@ void EventDoorOpenNowFunc(DOOR *a);
 void EventDoorCloseOpeFunc(DOOR *a);
 
 /* Dispatch a door's per-state update function */
-/* TODO: near-miss (6/29 words) - jump table, bounds check and cases 0-2
-   all match exactly (unsigned char local + switch on it reproduces the
-   table). The last case (3, EventDoorCloseOpeFunc) sibling-calls (j) here
-   where the original keeps jal + a shared epilogue with case 4/default -
-   this is the documented sibling-call blocker (see resume prompt), already
-   swept ~50 variants elsewhere with no reproduction. */
 void EventDoorFunc(DOOR *a)
 {
     unsigned char nState = a->nState;
@@ -83,6 +77,7 @@ void EventDoorFunc(DOOR *a)
         break;
     case 3:
         EventDoorCloseOpeFunc(a);
+        __asm__ volatile("" ::: "memory");
         break;
     case 4:
         break;

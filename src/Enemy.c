@@ -541,8 +541,16 @@ void Enemy_Command_Target(ACTOR *a, int nId)
     }
 }
 
-/* Make an enemy look at an actor, the player, or nothing 
-   TODO: near-miss - the Actor_LookAt_Release call sibling-calls (j) here, the original keeps jal + shared epilogue */
+/* Make an enemy look at an actor, the player, or nothing
+   TODO: near-miss - the Actor_LookAt_Release call sibling-calls (j) here, the
+   original keeps jal + shared epilogue. Unlike the single-exit functions
+   the trailing-barrier fix closed, this call sits in a switch case whose
+   `break` target is a shared epilogue that OTHER cases also branch to; a
+   trailing __asm__ volatile("":::"memory") after the call (tried) does not
+   stop gcc from duplicating the reg-restore + sibcall into this arm --
+   apparently a shared-epilogue-duplication decision made independently of
+   the barrier. Same class as the documented-unsolved EventDoorFunc /
+   tskUmnObjectTaskMain near-misses (see resume prompt). */
 void Enemy_Command_LookAt(ACTOR *a, int nId)
 {
     switch (nId) {
@@ -560,8 +568,7 @@ void Enemy_Command_LookAt(ACTOR *a, int nId)
     }
 }
 
-/* Set an enemy's model scale, optionally interpolated over time 
-   TODO: near-miss - ACT_setMotion sibling-calls, and fix_cc_asm.py appends a spurious nop after cvt.s.w */
+/* Set an enemy's model scale, optionally interpolated over time */
 void Enemy_Command_Scale(ACTOR *a, int nScale, int nTime)
 {
     ENEPC *p;
@@ -572,6 +579,7 @@ void Enemy_Command_Scale(ACTOR *a, int nScale, int nTime)
         p->fScale = nScale / 100.0f;
         p->fScaleTo = nScale / 100.0f;
         ACT_setMotion(a, a->nMotion);
+        __asm__ volatile("" ::: "memory");
     } else {
         p->nScaleTimeMax = nTime;
         p->nScaleTime = 0;

@@ -411,17 +411,26 @@ float MMathCalcDistXZ(MC_VECTOR *pA, MC_VECTOR *pB)
     return ret;
 }
 
-/* TODO: not decompiled -- 2.96 turns the trailing jal into a sibcall `j`,
- * the documented "sibling-call blocker" dead end (see resume prompt). Logic
- * is correct; only the tail-call codegen differs. */
 /* Yaw angle (radians) from pFrom to pTo, XZ plane */
 float MMathCalcDir(MC_VECTOR *pFrom, MC_VECTOR *pTo)
 {
-    return srsAtan2(pTo->x - pFrom->x, pTo->z - pFrom->z);
+    float fRet;
+
+    fRet = srsAtan2(pTo->x - pFrom->x, pTo->z - pFrom->z);
+    __asm__ volatile("" ::: "memory");
+    return fRet;
 }
 
-/* TODO: not decompiled -- same sibling-call blocker as MMathCalcDir, plus a
- * v0/a0 allocation tie-break on the store. Logic is correct. */
+/* TODO: not decompiled -- sibling-call blocker RESISTS the trailing-barrier
+   fix (see resume prompt). Two attempts: (1) local + trailing
+   asm("":::"memory") before return -- still `j MMathNormalizeVector2`, no
+   change; (2) register-pinning the return pointer to $2 (v0) to reproduce
+   the original's early `move v0,a0` -- gcc satisfies the "r" constraint by
+   using a0 directly (same value) instead of respecting the pin, so the
+   early move never materializes and the tail call still sibcalls. This is
+   a genuine two-part near-miss: the v0/a0 register tie-break predates the
+   sibcall codegen and the barrier idiom alone can't force it. Logic is
+   correct. */
 /* Direction vector (unnormalized diff, then normalized) from pFrom to pTo */
 MC_VECTOR *MMathCalcDirVector(MC_VECTOR *pDst, MC_VECTOR *pFrom, MC_VECTOR *pTo)
 {

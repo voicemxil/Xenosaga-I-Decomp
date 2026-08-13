@@ -46,18 +46,6 @@ extern UMN_WORK UmnWork;
 /* One-shot init (state 0, calls the handler then arms state 2 for the
  * next frame), per-frame step (state 2), or teardown (state -1, driven
  * by UmnWork's abort flag) */
-/* TODO: near-miss (32/33 words match; LENGTH class -- 43 orig vs 44 built).
- * The original calls xglTaskWaitRemove(node) via `jal` and then falls
- * through into the shared epilogue (explicit `ld s0`/`ld s1`/`ld ra`+`jr`);
- * every natural source form here has gcc 2.96 sibling-call it into a tail
- * `j` instead, since nothing follows the call in the `case -1:` arm. This
- * is the documented UNSOLVED sibling-call blocker (see MAP.c / the
- * XENOSAGA_RESUME_PROMPT idiom notes): the known fix -- taking the address
- * of a local -- only reproduces `jal` when that address is genuinely
- * passed to another call, which the original does not do here. Everything
- * else (the UmnWork-driven forced state=-1, the 0/2/-1 switch dispatch
- * tree with its dead `beq v1,v0,-1` in the state>0 arm, register
- * allocation) matches exactly. */
 void tskUmnObjectTaskMain(TSK_TASK *node)
 {
     void (*func)(TSK_TASK *, void *) = node->pFunc;
@@ -75,6 +63,7 @@ void tskUmnObjectTaskMain(TSK_TASK *node)
         break;
     case -1:
         xglTaskWaitRemove((XGL_TASK *)node);
+        __asm__ volatile("" ::: "memory");
         break;
     }
 }

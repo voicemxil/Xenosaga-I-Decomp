@@ -172,20 +172,26 @@ void MAP_LoadUwamonoResource(MAPUNIT *pUnit, int nId)
     }
 }
 
-/* TODO: near-miss - original does a plain jal here, gcc sibling-calls CheckDist3D */
 /* Spin a save-point symbol and report the player's distance to it */
 int MAP_updateUnitSaveSymbol(MAPUNIT *pUnit)
 {
+    int nDist;
+
     pUnit->fRot[1] += D_004D7EB4;
-    return CheckDist3D(D_00338684[0]->fPos, pUnit->fPos);
+    nDist = CheckDist3D(D_00338684[0]->fPos, pUnit->fPos);
+    __asm__ volatile("" ::: "memory");
+    return nDist;
 }
 
-/* TODO: near-miss - original does a plain jal here, gcc sibling-calls CheckDist3D */
 /* Spin a shop symbol and report the player's distance to it */
 int MAP_updateUnitShopSymbol(MAPUNIT *pUnit)
 {
+    int nDist;
+
     pUnit->fRot[1] += D_004D7EB8;
-    return CheckDist3D(D_00338684[0]->fPos, pUnit->fPos);
+    nDist = CheckDist3D(D_00338684[0]->fPos, pUnit->fPos);
+    __asm__ volatile("" ::: "memory");
+    return nDist;
 }
 
 /* TODO: near-miss - gcc emits the gp-relative load before the field load */
@@ -438,7 +444,6 @@ void MAP_updateUnitMPack(MAPUNIT *pUnit)
     pUnit->anm.fUnk004 = pPlay->fUnk44;
 }
 
-/* TODO: near-miss - original does a plain jal to xglMatrixStackSave, gcc sibling-calls */
 /* Run a unit's sequence callbacks, then rebuild its matrix */
 void MAP_updateUnitSequence(MAPUNIT *pUnit)
 {
@@ -476,6 +481,7 @@ void MAP_updateUnitSequence(MAPUNIT *pUnit)
     xglMatrixStackRotZ(pUnit->fRot[2]);
     xglMatrixStackScale(pUnit->fScale);
     xglMatrixStackSave(pUnit->fMatrix);
+    __asm__ volatile("" ::: "memory");
 }
 
 /* Default per-frame unit update: ground snap plus matrix build */

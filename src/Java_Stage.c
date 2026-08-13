@@ -266,8 +266,6 @@ void Java_xeno_Stage_setFadeCancel__I(void *pEnv, JVAL *pArgs, JVAL *pRet)
 }
 
 /* Show or hide one map part, or reset them all */
-/* TODO: not matching - gcc turns the setPartsVisible call into a sibling
-   call here; the original keeps the jal and branches to the epilogue */
 void Java_xeno_Stage_setVisible__IZ(void *pEnv, JVAL *pArgs, JVAL *pRet)
 {
     STAGEWORK *pWork = D_003386D4[0];
@@ -281,6 +279,7 @@ void Java_xeno_Stage_setVisible__IZ(void *pEnv, JVAL *pArgs, JVAL *pRet)
             if (nParts >= 0) {
                 if (nParts < pModel->nParts) {
                     nmlModelSetPartsVisible(pModel, nParts, pArgs[1].c);
+                    __asm__ volatile("" ::: "memory");
                 }
             } else {
                 nmlModelInitPartsVisible(pModel, pArgs[1].c);

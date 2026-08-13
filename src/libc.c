@@ -289,13 +289,18 @@ strtod (const char *s, char **ptr)
 
 extern float dptofp (double);
 
-/* TODO: near-miss (LOGIC, 6/10 words) -- sibling-call blocker. The
-   original keeps `jal dptofp` + a real epilogue; 2.96 always sibcalls
-   the trailing non-void call as `j dptofp` with the epilogue hoisted
-   before it. Same unsolved class as the ~9 MAP/Enemy near-misses in
-   XENOSAGA_RESUME_PROMPT.md -- neither an intermediate local nor
-   inlining the call into the return expression changes it. Not
-   registered. */
+/* TODO: near-miss (LOGIC, 6/10 words) -- sibling-call blocker RESISTS the
+   trailing-memory-barrier fix that closed EnemySound/MAP.c/MMathCalcDir.
+   Tried: barrier after the local assignment (still `j dptofp`, gcc hoists
+   `ld ra` before the second call regardless); carrying the dependency via
+   asm("":"+f"(fRet)) (no change); splitting strtod's result into its own
+   double local with a barrier before the dptofp call (ICE -- "f" is not a
+   valid asm constraint for a DF-mode value here). Unlike the single-call
+   near-misses this closed, strtodf chains two calls where only the SECOND
+   is the tail call; the barrier idiom does not reach across the first
+   call's `jal` to stop the second from sibcalling. Needs a different
+   idiom (e.g. register-pinning ra, or forcing dptofp's argument through a
+   real stack slot) -- not attempted here, budget spent. Not registered. */
 /* string to float */
 float
 strtodf (const char *s, char **ptr)
