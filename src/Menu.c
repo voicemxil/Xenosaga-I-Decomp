@@ -1,6 +1,17 @@
 /* Menu subsystem - equip/status UI getters, model/sub-window plumbing, sort
    helpers and misc bibration/load-sync bookkeeping */
 
+/* --- Work-end scratch buffer --- */
+extern char MenuWorkEndTop[0x10000];
+extern void *memset(void *, int, unsigned int);
+
+/* Zero the menu work-end scratch buffer and return its base address */
+void *MenuWorkEndGet(void)
+{
+    memset(MenuWorkEndTop, 0, 0x10000);
+    return MenuWorkEndTop;
+}
+
 /* --- Load-sync bookkeeping --- */
 extern int MenuLoadCount;
 
@@ -42,8 +53,24 @@ typedef struct {
 } EXTFUNC;
 extern void ActorAndResourceDispose(void *, void *, int);
 
+/* --- Model motion / unit teardown plumbing --- */
+typedef struct {
+    char pad20[0x20];
+    void *p20;
+} MOTSET1;
+typedef struct {
+    char pad6F0[0x6F0];
+    int f6F0;
+} MOTSET2;
+extern void ACT_setMotion(void *);
+typedef struct {
+    char pad10[0x10];
+    signed char b10;
+} UNITBRK;
+
 /* --- Model task driver --- */
 extern int MenuModelTask;
+extern int MenuModelFlag;
 extern void MenuModelResourceMain(void);
 extern void xglTaskExecute(int);
 
@@ -183,6 +210,30 @@ void MenuPasWindow(void)
 {
 }
 
+/* --- Model memory-state motion check --- */
+extern int MenuModelMemoryState[];
+
+/* Test whether the model memory state allows a menu-motion transition */
+int MenuModelMenuMotionCheck(void)
+{
+    int state;
+
+    state = MenuModelMemoryState[0];
+    if (state < 0xA) {
+        goto ret0;
+    }
+    if (state < 0xD) {
+        goto ret1;
+    }
+    if (state != 0x14) {
+        goto ret0;
+    }
+ret1:
+    return 1;
+ret0:
+    return 0;
+}
+
 /* Run the model resource loader once, then hand the resulting task to the executor */
 void MenuModelResourceCancel2(void *pRes)
 {
@@ -224,6 +275,25 @@ void MenuModelWeaponDispose(char *pWeapon)
     }
 }
 
+/* Set a model's actor into its default motion and mark it as motion-driven */
+void MenuModelMotionSet(MOTSET1 *p)
+{
+    MOTSET2 *q;
+
+    q = (MOTSET2 *)p->p20;
+    ACT_setMotion(q);
+    q->f6F0 |= 8;
+}
+
+/* Cancel and dispose a model unit's resources, marking the slot dead */
+void MenuModelUnitBreak(UNITBRK *p)
+{
+    if (p != 0) {
+        MenuModelResourceCancel2(p);
+        p->b10 = -1;
+    }
+}
+
 /* Attach the given extension-function pointers to a model slot and clear its flag */
 void MenuModelExtFuncSet(EXTFUNC *p, void *pFunc1, void *pFunc2)
 {
@@ -257,6 +327,18 @@ void MenuModelMain(void)
 {
     MenuModelResourceMain();
     xglTaskExecute(MenuModelTask);
+}
+
+extern void MenuModelResourceInit(void);
+
+/* Mark the model system dirty, re-run it, then clear the dirty flag and reinit resources/sub-window */
+void MenuModelAllBreak(void)
+{
+    MenuModelFlag |= 1;
+    MenuModelMain();
+    MenuModelFlag &= ~1;
+    MenuModelResourceInit();
+    MenuModelSubWindowinit();
 }
 
 /* Return the fixed save-data block pointer */
@@ -365,6 +447,15 @@ MWLIST *MenuListGet(int nIdx)
     return &mw_list[nIdx];
 }
 
+/* Fetch a technique's base attack-rate value */
+unsigned short MenuParaPtRateGet(int nBase, int nType)
+{
+    unsigned short *p;
+
+    p = ParaDataBuf + nBase * 8 + ParaDataChangeTbl[nType];
+    return p[-8];
+}
+
 /* Fetch a technique's base attack-point value */
 unsigned short MenuParaPtBaseGet(int nBase, int nType)
 {
@@ -382,6 +473,30 @@ int MenuCharWeaponAttCheck(void)
     return 0;
 }
 
+/* --- Ether/Tec raw-data-buffer lookups --- */
+extern void *MenuEtherDataBuf;
+extern void *MenuTecDataBuf;
+
+/* TODO: near-miss - allocator swaps p(v0)/t(v1) and schedules the idx<<2 shift into
+   the branch-delay slot instead of ahead of the sltiu compare (same shape as the
+   SsdGetMemoryBlocks/xglDmaMFIFOLeave irreducible allocator tie-break); every natural
+   variant tried (decl order, early-return, array-index form, unsigned t) reproduces
+   the same 5-word swap. */
+/* Return the base address of one ether-data entry, or NULL if the id is out of range */
+void *MenuEtherDataGet(int nId)
+{
+    int idx;
+    int t;
+
+    idx = nId & 0xFFFF;
+    t = idx - 1;
+    if ((unsigned int)t >= 0x50) {
+        return 0;
+    }
+    idx = idx << 2;
+    return (char *)MenuEtherDataBuf + idx - 4;
+}
+
 /* Look up an ether's element-type byte through the two ether-info indirections */
 signed char MenuEtherTypeGet(int nId)
 {
@@ -393,6 +508,23 @@ signed char MenuEtherTypeGet(int nId)
     t = *(short *)((char *)p + 6);
     q = func_A1A378(t);
     return *(signed char *)((char *)q + 4);
+}
+
+/* TODO: near-miss - same p/t allocator swap and delay-slot-shift scheduling as
+   MenuEtherDataGet above (identical function shape, different constants). */
+/* Return the base address of one tec-data entry, or NULL if the id is out of range */
+void *MenuTecDataGet(int nId)
+{
+    int idx;
+    int t;
+
+    idx = nId & 0xFFFF;
+    t = idx - 1;
+    if ((unsigned int)t >= 0x8) {
+        return 0;
+    }
+    idx = idx << 6;
+    return (char *)MenuTecDataBuf + idx - 0x40;
 }
 
 /* Test whether a technique's trigger-condition bits are set */
@@ -409,4 +541,16 @@ void MenuSystem2Init(void)
 {
     endPrintInit();
     subMenuSystemInit(MainMenuWorkEnd);
+}
+
+extern void subMenuSystemMain(void);
+extern void endPrintExtFunc(int, int, int);
+extern unsigned char D_0036C191[];
+
+/* Run one sub-menu-system tick, then report whether the end-print sequence is not yet done */
+int MenuSystem2(void)
+{
+    subMenuSystemMain();
+    endPrintExtFunc(0, 0x64, 0);
+    return D_0036C191[0] != 0xFF;
 }

@@ -1,6 +1,16 @@
 #!/bin/bash
 # Compile a standalone snippet through the real game-code pipeline and
 # objdump one function. Usage: trycc.sh <src.c> <FuncName>
+#
+# For a WHOLE existing translation unit, use tools/checkfile.py instead --
+# it compiles the file through this same pipeline and reports MATCH or a
+# diff count + triage class for every function in it:
+#     python3 tools/checkfile.py src/ssd.c
+# To sweep statement orderings against the original, use tools/permute.py.
+if [ -z "$2" ]; then
+  echo "usage: trycc.sh <src.c> <FuncName>   (whole file: tools/checkfile.py)" >&2
+  exit 2
+fi
 IN="$1"; FN="$2"
 BASE="/tmp/trycc_$$"
 /opt/ee-gcc2.96/bin/ee-gcc -O2 -G8 -S -o "$BASE.s" "$IN" 2>&1 | head -5

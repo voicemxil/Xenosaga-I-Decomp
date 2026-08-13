@@ -114,6 +114,9 @@ FILE_CC = {
     "EW.c": CC96,
     "MATRIX.c": CC96,
     "TCAMERA.c": CC96,
+    "MMath.c": CC96,
+    "Ether.c": CC96,
+    "Set.c": CC96,
 }
 # Note: game code (2.96) matches with plain -O2 -G8; adding
 # -fno-schedule-insns perturbs its register allocation.
@@ -188,6 +191,9 @@ FILE_CFLAGS = {
     "EW.c": "-O2 -G8",
     "MATRIX.c": "-O2 -G8",
     "TCAMERA.c": "-O2 -G8",
+    "MMath.c": "-O2 -G8",
+    "Ether.c": "-O2 -G8",
+    "Set.c": "-O2 -G8",
 }
 
 # xglVector's original object omits some load-delay nops that are present
@@ -298,7 +304,11 @@ def generate_ninja(asm_files, src_files, asset_files):
         for src in src_files:
             obj = BUILD_DIR / src.with_suffix(".o")
             obj_files.append(str(obj))
-            f.write(f"build {obj}: cc {src}\n")
+            # tools/fix_cc_asm.py rewrites the compiler output between cc
+            # and as, so an edit to it changes every C object -- make ninja
+            # know that, otherwise objects stay silently stale and verify.py
+            # reports results for code the current toolchain no longer emits.
+            f.write(f"build {obj}: cc {src} | tools/fix_cc_asm.py\n")
             if src.name in FILE_CFLAGS:
                 f.write(f"  cflags = {FILE_CFLAGS[src.name]}\n")
             if src.name in FILE_CC:

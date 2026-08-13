@@ -1,142 +1,80 @@
 #!/usr/bin/env python3
-"""Verify decompiled C functions match the original ELF."""
-import subprocess, sys, re, glob
+"""Verify decompiled C functions match the original ELF.
 
-ELF = "elf/SLUS_204.69"
-BUILT = "build/src"
-OBJDUMP = "/usr/local/ps2dev/ee/bin/mips64r5900el-ps2-elf-objdump"
-CC_OBJDUMP = "/usr/local/ps2dev/ee/bin/mips64r5900el-ps2-elf-objdump"
+    python3 tools/verify.py                 # everything (default)
+    python3 tools/verify.py --only Ssd      # just one family (substring/prefix)
+    python3 tools/verify.py --file ssd.c    # just the functions from one TU
+    python3 tools/verify.py -q              # failures + summary only
+
+Reads the ELF and the built objects directly rather than spawning
+objdump twice per function, so a full run is ~1s instead of ~75s.
+Output format (OK/FAIL/SKIP/HW lines + summary) is unchanged.
+"""
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from decomplib import Repo, parse_decompiled, matches_filter  # noqa: E402
 
 
-def get_words(cmd):
-    """Extract instruction words from objdump output."""
-    words, _ = get_words_relocs(cmd)
-    return words
+def split_list(v):
+    return [x for x in (v or "").replace(",", " ").split() if x]
 
 
-def get_words_relocs(cmd):
-    """Extract instruction words and relocation indices from objdump output.
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--only", action="append", default=[],
+                    help="only functions whose name contains/starts with this "
+                         "(comma-separated or repeated)")
+    ap.add_argument("--file", action="append", default=[],
+                    help="only functions from this source file, e.g. ssd.c")
+    ap.add_argument("-q", "--quiet", action="store_true",
+                    help="print failures and the summary only")
+    ap.add_argument("--fail-names", action="store_true",
+                    help="print just the failing names, one per line")
+    args = ap.parse_args()
 
-    Returns (words, relocs) where relocs maps instruction index ->
-    relocation type (e.g. "GPREL16") for instructions that carry a
-    relocation in the object file. Requires -r in cmd to see relocs.
-    """
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    words = []
-    relocs = {}
-    for line in result.stdout.split('\n'):
-        # Match lines like: "  20b1d8:    8c820000    lw v0,0(a0)"
-        m = re.match(r'\s+[0-9a-f]+:\s+([0-9a-f]{8})\b', line)
-        if m:
-            words.append(m.group(1))
+    only = [p for v in args.only for p in split_list(v)]
+    files = [p for v in args.file for p in split_list(v)]
+
+    entries, hardware = parse_decompiled()
+    repo = Repo()
+    if only or files:
+        entries = [e for e in entries if matches_filter(e, only, files, repo)]
+        hardware = [e for e in hardware if matches_filter(e, only, files, repo)]
+
+    passed = failed = 0
+    fail_names = []
+    for e in entries:
+        r = repo.compare(e.name, e.addr, e.size)
+        if r["status"] == "SKIP":
+            if not args.fail_names:
+                print(f"  SKIP {e.name} - {r['reason']}")
             continue
-        # Relocation lines interleaved by objdump -dr:
-        # "      14: R_MIPS_GPREL16    s_nScriptTalkLock"
-        r = re.match(r'\s+[0-9a-f]+:\s+R_MIPS_(\w+)', line)
-        if r and words:
-            relocs[len(words) - 1] = r.group(1)
-    return words, relocs
+        if r["status"] == "OK":
+            passed += 1
+            if not args.quiet and not args.fail_names:
+                print(f"  OK   {e.name}")
+        else:
+            failed += 1
+            fail_names.append(e.name)
+            if args.fail_names:
+                print(e.name)
+                continue
+            print(f"  FAIL {e.name}")
+            print(f"    orig:  {' '.join(f'{w:08x}' for w in r['orig'][:8])}")
+            print(f"    built: {' '.join(f'{w:08x}' for w in r['built'][:8])}")
+
+    if not args.fail_names:
+        for e in hardware:
+            if not args.quiet:
+                print(f"  HW   {e.name}")
+        print(f"\n{passed} passed, {failed} failed, {len(hardware)} hardware, "
+              f"{len(entries) + len(hardware)} total")
+    return 0
 
 
-# Read decompiled.txt
-entries = []
-hardware = []
-with open("config/decompiled.txt") as f:
-    for line in f:
-        line = line.strip()
-        if not line or line.startswith('#'):
-            continue
-        m = re.match(r'(\w+)\s*=\s*(0x[0-9A-Fa-f]+),\s*(0x[0-9A-Fa-f]+);', line)
-        if m:
-            name = m.group(1)
-            addr = int(m.group(2), 16)
-            size = int(m.group(3), 16)
-            if 'HARDWARE' in line:
-                hardware.append(name)
-            else:
-                entries.append((name, addr, size))
-
-passed = 0
-failed = 0
-
-# Scan every object's symbol table once up front: name -> (obj, offset).
-# Only defined function symbols count — other objects may reference the
-# same name as *UND* (callers) at address 0.
-symbol_map = {}
-for o in sorted(glob.glob(f"{BUILT}/*.o")):
-    nm = subprocess.run(
-        [CC_OBJDUMP, "-t", o], capture_output=True, text=True
-    )
-    for nm_line in nm.stdout.split('\n'):
-        if " F .text" in nm_line:
-            parts = nm_line.split()
-            if parts:
-                symbol_map.setdefault(parts[-1], (o, int(parts[0], 16)))
-
-for name, addr, size in entries:
-    obj, sym_offset = symbol_map.get(name, (None, None))
-
-    if not obj:
-        print(f"  SKIP {name} - no object file found")
-        continue
-
-    end = addr + size
-
-    orig = get_words([OBJDUMP, "-d", "-j", ".text",
-                      f"--start-address=0x{addr:x}",
-                      f"--stop-address=0x{end:x}", ELF])
-
-    func_addr = sym_offset
-
-    func_end = func_addr + size
-    built, built_relocs = get_words_relocs([CC_OBJDUMP, "-d", "-r",
-                                            f"--start-address=0x{func_addr:x}",
-                                            f"--stop-address=0x{func_end:x}", obj])
-
-    if not orig:
-        print(f"  SKIP {name} - no original bytes found")
-        continue
-
-    def mask_word(w):
-        """Mask jal targets and break encodings for comparison."""
-        val = int(w, 16)
-        # jal: opcode 0x0C (top 6 bits = 000011), mask lower 26 bits
-        if (val >> 26) == 0x03:
-            return f"{val & 0xFC000000:08x}"
-        # break: both 0x0007000d and 0x000001cd are break instructions
-        # SPECIAL opcode (0) with funct=0x0d (break)
-        if (val & 0xFC00003F) == 0x0000000D:
-            return "BREAK"
-        return w
-
-    orig_masked = [mask_word(w) for w in orig]
-    built_masked = [mask_word(w) for w in built]
-
-    # Mask 16-bit immediates resolved at link time (gp-relative and
-    # hi/lo address pairs) — unresolved in the .o, like jal targets.
-    for i, rtype in built_relocs.items():
-        if i >= len(orig_masked) or i >= len(built_masked):
-            continue
-        if rtype in ("GPREL16", "HI16", "LO16", "16", "LITERAL"):
-            orig_masked[i] = orig_masked[i][:4] + "0000"
-            built_masked[i] = built_masked[i][:4] + "0000"
-        elif rtype == "26":
-            # j/jal targets: mask the 26-bit field (jal is also handled
-            # opcode-wise by mask_word, but plain j tail calls are not)
-            orig_masked[i] = f"{int(orig_masked[i], 16) & 0xFC000000:08x}"
-            built_masked[i] = f"{int(built_masked[i], 16) & 0xFC000000:08x}"
-
-    if orig_masked == built_masked:
-        print(f"  OK   {name}")
-        passed += 1
-    else:
-        # Find first difference for display
-        print(f"  FAIL {name}")
-        print(f"    orig:  {' '.join(orig[:8])}")
-        print(f"    built: {' '.join(built[:8])}")
-        failed += 1
-
-for name in hardware:
-    print(f"  HW   {name}")
-
-print(f"\n{passed} passed, {failed} failed, {len(hardware)} hardware, {len(entries) + len(hardware)} total")
+if __name__ == "__main__":
+    sys.exit(main())
