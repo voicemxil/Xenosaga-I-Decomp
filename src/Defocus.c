@@ -57,6 +57,9 @@ typedef struct {
 } GAME_DEFOCUS;
 
 extern u_long GetTex0(int nMode, int nUnk);
+extern unsigned short D_004A90F4[];
+extern unsigned short D_004A9100[];
+extern unsigned short D_004A9102[];
 extern void sceVif1PkCnt(void *pkt, unsigned int nCode);
 extern void sceVif1PkAddDataN(void *pkt, void *pData, int nQw);
 
@@ -294,10 +297,10 @@ void DefocusMainType01(GAME_DEFOCUS *p, void *pkt)
     i = 0;
     Head_0.nTex0 = GetTex0(p->nParam, 0);
     q[3] = 0x51000006;
-    q[5] = 0x50AB4000;
-    q[6] = 0x53531;
     col = (u8 *)&p->nUnk10;
     q[4] = 0x8001;
+    q[5] = 0x50AB4000;
+    q[6] = 0x53531;
     q[0] = 0;
     q[1] = 0;
     q[2] = 0;
@@ -319,8 +322,8 @@ void DefocusMainType01(GAME_DEFOCUS *p, void *pkt)
     c = p->nUnk0C;
     q[26] = c;
     q[18] = c;
-    q[19] = 0;
     q[27] = 0;
+    q[19] = 0;
     sceVif1PkCnt(pkt, 0);
     sceVif1PkAddDataN(pkt, &Head_0, 0x18);
     if (p->nFlags != 0) {
@@ -329,4 +332,152 @@ void DefocusMainType01(GAME_DEFOCUS *p, void *pkt)
             i++;
         } while (i < p->nFlags);
     }
+}
+
+/* Head.4 @ 0x00367170 - GIF preamble for the type-3 textured blit */
+static DEFOCUS_HEAD0 Head_4 __asm__("Head.4_00367170") = {
+    { 0x00000000, 0x00000000, 0x00000000, 0x51000005,
+      0x00008001, 0x40000000, 0x0000EEEE, 0x00000000,
+      0x00000060, 0x00000000, 0x00000014, 0x00000000,
+      0x0007000D, 0x00000000, 0x00000047, 0x00000000,
+      0x00000064, 0x00000040, 0x00000042, 0x00000000 },
+    0,
+    { 0x00000006, 0x00000000 },
+};
+
+/* Type 3: textured sprite with the alpha channel forced opaque */
+void DefocusMainType03(GAME_DEFOCUS *p, void *pkt)
+{
+    unsigned int *q = (unsigned int *)0x70000000;
+    unsigned int i;
+    u8 *col;
+    int a;
+    int b;
+
+    i = 0;
+    Head_4.nTex0 = GetTex0(2, 1);
+    q[3] = 0x51000006;
+    col = (u8 *)&p->nFlags;
+    q[4] = 0x8001;
+    q[5] = 0x50AB4000;
+    q[6] = 0x53531;
+    q[0] = 0;
+    q[1] = 0;
+    q[2] = 0;
+    q[7] = 0;
+    q[8] = col[0];
+    q[9] = col[1];
+    q[10] = col[2];
+    q[11] = col[3];
+    q[20] = 0x2000;
+    q[12] = 0;
+    a = (p->nUnk0C << 4) + 0x6FF8;
+    q[16] = a;
+    q[24] = ((p->nUnk0C + p->nUnk14) << 4) + 0x8FF8;
+    q[21] = 0x1C00;
+    q[13] = 0;
+    b = (p->nUnk10 << 4) + 0x71F7;
+    q[17] = b;
+    q[25] = ((p->nUnk10 + p->nUnk18) << 4) + 0x8DF7;
+    q[26] = -1;
+    q[18] = -1;
+    q[27] = 0;
+    q[19] = 0;
+    sceVif1PkCnt(pkt, 0);
+    sceVif1PkAddDataN(pkt, &Head_4, 0x18);
+    if (p->nParam != 0) {
+        do {
+            sceVif1PkAddDataN(pkt, (void *)0x70000000, 0x1C);
+            i++;
+        } while (i < p->nParam);
+    }
+}
+
+typedef struct {
+    unsigned int aHead[20]; /* 0x00 */
+    u_long nTex0;           /* 0x50 */
+    unsigned int aMid[2];   /* 0x58 */
+    u_long nTest;           /* 0x60 */
+    unsigned int aTail[2];  /* 0x68 */
+} DEFOCUS_HEAD5;
+
+/* Head.5 @ 0x003671D0 - GIF preamble for the type-5 textured blit */
+static DEFOCUS_HEAD5 Head_5 __asm__("Head.5") = {
+    { 0x00000000, 0x00000000, 0x00000000, 0x51000006,
+      0x00008001, 0x50000000, 0x000EEEEE, 0x00000000,
+      0x00000000, 0x00000000, 0x00000014, 0x00000000,
+      0x00071001, 0x00000000, 0x00000047, 0x00000000,
+      0x00000044, 0x00000000, 0x00000042, 0x00000000 },
+    0,
+    { 0x00000006, 0x00000000 },
+    0,
+    { 0x00000008, 0x00000000 },
+};
+
+/* Type 5: textured blit with an explicit TEST/CLAMP register pair */
+void DefocusMainType05(GAME_DEFOCUS *p, void *pkt)
+{
+    unsigned int *q = (unsigned int *)0x70000000;
+    u8 *col;
+    int a;
+    unsigned int c;
+    u_long t;
+
+    Head_5.nTex0 = GetTex0(0, 0);
+    t = ((((u_long)(p->nUnk1C ^ 0x3FF)) << 4) | 0xF);
+    Head_5.nTest = t | (((u_long)(p->nUnk20 ^ 0x3FF)) << 24);
+    col = (u8 *)&p->nFlags;
+    q[3] = 0x51000006;
+    q[5] = 0x50AB4000;
+    q[4] = 0x8001;
+    q[6] = 0x53531;
+    q[0] = 0;
+    q[1] = 0;
+    q[2] = 0;
+    q[7] = 0;
+    q[8] = col[0];
+    q[9] = col[1];
+    q[10] = col[2];
+    q[11] = col[3];
+    a = p->nUnk0C << 4;
+    q[12] = a;
+    q[16] = a + 0x6FF8;
+    a = p->nUnk10 << 4;
+    q[13] = a;
+    q[17] = a + 0x71F7;
+    a = (p->nUnk0C + p->nUnk14) << 4;
+    q[20] = a;
+    q[24] = a + 0x6FF8;
+    a = (p->nUnk10 + p->nUnk18) << 4;
+    q[21] = a;
+    q[25] = a + 0x71F7;
+    c = p->nParam;
+    q[27] = 0;
+    q[26] = c;
+    q[18] = c;
+    q[19] = 0;
+    sceVif1PkCnt(pkt, 0);
+    sceVif1PkAddDataN(pkt, &Head_5, 0x1C);
+    sceVif1PkAddDataN(pkt, (void *)0x70000000, 0x1C);
+}
+
+/* Compose a GS TEX0 register for one of the three defocus work buffers */
+u_long GetTex0(int nMode, int nUnk)
+{
+    unsigned int nRet;
+
+    switch (nMode) {
+    case 0:
+        nRet = 0x24020000 | (D_004A9100[0] << 5);
+        break;
+    case 1:
+        nRet = 0x24020000 | (D_004A9102[0] << 5);
+        break;
+    case 2:
+        nRet = 0x24020000 | (D_004A90F4[0] << 5);
+        break;
+    default:
+        return 0;
+    }
+    return nRet | ((u_long)nUnk << 34) | ((u_long)0x9000 << 18);
 }

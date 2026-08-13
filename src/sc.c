@@ -152,14 +152,21 @@ extern char D_004CC850[];
 /* scGetCmdScript: reads the current opcode word for the running task,
  * advancing its cmdBuf[field54] cursor (a halfword index into the
  * current slot's script table) by one each call. */
+/* field54 is read twice with two different lvalue types -- once as the
+ * naturally-signed `short` (lh, direct sll*4 pointer scale) and once cast
+ * through `(unsigned short)` (lhu, needs a sign-extension shift-pair when
+ * later scaled for pointer math) -- which defeats CSE and reproduces the
+ * original's real lh+lhu pair. */
 int scGetCmdScript(SCOBJ *o) {
-    short result = 0;
-    if (o->cmdBuf[o->field54] != 0) {
-        result = *(short *)((char *)D_0041E7D0[_nowScript].pTable
-                             + o->cmdBuf[o->field54] * 2);
+    short *adr = 0;
+    int idx = o->field54;
+    int uidx = (unsigned short)o->field54;
+    int val = o->cmdBuf[idx];
+    if (val != 0) {
+        adr = (short *)((char *)D_0041E7D0[_nowScript].pTable + val * 2);
     }
-    o->cmdBuf[o->field54]++;
-    return result;
+    o->cmdBuf[uidx] = o->cmdBuf[uidx] + 1;
+    return *adr;
 }
 
 /* Indirect register write: reg with bit 0x8000 set means "the register
@@ -179,11 +186,12 @@ void scSetReg(int reg, int val) {
  * high bit is set, else a 14-bit unsigned immediate. */
 int scGetNumScript(SCOBJ *o) {
     int v1 = scGetCmdScript(o);
-    if ((v1 & 0x8000) == 0) {
-        return (short)scGetReg(v1);
-    }
-    if ((v1 & 0x4000) == 0) {
-        v1 &= 0x3FFF;
+    if ((v1 & 0x8000) != 0) {
+        if ((v1 & 0x4000) == 0) {
+            v1 &= 0x3FFF;
+        }
+    } else {
+        v1 = (short)scGetReg(v1);
     }
     return v1;
 }
@@ -199,11 +207,15 @@ void *scGetCmdAdrScript(SCOBJ *o) {
     return result;
 }
 
+/* Same signed/unsigned double-read idiom as scGetCmdScript: the signed
+ * read feeds the compare + cmdBuf pointer scale, the unsigned-cast read
+ * feeds the plain (non-scaling) decrement. */
 int scRETURNScript(SCOBJ *o) {
-    int n = o->field54;
-    if (n > 0) {
-        o->field54 = n - 1;
-        o->cmdBuf[n] = 0;
+    int idx = o->field54;
+    int uidx = (unsigned short)o->field54;
+    if (idx > 0) {
+        o->field54 = uidx - 1;
+        o->cmdBuf[idx] = 0;
     } else {
         tracePrint(D_004CC850);
     }
@@ -316,15 +328,12 @@ int scR_NOTScript(SCOBJ *o) {
 typedef struct { char pad[0x5A]; short field5A; char pad2[2]; short field5E; } SC_WAITCNT_OBJ;
 int scWAITCNTScript(SC_WAITCNT_OBJ *o) {
     int n = scGetNumScript((SCOBJ *)o);
-    int result;
-    if (n > 0) {
-        o->field5E = n;
-        o->field5A = 1;
-        result = 2;
-    } else {
-        result = 1;
+    if (n <= 0) {
+        return 1;
     }
-    return result;
+    o->field5A = 1;
+    o->field5E = n;
+    return 2;
 }
 
 extern void scDeleteTaskAll(int a);

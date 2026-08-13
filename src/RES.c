@@ -27,6 +27,9 @@ extern RES_MTNLIST cfMtnList[];
 extern char env_name[];
 extern unsigned char ScenePath;
 extern char *RES_path_table[] __asm__("tbl.0_00366420");
+extern char *RES_leader_se_table[] __asm__("tbl.1_00366470");
+extern char foot_name[];
+extern unsigned short D_004A1854[];
 
 char *RES_getPath(void)
 {
@@ -146,4 +149,22 @@ char *RES_GetMotBaseName(unsigned short nId)
         }
     }
     return cfMtnList[0].pName;
+}
+
+/* Build "XX_" + the current foot step name for the party leader */
+void RES_GetLeaderSeName(char *pName)
+{
+    char *p;
+    char *q;
+
+    p = RES_leader_se_table[D_004A1854[0]];
+    pName[0] = p[0];
+    pName[1] = p[1];
+    pName[2] = '_';
+    pName += 3;
+    q = foot_name;
+    while ((*pName = *q) != 0) {
+        q++;
+        pName++;
+    }
 }
