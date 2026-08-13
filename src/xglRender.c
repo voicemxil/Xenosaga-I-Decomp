@@ -1,5 +1,6 @@
 /* Frame rendering environment management for the xgl engine */
 
+typedef unsigned char u_char;
 typedef unsigned int u_int;
 typedef unsigned short u_short;
 typedef unsigned long u_long;
@@ -29,6 +30,7 @@ typedef struct {
     int nDrop;
     int nUnk50;
     int nUnk54;
+    u_char nUnk58;
 } XGLRENDER;
 
 typedef struct {
@@ -279,6 +281,83 @@ void xglRenderDrawEnvMove(void)
     DrawEnv.l[14] = (DrawEnv.l[14] & ~nMask) | nZbp;
     SyncDCache(&DrawEnv, (char *)&DrawEnv + 0x100);
     sceGsPutDrawEnv(&DrawEnv);
+}
+
+/* TODO: near-miss (38/49 words). Logic, field offsets, and constants
+ * verified against asm. The 0x47 test-addr constant needs to live in a
+ * callee-saved register across the ClearFrame/ClearColor calls (orig
+ * uses s1), but every source ordering tried lets 2.96 schedule the
+ * constant load past the calls into a caller-saved temp instead.
+ * Parked per budget rule after 2 attempts. */
+/* Reinitialize the clear-environment packet (giftag, test reg, and the
+ * screen-space scissor rectangle derived from the render width/height) */
+void xglRenderClearEnvInit(void)
+{
+    u_int *p;
+    u_int nTestAddr;
+    u_int nScissorAddr;
+    int nHalf1, nHalf2;
+
+    p = (u_int *)&ClearEnv;
+    p[0] = 0x8001;
+    p[1] = 0x50034000;
+    p[2] = 0xE551E;
+    p[3] = 0;
+    nTestAddr = 0x47;
+    xglRenderClearFrame();
+    xglRenderClearColor(0x80000000);
+    ClearEnv.nTestAddr = nTestAddr;
+
+    nHalf1 = (short)sRender.nUnk06 >> 1;
+    nScissorAddr = 0x50000;
+    nHalf2 = (short)*(u_short *)&sRender.nWidth >> 1;
+    ClearEnv.aUnk30[5] = nTestAddr;
+    p[12] = (2048 - nHalf2) << 4;
+    p[13] = (2048 - nHalf1) << 4;
+    p[16] = (nHalf2 + 2048) << 4;
+    p[17] = (nHalf1 + 2048) << 4;
+    ClearEnv.aUnk30[4] = nScissorAddr;
+}
+
+void sceGsResetPath(void);
+void sceGsResetGraph(int a0, int a1, int a2, int a3);
+void nmlModelConstruct(void);
+void xglRenderSetReso(int nMode);
+
+int s_nRenderReset1;
+int s_nRenderReset2;
+int s_nRenderReset3;
+
+/* TODO: near-miss (length mismatch, 50 vs 52 words -- 2 missing words,
+ * likely a hazard/scheduling nop the source shape hasn't reproduced).
+ * Loop bounds, field offsets and call sequence verified against asm.
+ * Parked per budget rule after 2 attempts. */
+/* One-time render subsystem bring-up: reset the GS path/graph, init
+ * vsync + resolution, and clear the per-frame render state */
+void xglRenderInit(void)
+{
+    int i;
+
+    sceGsResetPath();
+    *(volatile u_int *)0x10003820 |= 1;
+    *(volatile u_int *)0x10003c20 |= 1;
+    sceGsResetGraph(0, 1, 2, 0);
+    xglRenderSyncInit();
+    xglRenderSetReso(1);
+    s_nRenderReset1 = 0;
+    s_nRenderReset2 = 1;
+    s_nRenderReset3 = 0;
+    sRender.nFade = 0;
+    sRender.nUnk48 = 0;
+    sRender.nDrop = 0;
+    sRender.nUnk50 = 0;
+    sRender.nUnk58 = 0;
+    for (i = 7; i >= 0; i--) {
+        sRender.aUnk24[i] = 0;
+    }
+    xglRenderGlobalFadeInit();
+    xglRenderClearOff();
+    nmlModelConstruct();
 }
 
 int nmlModelIsBackBufferRequest(void);
