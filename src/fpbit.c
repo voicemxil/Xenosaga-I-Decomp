@@ -603,14 +603,23 @@ _fpmul_parts ( fp_number_type *  a,
     /* fractype is DImode, but we need the result to be twice as wide.
        Assuming a widening multiply from DImode to TImode is not
        available, build one by hand.  */
-    USItype nl = a->fraction.ll;
-    USItype nh = a->fraction.ll >> BITS_PER_SI;
-    USItype ml = b->fraction.ll;
-    USItype mh = b->fraction.ll >> BITS_PER_SI;
-    UDItype pp_ll = (UDItype) ml * nl;
-    UDItype pp_hl = (UDItype) mh * nl;
-    UDItype pp_lh = (UDItype) ml * nh;
-    UDItype pp_hh = (UDItype) mh * nh;
+    /* Written as UDItype locals (rather than USItype, per the letter of
+       the real source) because this ee-gcc build recognizes the narrower
+       (UDItype)(USItype)x * y shape as a WIDEN_MULT_EXPR and lowers it to
+       a native 32x32->64 multu -- but the original object calls __muldi3
+       for each partial product (confirmed by disassembly: 4 jal __muldi3
+       for pp_ll/pp_hl/pp_lh/pp_hh), meaning Sony's actual build did not
+       fold this. The R5900 has no native 64x64 multiply hardware either
+       way; this shape just avoids the narrowing optimization so both
+       multiplicands reach the multiply as genuine UDItype operands.  */
+    UDItype nl = a->fraction.ll & 0xffffffffULL;
+    UDItype nh = a->fraction.ll >> BITS_PER_SI;
+    UDItype ml = b->fraction.ll & 0xffffffffULL;
+    UDItype mh = b->fraction.ll >> BITS_PER_SI;
+    UDItype pp_ll = ml * nl;
+    UDItype pp_hl = mh * nl;
+    UDItype pp_lh = ml * nh;
+    UDItype pp_hh = mh * nh;
     UDItype res2 = 0;
     UDItype res0 = 0;
     UDItype ps_hh__ = pp_hl + pp_lh;
