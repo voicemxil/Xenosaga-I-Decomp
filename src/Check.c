@@ -299,3 +299,44 @@ int Check_EnemyElec(void)
     }
     return 0;
 }
+
+/* True when segment p1-p2 crosses segment p3-p4 */
+int Check_CrossingOver(VECTOR *p1, VECTOR *p2, VECTOR *p3, VECTOR *p4)
+{
+    int a, b, c, d;
+
+    a = CheckPointLine(p1, p2, p3);
+    b = CheckPointLine(p1, p2, p4);
+    if (a != b) {
+        c = CheckPointLine(p3, p4, p1);
+        d = CheckPointLine(p3, p4, p2);
+        if (c != d) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+extern float Get_Decimal_Surplus_for_Radius(float angle);
+
+/* True when angle (wrapped) falls within the [lo, hi] arc (wrapped, handling wraparound) */
+/* TODO: near-miss (LOGIC) - the callee-saved register that ends up holding
+ * "hi" vs "angle" across the first call is swapped from the original, and
+ * the &&/|| short-circuit form uses an extra v0/v1 temp the original
+ * doesn't; a nested-if rewrite fixed the boolean shape but made the length
+ * worse (41 vs 45), so the register save order looks like the harder half
+ * of this one. Parked after 2 attempts. */
+int Check_Angle(float angle, float lo, float hi)
+{
+    float wLo, wHi, wAngle;
+
+    wLo = Get_Decimal_Surplus_for_Radius(lo);
+    wHi = Get_Decimal_Surplus_for_Radius(hi);
+    wAngle = Get_Decimal_Surplus_for_Radius(angle);
+
+    if (wLo <= wHi) {
+        return (wLo <= wAngle) && (wAngle <= wHi);
+    } else {
+        return (wLo <= wAngle) || (wAngle <= wHi);
+    }
+}

@@ -349,3 +349,63 @@ int GetLastWord(char *s)
     }
     return s[i - 1];
 }
+
+typedef struct {
+    int f00;             /* 0x00 */
+    char pad04[4];
+    short f08;            /* 0x08 */
+    char pad0A[0xE];
+    int f18;               /* 0x18 */
+    char pad1C[4];
+    long long f20;          /* 0x20 */
+} UNDUPARAM;
+
+extern UNDUPARAM D_003B2610;
+extern void UnduParamInit(UNDUPARAM *param);
+extern int UnduDataGetHeader(int, int);
+extern void UnduCheck(void *, int, UNDUPARAM *);
+extern void *D_00338684[];
+
+/* TODO: near-miss (LOGIC) - close (struct/branch shape recovered, including
+ * the ld+dsll32+dsra32 64-bit-field truncation idiom) but the original keeps
+ * the struct base in a SECOND alias register (s4) distinct from the one used
+ * for the setup calls (s2), reloaded after UnduCheck returns; a single local
+ * doesn't reproduce that register split. Parked after several attempts. */
+int Get_Attr(void *actor, int nType, int nFlags)
+{
+    UNDUPARAM *param;
+    int flags;
+
+    param = &D_003B2610;
+    flags = nFlags | 0x800;
+    UnduParamInit(param);
+    param->f08 = flags;
+    if (nType == 0) {
+        param->f00 = 0;
+        param->f18 = ((int *)D_00338684[0])[312];
+    } else {
+        param->f18 = UnduDataGetHeader(nType, 0x8000);
+    }
+    UnduCheck(actor, 0, param);
+    return (int)param->f20;
+}
+
+/* TODO: near-miss (LOGIC) - same struct-base register-split issue as Get_Attr. */
+int Get_Attr_NU(void *actor, int nType, int nFlags)
+{
+    UNDUPARAM *param;
+    int flags;
+
+    param = &D_003B2610;
+    flags = nFlags | 0x800;
+    UnduParamInit(param);
+    param->f08 = flags;
+    if (nType == 0) {
+        param->f00 = 0;
+        param->f18 = ((int *)D_00338684[0])[312];
+    } else {
+        param->f18 = UnduDataGetHeader(nType, 0x8000);
+    }
+    UnduCheck(actor, 0, param);
+    return (int)param->f20;
+}
