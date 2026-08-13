@@ -419,16 +419,17 @@ void Java_xeno_Chr_getArgs__II(void *env, int *args, int *ret)
 }
 
 /* Store an object reference pair into the character's argument block */
-/* TODO: not matching - the second object field load is scheduled after the first store */
 void Java_xeno_Chr_setArgs__ILjava_lang_Object_I(void *env, int *args, int *ret)
 {
     char *obj = (char *)args[0];
     int *pObj = (int *)args[2];
     int nIndex = args[1];
     char *pArg = (char *)CHR_PEER(obj) + nIndex;
+    int nClass = pObj[2];
+    int nObject = pObj[1];
 
-    *(int *)(pArg + 0xC4) = pObj[1];
-    *(int *)(pArg + 0xC0) = pObj[2];
+    *(int *)(pArg + 0xC0) = nClass;
+    *(int *)(pArg + 0xC4) = nObject;
 }
 
 /* Return the character's actor serial number */
