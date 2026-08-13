@@ -24,6 +24,15 @@ import struct
 LOAD_OPS = ("lw", "lh", "lb", "lbu", "lhu", "lwc1", "l.s")
 MEM_OPS = ("sw", "sh", "sb", "swc1", "lw", "lh", "lb", "lbu", "lhu",
            "lwc1", "s.s", "l.s")
+# sd/ld deliberately excluded from MEM_OPS (and so from RE_MEM/RE_MEM_ABS):
+# those regexes' fix is `.set mips1`, but sd/ld are true 64-bit ops that
+# don't exist under mips1 -- gas silently splits them into a pair of 32-bit
+# sw/lw halves instead of just fixing the address macro. That's fine (and
+# needed) for gp-relative symbol operands, which assemble correctly with no
+# wrapping at all. Only the register-base-plus-large-numeric-offset case
+# (RE_MEM_BIGOFF) needs sd/ld handling, and it gets a hand-expanded macro
+# instead of the mips1 wrap -- see the RE_MEM_BIGOFF handling below.
+MEM_OPS_BIGOFF = MEM_OPS + ("sd", "ld")
 
 RE_MOVE = re.compile(r'\tmove\t(\$[0-9a-z]+),(\$[0-9a-z]+)')
 RE_LA = re.compile(r'^\tla[ \t](.*)$')
@@ -41,7 +50,7 @@ RE_MEM_ABS = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS) +
 # A load/store with a register base and an offset too large for the 16-bit
 # immediate field is also a macro: gas expands it as lui + daddu + op, but
 # the original ee-as used addu. Wrap in .set mips1 to get the 32-bit form.
-RE_MEM_BIGOFF = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS) +
+RE_MEM_BIGOFF = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS_BIGOFF) +
                            r')[ \t]([^,]*),(-?[0-9]+)(\(\$[a-z0-9]+\))[ \t]*$')
 RE_LIS = re.compile(r'^\tli\.s[ \t](.*)$')
 RE_CVT = re.compile(r'^\t(cvt\.[a-z.]+|trunc\.w\.s)[ \t](.*)$')
@@ -248,7 +257,24 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
         m_big = RE_MEM_BIGOFF.match(line)
         if m_big and abs(int(m_big.group(3))) > 32767:
-            out.append(wrap_mips1(line))
+            op, reg, off, base = m_big.groups()
+            if op in ("sd", "ld"):
+                # .set mips1 fixes the addu-vs-daddu base computation for
+                # sw/lw etc., but sd/ld are true 64-bit ops that don't
+                # exist under mips1 -- gas silently splits them into a
+                # pair of 32-bit sw/lw halves instead (wrong instruction
+                # count and encoding). Expand the address macro by hand
+                # instead, matching the original's lui+addu+sd/ld shape.
+                offset = int(off)
+                lo = offset & 0xFFFF
+                if lo >= 0x8000:
+                    lo -= 0x10000
+                hi = ((offset - lo) >> 16) & 0xFFFF
+                basereg = base[1:-1]
+                out.append(f"\tlui\t$1,{hi}\n\taddu\t$1,$1,{basereg}"
+                           f"\n\t{op}\t{reg},{lo}($1)")
+            else:
+                out.append(wrap_mips1(line))
             continue
 
         if (barrier_return_store is not None and RE_STORE.match(line)

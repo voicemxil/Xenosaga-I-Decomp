@@ -1003,7 +1003,6 @@ void Java_xeno_util_Runtime_setMenuLock__(JThread *thread, JValue *args, JValue 
 }
 
 /* Remember the current camera as the event return point */
-/* TODO: near-miss - gas expands the >16-bit offset with daddu where the original used addu */
 void Java_xeno_util_Runtime_evsSetRetPoint__(JThread *thread, JValue *args, JValue *ret)
 {
     long long *p;

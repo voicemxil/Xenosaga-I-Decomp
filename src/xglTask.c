@@ -119,14 +119,6 @@ XGL_TASK *xglTaskEntryNext(XGL_TASK *queue, void (*func)(void), XGL_TASK *pRef)
 /* Unlink node from its owning queue's active list and push it back onto
  * the free list; also advances the queue's iterator scratch if it was
  * pointing at the node being removed (safe removal mid-Execute) */
-/* TODO: near-miss (23/25 words match). Original reloads node->field4 a
- * second time via a separate `lw` after the queue->fieldC store in the
- * "node is the iterator" branch; every source form tried here (shared
- * temp, duplicated reads, differently-typed temps, reversed condition)
- * has 2.96 either CSE the already-loaded value into a `move` instead of
- * a second `lw`, or flip the branch polarity (beql vs bnel). Everything
- * else -- the bnel merge, the two insert-before/after branch pairs, the
- * free-list push -- matches exactly. */
 void *xglTaskRemove(XGL_TASK *node)
 {
     XGL_TASK *queue = node->field0;
@@ -134,6 +126,7 @@ void *xglTaskRemove(XGL_TASK *node)
 
     if (node == (XGL_TASK *)queue->fieldC) {
         queue->fieldC = (void (*)(void))node->field4;
+        __asm__ volatile("" ::: "memory");
         next = node->field4;
     } else {
         next = node->field4;
