@@ -371,3 +371,84 @@ int *scGetRegAdr(int reg) {
     }
     return &D_0041E7D0[_nowScript].regs[reg];
 }
+
+typedef struct { char pad[0x8]; short nTaskCnt; char pad2[0x450 - 0xA]; } SC_SLOT_CNT;
+extern SC_SLOT_CNT D_0041E810[];
+
+typedef struct {
+    unsigned short flags;   /* 0x00 */
+    char pad2[8 - 2];
+    int f08;                 /* 0x08 */
+    char pad3[0x54 - 0x0C];
+    short f54;                /* 0x54 */
+} TASK_OBJ;
+
+/* Clear task <task> in script slot <slot>: decrement the slot's active-task
+ * counter (offset 0x48 of the SC_SLOT header) if the task was live, then
+ * zero the task's flags/field54 and reset its field08 to -1. Same 0x450
+ * slot stride, 0x80 task stride as scGetTaskAdr. */
+void scDeleteTask(int slot, int task)
+{
+    TASK_OBJ *p;
+    SC_SLOT_CNT *cp;
+
+    if ((unsigned int)task >= 9) {
+        return;
+    }
+    if (task < 0) {
+        p = 0;
+    } else {
+        p = (TASK_OBJ *)((char *)&_scriptWork[slot] + task * 128);
+    }
+    if (p->flags != 0) {
+        cp = &D_0041E810[slot];
+        cp->nTaskCnt--;
+    }
+    p->flags = 0;
+    p->f54 = 0;
+    p->f08 = -1;
+}
+
+extern int _nowScript;
+extern short D_0041E426[];
+extern int scCreateTask(int nowScript, int a1, void *adr, void *a3);
+
+/* OBJEVE opcode: spawn a sub-task at the resolved address, storing the
+ * event's operand value into the per-(slot,task) short table at
+ * D_0041E426 (same 0x450/0x80 stride as _scriptWork). Always returns 1. */
+int scOBJEVEScript(SCOBJ *o) {
+    int n;
+    int adr;
+    int taskId;
+
+    n = scGetNumScript(o);
+    adr = scGetAdrScript(o);
+    taskId = scCreateTask(_nowScript, -1, (void *)adr, (char *)o + 0x30);
+    if (taskId >= 0) {
+        *(short *)(taskId * 128 + (char *)D_0041E426 + _nowScript * 1104) = n;
+    }
+    return 1;
+}
+
+extern int sprintf(char *buf, const char *fmt, ...);
+
+/* RDUMP debug opcode: sprintf all 16 script registers (2 rows of 8) into a
+ * scratch buffer via scGetReg; always returns 1 (the buffer itself is
+ * write-only/discarded here, matching the original's dead final store). */
+int scRDUMPScript(SCOBJ *o) {
+    char buf[0x80];
+    int pos;
+    int row;
+    int col;
+    int v;
+
+    pos = 0;
+    for (row = 0; row < 2; row++) {
+        for (col = 0; col < 8; col++) {
+            v = scGetReg(row * 8 + col);
+            pos += sprintf(buf + pos, "%d ", v);
+        }
+        buf[0] = 0;
+    }
+    return 1;
+}

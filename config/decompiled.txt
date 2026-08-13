@@ -1342,3 +1342,6 @@ scGetNumScript = 0x002EA488, 0x58; // sc
 scRETURNScript = 0x002EA890, 0x4C; // sc
 scWAITCNTScript = 0x002EB2E8, 0x40; // sc
 scGetRegAdr = 0x002EBC80, 0x60; // sc
+MenuParaUpCheck = 0x002917D0, 0x84; // Menu
+MenuTecSpeedUp = 0x002AF770, 0x84; // Menu
+MenuModelSubWindowMainSub = 0x0027FC88, 0xB4; // Menu

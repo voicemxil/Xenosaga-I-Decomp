@@ -554,3 +554,216 @@ int MenuSystem2(void)
     endPrintExtFunc(0, 0x64, 0);
     return D_0036C191[0] != 0xFF;
 }
+
+/* --- Box (item/event/weapon/bullet/accessory data record) plumbing --- */
+extern int dataItmBoxChk(int);
+extern int dataEvtBoxChk(int);
+extern int dataWpnBoxChk(int);
+extern int dataBltBoxChk(int);
+extern int dataAccBoxChk(int);
+
+/* TODO: near-miss - a single differing word, the jump-table base-pointer add
+   (orig `addu`, ours `daddu`). Every switch variant tried (unsigned/int index,
+   split local, explicit cast) reproduces the same 1-word diff; this looks like
+   a compiler-version jump-table codegen artifact rather than a source shape,
+   since no jtbl_-based switch anywhere in the codebase yet matches. Worth a
+   permuter/register-pin pass or revisiting once another jtbl_ function lands. */
+/* --- Para (stat point) up-check plumbing --- */
+typedef struct {
+    char pad0C[0xC];
+    int fC;
+} PARAOBJ;
+extern int MenuParaPtNowGet(int nBase, int nType);
+extern int MenuParaUpMaxGet(int nType);
+extern PARAOBJ *func_A19210(int nBase);
+extern int MenuParaNextPointGet(int nBase, int nType, int nArg2);
+
+/* Test whether a stat still has room to level up: -2 out of points, -1 below the next
+   breakpoint, 0 ready to advance */
+int MenuParaUpCheck(int nBase, int nType)
+{
+    unsigned int ptNow, upMax;
+    PARAOBJ *p;
+    int nextPoint;
+
+    ptNow = MenuParaPtNowGet(nBase, nType);
+    upMax = MenuParaUpMaxGet(nType);
+    if (ptNow >= upMax) {
+        return -2;
+    }
+    p = func_A19210(nBase);
+    nextPoint = MenuParaNextPointGet(nBase, nType, 0);
+    if (p->fC < nextPoint) {
+        return -1;
+    }
+    return 0;
+}
+
+/* --- Tec (technique) speed/save-data plumbing --- */
+extern char *MenuTecSaveDataGet(int nId);
+extern int MenuTecNextSpeedPointGet(int nId, int nSpeed);
+
+/* Mark a technique's speed-up slot used and deduct its point cost */
+void MenuTecSpeedUp(int nId, int nSpeed)
+{
+    int idx;
+    char *pSave;
+    PARAOBJ *p;
+    int nextPoint;
+
+    idx = nId & 0xFFFF;
+    pSave = MenuTecSaveDataGet(idx);
+    p = func_A19210(idx);
+    if (nSpeed < 0) {
+        return;
+    }
+    nextPoint = MenuTecNextSpeedPointGet(nId, nSpeed);
+    pSave[nSpeed + 8] = 1;
+    p->fC -= nextPoint;
+}
+
+/* --- Model sub-window main-tick detail plumbing --- */
+typedef struct {
+    char b0;
+    unsigned char b1;
+    unsigned char b2;
+    unsigned char b3;
+    short h4;
+    short h6;
+    short h8;
+    short hA;
+    int fC;
+} SUBOBJ2;
+extern void nmlModelUseSubWindow(int, int);
+extern void xglCameraSetWindow(int, int, int, int, int);
+
+/* Run the actual model sub-window tick: refresh the camera window and radar marker,
+   or tear the sub-window down if its owning object has gone away */
+void MenuModelSubWindowMainSub(SUBWIN *p)
+{
+    SUBOBJ2 *pObj;
+    char *pActor;
+    int fC;
+
+    pObj = (SUBOBJ2 *)p->f4C;
+    pActor = *(char **)((char *)p + 0x20);
+    if (MenuModelFlag & 1) {
+        pObj->b1 = -1;
+    }
+    if (pObj->b1 == 0) {
+        fC = pObj->fC;
+    } else if (pObj->b1 == 0xFF) {
+        nmlModelUseSubWindow(pObj->b2, 0);
+        p->f4C = 0;
+        return;
+    } else {
+        fC = pObj->fC;
+    }
+    xglCameraSetWindow(fC, pObj->h4, pObj->h6, pObj->h8, pObj->hA);
+    nmlModelUseSubWindow(pObj->b2, pObj->b3);
+    if (pObj->b3 == 1) {
+        *(short *)(pActor + 0x676) = pObj->b2;
+        return;
+    }
+    *(short *)(pActor + 0x676) = 0;
+}
+
+/* TODO: near-miss - the weapon-dispose countdown loop matches exactly; only the
+   trailing pair of ActorAndResourceDispose calls differs. The original routes
+   the second call's two pointer args through s0/s1 (reusing the just-freed loop
+   registers) before reloading them for the epilogue; every natural variant tried
+   (inline exprs, named p1/p2 locals, reusing pWeapon, goto-shaped loop) instead
+   allocates them straight into a0/a1 since nothing forces a callee-saved temp.
+   Logic and byte COUNT differ only in this tail (0x90 orig vs 0x88 here). */
+/* Dispose a model unit's three weapon slots, then tear down its two actor/resource pairs */
+void MenuModelUnitDispose(char *p)
+{
+    char **pWeapon;
+    int i;
+
+    if (p == 0) {
+        return;
+    }
+    pWeapon = (char **)(p + 0x34);
+    for (i = 2; i >= 0; i--) {
+        MenuModelWeaponDispose(*pWeapon);
+        pWeapon++;
+    }
+    ActorAndResourceDispose(p + 0x24, p + 0x2C, 1);
+    ActorAndResourceDispose(p + 0x20, p + 0x28, 0);
+}
+
+/* --- Hardcoded z-clear DMA packet plumbing --- */
+typedef struct {
+    long long f0;
+    long long f8;
+    long long f10;
+    long long f18;
+    long long f20;
+    long long f28;
+} DMABLK1;
+typedef struct {
+    int f0;
+    int f4;
+    int f8;
+    int fC;
+    int f10;
+    int f14;
+    int f18;
+    int f1C;
+} DMABLK2;
+extern void nmlModelDirectSend(int, void *, int);
+
+/* TODO: near-miss - same size (0xA4) and same set of stores/constants as the
+   original, but gcc 2.96's scheduler interleaves the nmlModelDirectSend(1,
+   0x70000000, 5) argument setup between the DMABLK1 field stores (reusing each
+   just-freed register immediately), while ours computes the call args together
+   right before the call. The logical store ORDER already matches; this looks
+   like a pure instruction-scheduling difference, not a source-order one -
+   candidate for the permuter, but the reorderable set (6 DMABLK1 stores + 8
+   DMABLK2 stores + 3 call-arg loads = 17 statements) is too large to sweep by
+   hand. */
+/* Build and kick off a fixed z-clear GS packet via the scratchpad DMA staging area */
+void MenuModelDirectSendZClear(void)
+{
+    DMABLK1 *p1 = (DMABLK1 *)0x70000000;
+    DMABLK2 *p2 = (DMABLK2 *)0x70000030;
+
+    p1->f28 = 0x47;
+    p1->f8 = 0x5100000400001100LL;
+    p1->f10 = 0x3023400000008001LL;
+    p1->f18 = 0x55E;
+    p1->f20 = 0x32001;
+    p1->f0 = 0;
+
+    p2->f0 = 0x6FF8;
+    p2->f4 = 0x71F8;
+    p2->f10 = 0x8FF8;
+    p2->f14 = 0x8DF8;
+    p2->f1C = 0;
+    p2->f8 = 0;
+    p2->fC = 0;
+    p2->f18 = 0;
+
+    nmlModelDirectSend(1, (void *)0x70000000, 5);
+}
+
+/* Test whether a box entry exists, dispatching on the record-type encoded in the high word */
+int MenuBoxChk(int nId)
+{
+    unsigned int nType;
+    int nRes;
+
+    nType = (unsigned int)nId >> 16;
+    nId = nId & 0xFFFF;
+    nRes = 0;
+    switch (nType - 1) {
+    case 0: nRes = dataItmBoxChk(nId); break;
+    case 1: nRes = dataEvtBoxChk(nId); break;
+    case 2: nRes = dataWpnBoxChk(nId); break;
+    case 3: nRes = dataBltBoxChk(nId); break;
+    case 4: nRes = dataAccBoxChk(nId); break;
+    case 5: nRes = 0; break;
+    }
+    return nRes;
+}

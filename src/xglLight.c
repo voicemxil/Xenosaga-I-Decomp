@@ -4,6 +4,31 @@ typedef int TI __attribute__((mode(TI)));
 
 void xglVectorNormal(void *pDest, void *pSource);
 extern unsigned int Vu0CallLightCalcMatrix[];
+void xglMatrixStackUnit(void);
+void xglMatrixStackRotX(float);
+void xglMatrixStackRotY(float);
+void xglMatrixStackRotZ(float);
+void xglMatrixStackSave(void *);
+
+/* Default per-light templates (4 rows: ambient + up to 3 parallel slots) */
+static unsigned int asIntensity_0[16] __asm__("asIntensity.0") = {
+    0x3E800000, 0x3E800000, 0x3E800000, 0x3F800000,
+    0x3F4CCCCD, 0x3F4CCCCD, 0x3F4CCCCD, 0x3F800000,
+    0x3F000000, 0x3F000000, 0x3F000000, 0x3F800000,
+    0x3F000000, 0x3F000000, 0x3F000000, 0x3F800000,
+};
+static unsigned int asDirection_1[16] __asm__("asDirection.1") = {
+    0x00000000, 0x00000000, 0x00000000, 0x3F800000,
+    0xBE861F28, 0x3F07FD47, 0xBCA290B6, 0x3F800000,
+    0x4016CBE4, 0x3FA2FD60, 0x40490FDB, 0x3F800000,
+    0x3EB8F33F, 0x4071A850, 0x3CE9C49C, 0x3F800000,
+};
+static unsigned int sIntensity0_2[4] __asm__("sIntensity0.2") = {
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+};
+static unsigned int sIntensity1_3[4] __asm__("sIntensity1.3") = {
+    0x3F800000, 0x3F800000, 0x3F800000, 0x3F800000,
+};
 
 /* TODO: near-miss (2/4 words differ, SCHEDULING) - 2.96 schedules the sq
  * into the jr delay slot here; the original keeps sq before jr with a
@@ -58,4 +83,61 @@ void xglLightCalcMatrix(void *pLight)
         "sqc2 $vf24, 0xb0(%1)\n sqc2 $vf25, 0xc0(%1)\n"
         "sqc2 $vf26, 0xd0(%1)\n sqc2 $vf27, 0xe0(%1)\n"
         ".set reorder" : : "r"((unsigned int)Vu0CallLightCalcMatrix >> 3), "r"(pLight));
+}
+
+/* Set light angles (rotation about Z,Y,X) and bake the resulting matrix's
+ * direction row into slot nNo (no-op past slot 2) */
+/* TODO: near-miss (13/32 words, LOGIC/addressing) - the final quadword
+ * copy's source is a known sp-relative stack slot (the just-saved local
+ * matrix), so gcc always folds it to `lq $v0,0x20($sp)`; the original
+ * instead materializes the address in a register (`addiu $a0,$sp,0x20;
+ * lq $v0,0($a0)`). Every natural pointer-indirection form tried still
+ * gets constant-folded back to the sp-immediate. Register-save/restore
+ * epilogue also then differs in instruction count as a result. */
+void xglLightAngle(void *pLight, unsigned int nNo, void *pAngles)
+{
+    unsigned int aMtx[16];
+    float *pA = (float *)pAngles;
+    void *pRow;
+    void *pDst;
+
+    if (nNo < 3) {
+        xglMatrixStackUnit();
+        xglMatrixStackRotZ(pA[2]);
+        xglMatrixStackRotY(pA[1]);
+        xglMatrixStackRotX(pA[0]);
+        xglMatrixStackSave(aMtx);
+        pDst = (char *)pLight + nNo * 0x20 + 0x20;
+        pRow = (char *)aMtx + 0x20;
+        *(TI *)pDst = *(TI *)pRow;
+    }
+}
+
+/* Reset all 4 light slots (1 ambient + 3 parallel) to their default
+ * intensity/direction templates */
+void xglLightSetDefault(void *pLight)
+{
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        if (i == 0) {
+            xglLightIntensityAmbient(pLight, asIntensity_0);
+        } else {
+            xglLightIntensityParallel(pLight, i - 1, &asIntensity_0[i * 4]);
+            xglLightAngle(pLight, i - 1, &asDirection_1[i * 4]);
+        }
+    }
+}
+
+/* Initialize a light to full white ambient + 3 parallel lights all
+ * pointed straight along the same default direction */
+void xglLightInit(void *pLight)
+{
+    int i;
+
+    xglLightIntensityAmbient(pLight, sIntensity1_3);
+    for (i = 0; i < 3; i++) {
+        xglLightIntensityParallel(pLight, i, sIntensity0_2);
+        xglLightDirection(pLight, i, sIntensity1_3);
+    }
 }

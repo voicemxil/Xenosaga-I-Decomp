@@ -32,13 +32,58 @@ int create_file(char *pName, int nFlag, void *pBuf, int nSize);
 void make_fullpath(char *pDest, char *pName, int nFlag);
 int xglCdArcCheck(void);
 void xglCdReadCancel(void);
-int xglHddCheckCore(void);
 int xglHddErrorScreen(void);
 int xglHddActivate(int nMode);
 int xglHddCheck2(void);
 int xglHddMcLoadMount(void);
 int xglHddMcLoadCore(XGLHDDREQ *pReq);
 int xglHddMcUmount(void);
+
+extern char D_004DC368[];
+int sceDevctl(char *pDevice, int nCmd, int a2, int a3, int a4, int a5);
+
+/* TODO: near-miss (52/54 words). Full branch structure, sceDevctl args,
+ * and the range-check shape (result<3 vs result>=3, not a plain switch)
+ * are all verified against the asm -- see the derivation: result==0
+ * triggers a second devctl call; result==2 falls through to the default
+ * -5; result==1 -> -3; result==3 -> -1; anything else -> -99. Remaining
+ * blocker: the original hoists `li v0,-5` to the very top of the
+ * function (shared between the HddActive>=2 early-out and the result==2
+ * fallthrough), so the whole instruction stream is offset by one word
+ * versus every natural C form tried (single shared return var forces an
+ * extra callee-saved register across the jal calls instead). */
+int xglHddCheckCore(void)
+{
+    int result;
+
+    if (HddActive < 2) {
+        result = sceDevctl(D_004DC368, 0x4807, 0, 0, 0, 0);
+        if (result == 0) {
+            result = sceDevctl(D_004DC368, 0x4804, 0, 0, 0, 0);
+            if (result >= 0) {
+                return 0;
+            }
+            if (HddActive == 1) {
+                return -6;
+            }
+            xglHddActivate(0x102);
+            return -5;
+        }
+        if (result != 2) {
+            if (result < 3) {
+                if (result == 1) {
+                    return -3;
+                }
+                return -0x63;
+            }
+            if (result == 3) {
+                return -1;
+            }
+            return -0x63;
+        }
+    }
+    return -5;
+}
 
 /* Probe the HDD, deactivating it when the media has gone away */
 int xglHddCheck2(void)

@@ -1,8 +1,44 @@
 /* Bit-packed persistent flag accessors */
 
-int xglFlagsSet(int, int, int);
 int xglFlagsGet(int, int);
 extern unsigned char SaveData[] __attribute__((section(".data")));
+extern unsigned char D_00491824[];
+
+/* TODO: near-match (41/48 words) - bit-packed field read/modify/write via
+   stack scratch buffer; nOld extraction (chunk>>shift)&mask vs. the final
+   dsll32/dsra32 sign-extend schedules differently than the original, which
+   ANDs-then-sign-extends where ours sign-extends-then-ANDs. Logic is
+   correct (matches xglFlagsGet's mirror-image pattern below); only
+   instruction scheduling differs. LOGIC class per triage.py. */
+int xglFlagsSet(int nFlag, int nSize, int nValue)
+{
+    unsigned char *p;
+    long long nChunk;
+    unsigned char *pByte = (unsigned char *)&nChunk;
+    int nShift;
+    int nBytes;
+    int i;
+    int mask;
+    int nOld;
+
+    nShift = nFlag & 7;
+    mask = (1 << nSize) - 1;
+    nBytes = (nSize + nShift + 7) >> 3;
+    p = &D_00491824[nFlag >> 3];
+
+    for (i = 0; i < nBytes; i++) {
+        pByte[i] = p[i];
+    }
+
+    nOld = (int)((nChunk >> nShift) & mask);
+    nChunk = (nChunk & ~((long long)mask << nShift)) | ((long long)(nValue & mask) << nShift);
+
+    for (i = 0; i < nBytes; i++) {
+        p[i] = pByte[i];
+    }
+
+    return nOld;
+}
 
 int xglFlagsSet1(int nFlag, int nValue) { return xglFlagsSet(nFlag, 1, nValue); }
 int xglFlagsSet2(int nFlag, int nValue) { return xglFlagsSet(nFlag, 2, nValue); }

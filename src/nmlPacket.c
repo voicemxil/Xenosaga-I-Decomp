@@ -299,3 +299,43 @@ void nmlPacketAddGsFba(u_long nFba)
     g_aGsTag.l[g_nGsEntry * 2 + 3] = 0x4A;
     g_nGsEntry++;
 }
+
+typedef int TI __attribute__((mode(TI)));
+void sceVif1PkAddUpkData128(u_int *pPk, TI data);
+unsigned int sceVif1PkSize(u_int *pPk);
+void sceVif1PkRef(u_int *pPk, u_int a1, u_int a2, u_int a3, u_int t0, u_int t1);
+
+/* Reference pData directly from the packet (DMA-ref, no copy) if doing
+ * so wouldn't push the packet's total span past the 2MB DMA window;
+ * returns 1 if it was too big to reference, 0 on success */
+int nmlPacketDirectData(void *pData, int nSize)
+{
+    u_int *pk;
+    u_int nSizeQw;
+
+    s_pPacket = xglPacketGetCurrent();
+    nSizeQw = sceVif1PkSize(s_pPacket);
+    pk = s_pPacket;
+    if (0x200000 < (nSizeQw << 4) + (pk[8] - pk[9]) + 0x10000) {
+        return 1;
+    }
+    sceVif1PkRef(pk, (u_int)pData, nSize, 0, 0, 0);
+    return 0;
+}
+
+/* Add a standard (non-textured) GIF tag with the given PRIM/NREG-ish
+ * fields packed into word 1 */
+void nmlPacketAddGifTagStandard(int nA, int nB)
+{
+    u_int aTag[4];
+
+    s_pPacket = xglPacketGetCurrent();
+    sceVif1PkCnt(s_pPacket, 0);
+    aTag[0] = 0x8000;
+    aTag[1] = (nA << 19) | (nB << 21) | 0x30064000;
+    aTag[2] = 0x412;
+    aTag[3] = 0;
+    sceVif1PkOpenUpkCode(s_pPacket, 0x3F3, 0x6C, 1, 1);
+    sceVif1PkAddUpkData128(s_pPacket, *(TI *)aTag);
+    sceVif1PkCloseUpkCode(s_pPacket);
+}

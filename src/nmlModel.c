@@ -57,7 +57,7 @@ typedef struct {
         float f;
         int n;
     } uAxis;                /* 0x230 */
-    char pad234[0x4];
+    int nFilterFlag;        /* 0x234 */
     int nPixelAlpha;        /* 0x238 */
     void *pMatrix;          /* 0x23C */
     void *pTexture;         /* 0x240 */
@@ -736,4 +736,219 @@ void nmlModelFlushClear(void)
     FLUSH_PARENT_BUF();
     FLUSH_BACK_BUFFER();
     nmlModelClear();
+}
+
+void CONSTRUCT_MODELSYSTEM(void);
+void CONSTRUCT_CIRCLR_SHADOW(void);
+void CONSTRUCT_BACK_BUFFER(void);
+void CONSTRUCT_ALPHA_GROUP(void);
+void CONSTRUCT_PARENT_BUF(void);
+void CONSTRUCT_MAP_HANDLE(void *pMapHandle);
+void CONSTRUCT_FADE_CONTROL(void *pFade);
+extern int D_004A9430[];
+
+/* Construct every model subsystem, then clear model state */
+void nmlModelConstruct(void)
+{
+    CONSTRUCT_MODELSYSTEM();
+    CONSTRUCT_CIRCLR_SHADOW();
+    CONSTRUCT_BACK_BUFFER();
+    CONSTRUCT_ALPHA_GROUP();
+    CONSTRUCT_PARENT_BUF();
+    CONSTRUCT_MAP_HANDLE(&s_inMapHandle);
+    CONSTRUCT_FADE_CONTROL(&s_inFadeIn);
+    CONSTRUCT_FADE_CONTROL(&s_inFadeOut);
+    CONSTRUCT_FADE_CONTROL(&s_inActiveFadeIn);
+    CONSTRUCT_FADE_CONTROL(&s_inActiveFadeOut);
+    nmlModelClear();
+    D_004A9430[0] = 0;
+}
+
+extern unsigned short D_0033868C[];
+int SCRIPT_getCfTime(void);
+int s_nUseStealth;
+
+/* TODO: near-miss (25/35 words, LOGIC/register) - clamp logic, field
+ * offsets (nFilterFlag@0x234, aFogDist[4]@0x1E0, aFogDist[5]@0x1E4) and
+ * the stealth-timer gate are all verified against asm. Original caches
+ * &s_inLayout in a single register ($v0) used throughout; every local
+ * pointer / direct-field-access variant tried still splits it into two
+ * registers (an extra `addiu v1,v0,0` copy) once the (flag&2) branch is
+ * added. Length now matches (35 words); remaining diffs are pure
+ * instruction/register shuffling within that block. */
+void *xglStudioGetActiveCamera(void);
+void _ModelCalcClipInit(void *pCamera);
+int _ModelCalcClip(void *pPos);
+int xglCullingCheck(void *p1, void *p2);
+
+/* Transform pPos by pMatrix through the VU0 point-transform pipe, then
+ * clip-test it against the active camera and the culling map; returns
+ * 0 if there's no active camera */
+int nmlModelCalcClipMat1(void *pPos, void *pMatrix)
+{
+    void *pCamera;
+    VEC4 vTemp;
+    int n1, n2;
+
+    pCamera = xglStudioGetActiveCamera();
+    if (pCamera != 0) {
+        __asm__ __volatile__(".set noreorder\n"
+            "lqc2 $vf31, 0x0(%1)\n"
+            "lqc2 $vf27, 0x0(%2)\n lqc2 $vf28, 0x10(%2)\n"
+            "lqc2 $vf29, 0x20(%2)\n lqc2 $vf30, 0x30(%2)\n"
+            "vmulax.xyz $ACC, $vf27, $vf31x\n vmadday.xyz $ACC, $vf28, $vf31y\n"
+            "vmaddaz.xyz $ACC, $vf29, $vf31z\n vmaddw.xyz $vf31, $vf30, $vf0w\n"
+            "sqc2 $vf31, 0x0(%0)\n"
+            ".set reorder" : : "r"(&vTemp), "r"(pPos), "r"(pMatrix));
+        _ModelCalcClipInit((char *)pCamera + 0x4F0);
+        n1 = _ModelCalcClip(&vTemp);
+        n2 = xglCullingCheck(pCamera, &vTemp);
+        return n1 | n2;
+    }
+    return (int)pCamera;
+}
+
+/* Transform pPos by pMatrix1 then pMatrix2 (chained) through the VU0
+ * point-transform pipe, then clip-test against the active camera and
+ * the culling map; returns 0 if there's no active camera */
+int nmlModelCalcClipMat2(void *pPos, void *pMatrix1, void *pMatrix2)
+{
+    void *pCamera;
+    VEC4 vTemp;
+    int n1, n2;
+
+    pCamera = xglStudioGetActiveCamera();
+    if (pCamera != 0) {
+        __asm__ __volatile__(".set noreorder\n"
+            "lqc2 $vf31, 0x0(%1)\n"
+            "lqc2 $vf27, 0x0(%2)\n lqc2 $vf28, 0x10(%2)\n"
+            "lqc2 $vf29, 0x20(%2)\n lqc2 $vf30, 0x30(%2)\n"
+            "vmulax.xyz $ACC, $vf27, $vf31x\n vmadday.xyz $ACC, $vf28, $vf31y\n"
+            "vmaddaz.xyz $ACC, $vf29, $vf31z\n vmaddw.xyz $vf31, $vf30, $vf0w\n"
+            "lqc2 $vf27, 0x0(%3)\n lqc2 $vf28, 0x10(%3)\n"
+            "lqc2 $vf29, 0x20(%3)\n lqc2 $vf30, 0x30(%3)\n"
+            "vmulax.xyz $ACC, $vf27, $vf31x\n vmadday.xyz $ACC, $vf28, $vf31y\n"
+            "vmaddaz.xyz $ACC, $vf29, $vf31z\n vmaddw.xyz $vf31, $vf30, $vf0w\n"
+            "sqc2 $vf31, 0x0(%0)\n"
+            ".set reorder" : : "r"(&vTemp), "r"(pPos), "r"(pMatrix1), "r"(pMatrix2));
+        _ModelCalcClipInit((char *)pCamera + 0x4F0);
+        n1 = _ModelCalcClip(&vTemp);
+        n2 = xglCullingCheck(pCamera, &vTemp);
+        return n1 | n2;
+    }
+    return (int)pCamera;
+}
+
+void *xglStudioSelectGetActiveCamera(int nStudio);
+
+/* Transform pPos by pMatrix and clip/cull-test it against every active
+ * sub-window camera (skipping disabled windows); returns 0 as soon as
+ * any camera shows it visible, or 1 if every camera clips/culls it (or
+ * immediately 0 if a window has no camera at all) */
+int nmlModelCalcClipMat1AllCam(void *pPos, void *pMatrix)
+{
+    int i;
+    void *pCamera;
+    VEC4 vTemp;
+    int n1, n2;
+    int nRet;
+
+    nRet = 1;
+    for (i = 0; i < 4; i++) {
+        pCamera = xglStudioSelectGetActiveCamera(i);
+        if (pCamera == 0) {
+            return (int)pCamera;
+        }
+        if (g_aSubWindow[i] != 0) {
+            __asm__ __volatile__(".set noreorder\n"
+                "lqc2 $vf31, 0x0(%1)\n"
+                "lqc2 $vf27, 0x0(%2)\n lqc2 $vf28, 0x10(%2)\n"
+                "lqc2 $vf29, 0x20(%2)\n lqc2 $vf30, 0x30(%2)\n"
+                "vmulax.xyz $ACC, $vf27, $vf31x\n vmadday.xyz $ACC, $vf28, $vf31y\n"
+                "vmaddaz.xyz $ACC, $vf29, $vf31z\n vmaddw.xyz $vf31, $vf30, $vf0w\n"
+                "sqc2 $vf31, 0x0(%0)\n"
+                ".set reorder" : : "r"(&vTemp), "r"(pPos), "r"(pMatrix));
+            _ModelCalcClipInit((char *)pCamera + 0x4F0);
+            n1 = _ModelCalcClip(&vTemp);
+            n2 = xglCullingCheck(pCamera, &vTemp);
+            if ((n1 | n2) == 0) {
+                nRet = 0;
+                break;
+            }
+        }
+    }
+    return nRet;
+}
+
+/* Transform pPos by pMatrix1 then pMatrix2 and clip-test it (no culling
+ * check) against sub-windows 0-2; returns a per-window clip bitmask,
+ * with bit 0x80 additionally set when every checked window clipped it
+ * (or immediately 0 if an enabled window has no camera) */
+int nmlModelCalcClipMat2AllCam(void *pPos, void *pMatrix1, void *pMatrix2)
+{
+    int i;
+    void *pCamera;
+    VEC4 vTemp;
+    int nResult;
+    int nMask;
+    int nCount;
+    int nSum;
+
+    nMask = 0;
+    nCount = 0;
+    nSum = 0;
+    i = 0;
+    do {
+        if (g_aSubWindow[i] != 0) {
+            pCamera = xglStudioSelectGetActiveCamera(i);
+            if (pCamera == 0) {
+                return (int)pCamera;
+            }
+            _ModelCalcClipInit((char *)pCamera + 0x4F0);
+            __asm__ __volatile__(".set noreorder\n"
+                "lqc2 $vf31, 0x0(%1)\n"
+                "lqc2 $vf27, 0x0(%2)\n lqc2 $vf28, 0x10(%2)\n"
+                "lqc2 $vf29, 0x20(%2)\n lqc2 $vf30, 0x30(%2)\n"
+                "vmulax.xyz $ACC, $vf27, $vf31x\n vmadday.xyz $ACC, $vf28, $vf31y\n"
+                "vmaddaz.xyz $ACC, $vf29, $vf31z\n vmaddw.xyz $vf31, $vf30, $vf0w\n"
+                "lqc2 $vf27, 0x0(%3)\n lqc2 $vf28, 0x10(%3)\n"
+                "lqc2 $vf29, 0x20(%3)\n lqc2 $vf30, 0x30(%3)\n"
+                "vmulax.xyz $ACC, $vf27, $vf31x\n vmadday.xyz $ACC, $vf28, $vf31y\n"
+                "vmaddaz.xyz $ACC, $vf29, $vf31z\n vmaddw.xyz $vf31, $vf30, $vf0w\n"
+                "sqc2 $vf31, 0x0(%0)\n"
+                ".set reorder" : : "r"(&vTemp), "r"(pPos), "r"(pMatrix1), "r"(pMatrix2));
+            nResult = _ModelCalcClip(&vTemp);
+            nCount++;
+            nMask |= nResult << i;
+            nSum += nResult;
+        }
+        i++;
+    } while (i < 3);
+    if (nCount != 0 && nSum == nCount) {
+        nMask |= 0x80;
+    }
+    return nMask;
+}
+
+void nmlModelSetFilter(int flag, float a, float b)
+{
+    LAYOUT *p = &s_inLayout;
+
+    if (a < 0.0f) {
+        a = 0.0f;
+    }
+    if (128.0f < a) {
+        a = 128.0f;
+    }
+    p->nFilterFlag = flag;
+    p->aFogDist[5] = b;
+    if ((flag & 2) != 0) {
+        p->aFogDist[4] = a;
+        if (D_0033868C[0] == 2) {
+            s_nUseStealth = 1;
+            if (SCRIPT_getCfTime() < 2) {
+                s_nUseStealth = 0;
+            }
+        }
+    }
 }

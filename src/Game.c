@@ -3,17 +3,39 @@
 typedef unsigned char u8;
 typedef unsigned short u16;
 
+typedef int TIWORD __attribute__((mode(TI)));
+
 typedef struct {
     u8 pad0[0xC];
     u16 nSaveA;             /* 0x0C */
     u16 nSaveB;             /* 0x0E */
     int nFlags;             /* 0x10 */
-    u8 pad14[0x18];
+    u8 pad14[0x28 - 0x14];
+    int nUnk28;              /* 0x28 */
     void (*pDrawFunc)(void);        /* 0x2C */
     void (*pDrawFunc2)(void);       /* 0x30 */
-    u8 pad34[0xAC];
+    u8 pad34[0x50 - 0x34];
+    short nUnk50;             /* 0x50 */
+    u8 pad52[0xC1 - 0x52];
+    u8 nUnkC1;               /* 0xC1 */
+    u8 padC2[0xC4 - 0xC2];
+    unsigned short nUnkC4;    /* 0xC4 */
+    u8 padC6[0xE0 - 0xC6];
     u16 nStateA;            /* 0xE0 */
     u16 nStateB;            /* 0xE2 */
+    u8 pad1E4[0x1F0 - 0xE4];
+    int nUnk1F0;              /* 0x1F0 */
+    short nUnk1F4;             /* 0x1F4 */
+    short nUnk1F6;             /* 0x1F6 */
+    int nUnk1F8;               /* 0x1F8 */
+    u8 pad1FC[0x200 - 0x1FC];
+    TIWORD quad200;             /* 0x200 */
+    TIWORD quad210;             /* 0x210 */
+    short nUnk220;              /* 0x220 */
+    u8 pad222[0x230 - 0x222];
+    int nUnk230;               /* 0x230 */
+    u8 pad234[0x240 - 0x234];
+    TIWORD quad240;             /* 0x240 */
 } GAME_LOOP_STATE;
 
 typedef struct {
@@ -279,4 +301,110 @@ void GameRadarInit(void)
     image_004DC554 = addr;
     WorkEnd = image_004DC554 + xglCdReadFile(D_004C0618, addr, 0, 0);
     rate = 0;
+}
+
+typedef struct {
+    int nFlags;              /* 0x000 */
+    u8 pad004[0x82];         /* 0x004 */
+    short nAlive;             /* 0x086 */
+    u8 pad088[0xA70 - 0x88]; /* 0x088 */
+} GAME_ACTOR;
+
+extern GAME_ACTOR actor[];
+extern void ACT_DrawShadowBegin(void);
+extern void ACT_DrawShadowEnd(void);
+extern void ACT_DrawShadow(GAME_ACTOR *p);
+
+/* Draw shadows for every live, non-hidden, shadow-enabled actor */
+void GameDrawShadow(void)
+{
+    GAME_ACTOR *p = actor;
+    int i;
+
+    ACT_DrawShadowBegin();
+    for (i = 0x3F; i >= 0; i--, p++) {
+        int flags;
+
+        if (p->nAlive == 0) continue;
+        flags = p->nFlags;
+        if ((flags & 8) != 0) continue;
+        if ((flags & 0x20) == 0) continue;
+        ACT_DrawShadow(p);
+    }
+    ACT_DrawShadowEnd();
+}
+
+/* Draw the two pause-screen button hint captions, each centred on screen */
+void GamePauseDispEvent(void)
+{
+    static char msg1[] = "\x0b\x0d\x03\x0c\x20\x80\x20\xa2\xa4\x0c\x80\x80\x80\x19\x03\x20""Button : Skip and proceed\x19\x02";
+    static char msg2[] = "\x0b\x0d\x03\x19\x03""START BUTTON : Cancel PAUSE\x19\x02";
+    int w;
+
+    GamePauseDispCf();
+    w = xglFontGetStringWidth(msg1);
+    xglFontPrint(0x100 - w / 2, 0x100, 0xFFFFFF, msg1);
+    w = xglFontGetStringWidth(msg2);
+    xglFontPrint(0x100 - w / 2, 0x120, 0xFFFFFF, msg2);
+}
+
+extern int UnduDataGetHeader(int a, int b);
+
+typedef struct { int f0; int f4; u8 pad8[0x18 - 0x8]; int f18; } CAM_VEC;
+extern CAM_VEC CamLookAt;
+extern CAM_VEC CamPos;
+
+/* Re-point the camera lookat/pos at a new undu data header, falling back to
+ * a default id if the requested one has no header */
+void GameCameraChangeID(int id)
+{
+    int h;
+
+    if (GameLoopState.nUnkC4 != id) {
+        h = UnduDataGetHeader(0x100, id);
+        if (h == 0) {
+            h = UnduDataGetHeader(0x100, 0x8000);
+            id = 0x8000;
+        }
+        GameLoopState.nUnkC1 |= 0x40;
+        GameLoopState.nUnkC4 = id;
+        CamPos.f18 = h;
+        CamPos.f4 = 0;
+        CamPos.f0 = 0;
+        CamLookAt.f18 = h;
+        CamLookAt.f4 = 0;
+        CamLookAt.f0 = 0;
+    }
+}
+
+extern void GameResourceReset(int nNo);
+extern void __gnu_compiled_c_0024A378(void);
+extern void *GameResourceReadFileCallback;
+
+/* Clear every resource slot, seed slot 0 with the given id/data, and wipe
+ * the IOP-side resource module's cached state pointers */
+void GameResourceInit(int id, int data)
+{
+    int clr;
+    GAME_RESOURCE *p;
+    int i;
+
+    clr = -1;
+    p = GameResource;
+    for (i = 0x7F; i >= 0; i--, p++) {
+        p->nId = 0;
+        p->nUnk04 = 0;
+        p->nUnk08 = 0;
+        p->nUnk0C = clr;
+    }
+    GameResource[0].nId = id;
+    GameResource[0].nUnk04 = data;
+    GameResourceReset(0);
+    GameResourceReadFileCallback = (void *)__gnu_compiled_c_0024A378;
+    *(int *)0x1000000 = 0;
+    *(int *)0x1070800 = 0;
+    *(int *)0x10B1000 = 0;
+    *(int *)0x10B4000 = 0;
+    *(int *)0x10E6000 = 0;
+    *(int *)0x10E7000 = 0;
 }
