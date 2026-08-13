@@ -19,6 +19,7 @@ typedef struct {
 
 extern int xglSRand(void);
 extern float fmodf(float x, float y);
+extern float srsAtan2(float y, float x);
 
 /* Uniform random float in [0, 2*PI/65536) */
 float MMathMakeRandom(void)
@@ -296,6 +297,160 @@ MC_VECTOR *MMathApplyMatrix(MC_VECTOR *pDst, MC_MATRIX *pMat, MC_VECTOR *pSrc)
         "sqc2 $vf1, 0x0(%0)\n"
         ".set reorder" : : "r"(pDst), "r"(pMat), "r"(pSrc));
     return pDst;
+}
+
+/* Vector length (XYZ magnitude) */
+float MMathCalcLength(MC_VECTOR *pA)
+{
+    float ret;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "vmul.xyz $vf1, $vf1, $vf1\n"
+        "vaddy.x $vf1, $vf1, $vf1y\n"
+        "vaddz.x $vf1, $vf1, $vf1z\n"
+        "vsqrt $Q, $vf1x\n"
+        "vwaitq\n"
+        "vaddq.x $vf1, $vf0, $Q\n"
+        "qmfc2.ni $t0, $vf1\n"
+        "mtc1 $t0, %0\n"
+        ".set reorder" : "=f"(ret) : "r"(pA));
+    return ret;
+}
+
+/* Vector length, XY plane only */
+float MMathCalcLengthXY(MC_VECTOR *pA)
+{
+    float ret;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "vmul.xy $vf1, $vf1, $vf1\n"
+        "vaddy.x $vf1, $vf1, $vf1y\n"
+        "vsqrt $Q, $vf1x\n"
+        "vwaitq\n"
+        "vaddq.x $vf1, $vf0, $Q\n"
+        "qmfc2.ni $t0, $vf1\n"
+        "mtc1 $t0, %0\n"
+        ".set reorder" : "=f"(ret) : "r"(pA));
+    return ret;
+}
+
+/* Vector length, XZ plane only */
+float MMathCalcLengthXZ(MC_VECTOR *pA)
+{
+    float ret;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "vmul.xz $vf1, $vf1, $vf1\n"
+        "vaddz.x $vf1, $vf1, $vf1z\n"
+        "vsqrt $Q, $vf1x\n"
+        "vwaitq\n"
+        "vaddq.x $vf1, $vf0, $Q\n"
+        "qmfc2.ni $t0, $vf1\n"
+        "mtc1 $t0, %0\n"
+        ".set reorder" : "=f"(ret) : "r"(pA));
+    return ret;
+}
+
+/* Vector length, YZ plane only */
+float MMathCalcLengthYZ(MC_VECTOR *pA)
+{
+    float ret;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "vmul.yz $vf1, $vf1, $vf1\n"
+        "vaddz.y $vf1, $vf1, $vf1z\n"
+        "vsqrt $Q, $vf1y\n"
+        "vwaitq\n"
+        "vaddq.x $vf1, $vf0, $Q\n"
+        "qmfc2.ni $t0, $vf1\n"
+        "mtc1 $t0, %0\n"
+        ".set reorder" : "=f"(ret) : "r"(pA));
+    return ret;
+}
+
+/* Distance between two points (XYZ) */
+float MMathCalcDist(MC_VECTOR *pA, MC_VECTOR *pB)
+{
+    float ret;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%1)\n lqc2 $vf2, 0x0(%2)\n"
+        "vsub.xyz $vf1, $vf2, $vf1\n"
+        "vmul.xyz $vf1, $vf1, $vf1\n"
+        "vaddy.x $vf1, $vf1, $vf1y\n"
+        "vaddz.x $vf1, $vf1, $vf1z\n"
+        "vsqrt $Q, $vf1x\n"
+        "vwaitq\n"
+        "vaddq.x $vf1, $vf0, $Q\n"
+        "qmfc2.ni $t0, $vf1\n"
+        "mtc1 $t0, %0\n"
+        ".set reorder" : "=f"(ret) : "r"(pA), "r"(pB));
+    return ret;
+}
+
+/* Distance between two points, XZ plane only */
+float MMathCalcDistXZ(MC_VECTOR *pA, MC_VECTOR *pB)
+{
+    float ret;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%1)\n lqc2 $vf2, 0x0(%2)\n"
+        "vsub.xz $vf1, $vf2, $vf1\n"
+        "vmul.xz $vf1, $vf1, $vf1\n"
+        "vaddz.x $vf1, $vf1, $vf1z\n"
+        "vsqrt $Q, $vf1x\n"
+        "vwaitq\n"
+        "vaddq.x $vf1, $vf0, $Q\n"
+        "qmfc2.ni $t0, $vf1\n"
+        "mtc1 $t0, %0\n"
+        ".set reorder" : "=f"(ret) : "r"(pA), "r"(pB));
+    return ret;
+}
+
+/* TODO: not decompiled -- 2.96 turns the trailing jal into a sibcall `j`,
+ * the documented "sibling-call blocker" dead end (see resume prompt). Logic
+ * is correct; only the tail-call codegen differs. */
+/* Yaw angle (radians) from pFrom to pTo, XZ plane */
+float MMathCalcDir(MC_VECTOR *pFrom, MC_VECTOR *pTo)
+{
+    return srsAtan2(pTo->x - pFrom->x, pTo->z - pFrom->z);
+}
+
+/* TODO: not decompiled -- same sibling-call blocker as MMathCalcDir, plus a
+ * v0/a0 allocation tie-break on the store. Logic is correct. */
+/* Direction vector (unnormalized diff, then normalized) from pFrom to pTo */
+MC_VECTOR *MMathCalcDirVector(MC_VECTOR *pDst, MC_VECTOR *pFrom, MC_VECTOR *pTo)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%1)\n lqc2 $vf2, 0x0(%2)\n"
+        "vsub.xyz $vf2, $vf2, $vf1\n"
+        "sqc2 $vf2, 0x0(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(pFrom), "r"(pTo));
+    return MMathNormalizeVector2(pDst, pDst);
+}
+
+/* Hermite tangents: (pC - pA) * 0.5, (pD - pB) * 0.5 */
+void MMathCalcHermitePrm(MC_VECTOR *pOut1, MC_VECTOR *pOut2, MC_VECTOR *pA, MC_VECTOR *pB, MC_VECTOR *pC, MC_VECTOR *pD)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%2)\n"
+        "lqc2 $vf2, 0x0(%3)\n"
+        "lqc2 $vf3, 0x0(%4)\n"
+        "lqc2 $vf4, 0x0(%5)\n"
+        "viaddi $vi5, $vi0, 8\n"
+        "vmfir.x $vf5x, $vi5\n"
+        "vitof4.x $vf5x, $vf5x\n"
+        "vsub.xyz $vf6, $vf3, $vf1\n"
+        "vsub.xyz $vf7, $vf4, $vf2\n"
+        "vmulx.xyz $vf6, $vf6, $vf5x\n"
+        "vmulx.xyz $vf7, $vf7, $vf5x\n"
+        "sqc2 $vf6, 0x0(%0)\n"
+        "sqc2 $vf7, 0x0(%1)\n"
+        ".set reorder" : : "r"(pOut1), "r"(pOut2), "r"(pA), "r"(pB), "r"(pC), "r"(pD));
 }
 
 /* Multiply two 4x4 matrices (row-major): dst = left * right */

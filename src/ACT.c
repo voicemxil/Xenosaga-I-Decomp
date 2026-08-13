@@ -113,6 +113,7 @@ extern u8 actMatrix[];
 extern u8 matrixHeapBlock[];
 extern ACTOR actor[];
 extern ACT_SEQUENCE actSequence[];
+extern void nmlModelDirectSend(int, void *, int);
 
 void memset();
 void RSRC_inactiveSource(int, ACTOR *);
@@ -705,4 +706,12 @@ void ACT_filterStealth(ACTOR *a)
 /* Shadow renderer initialiser (nothing to do) */
 void ACT_DrawShadowInit(void)
 {
+}
+
+extern u8 D_00478F80[];
+
+/* End the shadow render batch */
+void ACT_DrawShadowEnd(void)
+{
+    nmlModelDirectSend(1, D_00478F80, 3);
 }
