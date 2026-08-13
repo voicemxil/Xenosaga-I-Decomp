@@ -36,14 +36,20 @@ void xglLightIntensityAmbient(void *pLight, void *pSrc)
     *(TI *)pLight = *(TI *)pSrc;
 }
 
-/* TODO: near-miss (6/9 words, REGISTER class) - original keeps the
- * computed address in $v0/$v1, this in-place-advances $a0; every
- * natural form tried reuses $a0. */
+/* TODO: near-miss, 1/9 words differ (REGISTER pinning closed 2 of the 3
+ * original diffs -- pBase/pDst now land in $v0/$v1 as the original does).
+ * The remaining word is `addu v0,v0,a0` vs our `addu v0,a0,v0`: a
+ * commutative-add operand-order canonicalization, not a register choice.
+ * Matches the sceVif1Pk rd==rs canonicalization wall exactly -- swapping
+ * the source addition order has no effect (gcc always canonicalizes),
+ * and pinning the shift result to a third register didn't change it
+ * either. Likely needs the same unidentified compiler build as the
+ * sceVif1Pk near-misses; not a source-reachable fix. */
 /* Set one of a light's up-to-3 parallel colors (no-op past slot 2) */
 void xglLightIntensityParallel(void *pLight, unsigned int nNo, void *pSrc)
 {
-    char *pBase = (char *)pLight + nNo * 0x20;
-    char *pDst = pBase + 0x10;
+    register char *pBase __asm__("$2") = (char *)pLight + nNo * 0x20;
+    register char *pDst __asm__("$3") = pBase + 0x10;
 
     if (nNo < 3) {
         *(TI *)pDst = *(TI *)pSrc;

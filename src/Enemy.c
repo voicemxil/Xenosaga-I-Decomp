@@ -147,19 +147,19 @@ extern char *AdrsEnemyQuestion;
 extern char *AdrsEnemySphere;
 extern char *AdrsEnemySquare;
 
-/* React to an explosion hit: stop, face the player and pick a recovery action
-   TODO: near-miss - only the GameLoopState address-base register differs
-   ($v0 from gcc versus $v1 in the original) */
+/* React to an explosion hit: stop, face the player and pick a recovery action */
 void Enemy_Damage_Explosion(ACTOR *a)
 {
     ENEPC *p;
     int nFlag;
+    register GAME_LOOP_STATE *pgls __asm__("$3");
 
     p = &enepc[a->nSerial];
     p->fMove[0] = 0.0f;
     p->fMove[2] = 0.0f;
     TM_Enemy_Move_Step(a->nSerial, &p->fMoveWork[0], p->fMove[0]);
-    a->fAngle = Get_Angle(&a->fPos[0], &GameLoopState.pPlayer->fPos[0]);
+    pgls = &GameLoopState;
+    a->fAngle = Get_Angle(&a->fPos[0], &pgls->pPlayer->fPos[0]);
     if ((short)p->nWait++ >= p->nWaitLimit) {
         a->nFlags &= ~0x800000;
         nFlag = p->nUnk006A;

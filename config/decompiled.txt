@@ -1017,6 +1017,7 @@ MAP_updateUnitMotion = 0x00320850, 0x8; // MAP
 MAP_updateUnitMPack = 0x003208E0, 0x74; // MAP
 MAP_updateUnitDefault = 0x00320A80, 0x90; // MAP
 MAP_initUnitSequance = 0x00320B10, 0x88; // MAP
+Enemy_Damage_Explosion = 0x002CB808, 0xE4; // Enemy
 Enemy_Damage_Electric = 0x002CB8F0, 0x90; // Enemy
 Enemy_Damage_Seal = 0x002CB980, 0x90; // Enemy
 Enemy_Stiff = 0x002CBA10, 0xB8; // Enemy
