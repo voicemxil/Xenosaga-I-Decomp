@@ -231,8 +231,67 @@ extern void *_malloc_r (struct _reent *, size_t);
 extern void _free_r (struct _reent *, void *);
 extern void *_calloc_r (struct _reent *, size_t, size_t);
 extern void *memcpy (void *, const void *, size_t);
-extern void *_setlocale_r (struct _reent *, int, const char *);
-extern void *_localeconv_r (struct _reent *);
+extern int strcmp (const char *, const char *);
+
+/* only the two locale fields this translation unit touches are
+   modelled; offsets from newlib's sys/reent.h field order (errno, 3
+   FILE* + _inc + a 25-byte emergency buffer, then the category/locale
+   pair, padded to a 4-byte boundary same as the mprec fields above). */
+struct _reent_locale
+{
+  int _errno;
+  char _pad0[44];
+  int _current_category;
+  const char *_current_locale;
+};
+
+char *
+_setlocale_r (struct _reent *p, int category, const char *locale)
+{
+  if (locale)
+    {
+      if (strcmp (locale, "C") && strcmp (locale, ""))
+	return 0;
+      ((struct _reent_locale *) p)->_current_category = category;
+      ((struct _reent_locale *) p)->_current_locale = locale;
+    }
+  return "C";
+}
+
+struct lconv
+{
+  char *decimal_point;
+  char *thousands_sep;
+  char *grouping;
+  char *int_curr_symbol;
+  char *currency_symbol;
+  char *mon_decimal_point;
+  char *mon_thousands_sep;
+  char *mon_grouping;
+  char *positive_sign;
+  char *negative_sign;
+  char int_frac_digits;
+  char frac_digits;
+  char p_cs_precedes;
+  char p_sep_by_space;
+  char n_cs_precedes;
+  char n_sep_by_space;
+  char p_sign_posn;
+  char n_sign_posn;
+};
+
+static const struct lconv lconv =
+{
+  ".", "", "", "", "", "", "", "", "", "",
+  127, 127, 127, 127,
+  127, 127, 127, 127,
+};
+
+struct lconv *
+_localeconv_r (struct _reent *data)
+{
+  return (struct lconv *) &lconv;
+}
 
 /* the reent fields the allocator and mprec reach for -- offsets taken
    from newlib's sys/reent.h field order (errno, 3 FILE* + _inc + a
@@ -543,7 +602,14 @@ _multiply (struct _reent * ptr, _Bigint * a, _Bigint * b)
   return c;
 }
 
-/* multiply a Bigint by a power of 5 */
+/* multiply a Bigint by a power of 5. TODO: not registered -- 1-word
+   LOGIC diff. The `if (!(p5 = ...->_p5s)) { init }` guard (literal
+   transcription of the original) compiles to `bnezl` here but the
+   original uses plain `bnez`, with the shared post-if instruction
+   (`andi v0,s1,1`) duplicated after the init block either way (so it's
+   functionally a scheduler choice, not a logic difference); tried
+   splitting the assignment out of the condition, no change. 3 attempts
+   spent, leaving as TODO per the budget rule. */
 _Bigint *
 _pow5mult (struct _reent * ptr, _Bigint * b, int k)
 {
@@ -712,7 +778,14 @@ __mdiff (struct _reent * ptr, _Bigint * a, _Bigint * b)
 }
 
 /* the smallest number that can be added to a double to produce a
-   value distinguishable from it (one unit in the last place) */
+   value distinguishable from it (one unit in the last place). TODO:
+   not registered -- otherwise byte-identical except the final `move
+   v0,a1` return copy: the original leaves it BEFORE `jr ra` with an
+   unfilled delay-slot nop, we get it filled INTO the delay slot (a
+   strictly more efficient schedule). Tried staging through a fresh
+   local and an empty asm memory barrier before return, neither
+   changes it -- looks like the same class of delay-slot-fill
+   scheduler quirk as _ratio's `dpdiv` call below. */
 double
 _ulp (double _x)
 {
@@ -785,7 +858,13 @@ ret_d:
   return d.d;
 }
 
-/* double to Bigint */
+/* double to Bigint. TODO: not registered -- the `y = d1` temp lands in
+   $2 (v0) here but $5 (a1, the now-dead high half of the packed
+   double argument) in the original; a register pin doesn't apply
+   because `&y` is taken (see the "address taken" pinning caveat in
+   the resume notes) and a fresh-local-for-the-final-use trick doesn't
+   apply either since y's FIRST use is the address-taken one. Otherwise
+   an exact transcription of newlib's d2b with Pack_32 defined. */
 _Bigint *
 _d2b (struct _reent * ptr, double _d, int *e, int *bits)
 {
@@ -837,7 +916,14 @@ _d2b (struct _reent * ptr, double _d, int *e, int *bits)
   return b;
 }
 
-/* ratio of two Bigints as a double */
+/* ratio of two Bigints as a double. TODO: not registered -- compiles
+   to the expected `dpdiv` libcall (confirming _ratio is genuinely
+   PS2-routed through the same double-division helper as everywhere
+   else, not FPU div.d), but the original leaves the `jal dpdiv` delay
+   slot as an explicit `nop` with `move a1,t0` scheduled BEFORE the
+   call, while we get `move a1,t0` filled INTO the delay slot -- one
+   fewer instruction overall (50 vs 51). Same delay-slot-fill
+   scheduler class as _ulp above; not source-reachable so far. */
 double
 _ratio (_Bigint * a, _Bigint * b)
 {
