@@ -557,7 +557,19 @@ void Java_xeno_util_Runtime_CaptureStart__Ljava_lang_String_I(JThread *thread, J
 }
 
 /* Jump to another cutscene script */
-/* TODO: near-miss - one scheduling tie-break between the parameter copy and the %lo addiu */
+/* TODO: near-miss - one scheduling tie-break between the parameter copy
+ * (move s0,a0, preserving `thread` across the SCRIPT_talkIgnoreSet call)
+ * and the %lo addiu completing the jthreadResetFunc address. Original
+ * order: store args_jump[0], move s0,a0, addiu-lo; ours: store
+ * args_jump[0], addiu-lo, move s0,a0 -- a pure list-scheduler tie-break,
+ * both instructions are ready at the same point with no dependency
+ * between them. jumpEvent__I (identical shape plus one extra `+
+ * 0x10000000` add) naturally gets the original's ordering, so the extra
+ * instruction tips the scheduler, but there's no semantically-neutral
+ * source change to reproduce that here. Tried: reordering the 3
+ * assignment statements (every permutation regresses to 8 diffs),
+ * register-pinning `thread` to $16 (no effect), hoisting it through a
+ * plain local `JThread *t = thread` (no effect). Leave as-is. */
 void Java_xeno_util_Runtime_jumpCF__II(JThread *thread, JValue *args, JValue *ret)
 {
     args_jump[0] = args[0].i;
