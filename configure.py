@@ -55,6 +55,11 @@ CC96 = "/opt/ee-gcc2.96/bin/ee-gcc"
 SDK_FILES = {
     "sceVif1Pk.c",
     "sceDeci2.c",
+    # IPU-assisted MPEG2 sequence-layer parsing (_sequenceHeader family):
+    # confirmed via the 16-byte-per-saved-register frame padding pattern,
+    # matched exactly by the 2.9-ee SDK compiler at -O2 -G0
+    # -fno-schedule-insns; the 2.96 game compiler cannot reproduce it.
+    "mpeg.c",
 }
 SDK_CC = CC
 SDK_CFLAGS = CFLAGS

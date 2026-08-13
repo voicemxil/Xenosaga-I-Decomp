@@ -192,7 +192,11 @@ int MAP_updateUnitShopSymbol(MAPUNIT *pUnit)
 /* Spin a symbol unit at the standard rate */
 void MAP_updateUnitSymbol(MAPUNIT *pUnit)
 {
-    pUnit->fRot[1] += D_004D7EBC;
+    float f;
+
+    f = pUnit->fRot[1];
+    __asm__ volatile("" : "+f"(f));
+    pUnit->fRot[1] = f + D_004D7EBC;
 }
 
 /* TODO: near-miss - fix_cc_asm adds one extra hazard nop after cvt.s.w */
@@ -524,9 +528,12 @@ void MAP_initUnitSequance(void)
     }
 }
 
-/* TODO: near-match (LOGIC) - the 49-word natural form differs at 12 words;
- * gcc hoists MapUnit + 0x10 before the 0x300-stride index calculation, while
- * the original forms offset + 0x10 first and adds the MapUnit base afterward. */
+/* TODO: near-match (LOGIC, 10 of 49 words) - moving the pTargetPos derivation
+ * into the else branch (from unconditional) improved 12->10 diffs but gcc
+ * still hoists "MapUnit+nOffset+0x10" above the branch test as a pure
+ * expression; original computes it in the bnez delay slot. Register/schedule
+ * tie-break, not clearly reachable from source; a (char*)pTarget+0x10 form
+ * regresses to LENGTH (47 vs 49 words) so was reverted. */
 /* Update an enemy marker from its linked map unit */
 void MAP_updateUnitEnemy(MAPUNIT *pUnit)
 {
@@ -540,12 +547,12 @@ void MAP_updateUnitEnemy(MAPUNIT *pUnit)
     nIndex = D_0037915B[nEnemy * 0x38B0];
     nOffset = nIndex * 0x300;
     pTarget = (MAPUNIT *)((char *)MapUnit + nOffset);
-    pTargetPos = (float *)((char *)MapUnit + nOffset + 0x10);
     if (pTarget->nUnk0A2 == 0) {
         pUnit->nFlags |= 8;
     } else {
         float fAngle;
 
+        pTargetPos = (float *)((char *)MapUnit + nOffset + 0x10);
         *(unsigned long long *)&pUnit->fPos[0] =
             *(unsigned long long *)&pTargetPos[0];
         *(unsigned long long *)&pUnit->fPos[2] =
