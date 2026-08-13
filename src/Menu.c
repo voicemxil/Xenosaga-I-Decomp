@@ -1089,3 +1089,83 @@ int MenuEtherCharPointCheck(int nId, int nPoint)
     s08 = p->s08;
     return s10 >= s08;
 }
+
+extern int func_A1A5E8(int);
+extern int func_A1A598(int);
+extern void *chrEquipGet(int);
+
+/* Ask whether a character has an engine-slot item equipped matching the mask */
+/* TODO: near-miss (REGISTER) - a 3-register allocator swap ($s0 vs $v0/$v1)
+ * identical to the SsdGetMemoryBlocks/MenuEtherDataGet class; every source
+ * variant tried reproduces the same swap, looks unreachable from C. */
+int MenuEngineEquipCheck(int nId, int nMask)
+{
+    int mask;
+    void *equip;
+    unsigned short v;
+
+    if (nMask == 0) {
+        return 0;
+    }
+    mask = func_A1A5E8(nMask);
+    equip = chrEquipGet(nId);
+    v = *(unsigned short *)((char *)equip + 6);
+    return (v & mask) != 0;
+}
+
+/* Ask whether a character has a frame-slot item equipped matching the mask */
+/* TODO: near-miss (REGISTER) - same allocator swap as MenuEngineEquipCheck. */
+int MenuFrameEquipCheck(int nId, int nMask)
+{
+    int mask;
+    void *equip;
+    unsigned short v;
+
+    if (nMask == 0) {
+        return 0;
+    }
+    mask = func_A1A598(nMask);
+    equip = chrEquipGet(nId);
+    v = *(unsigned short *)((char *)equip + 6);
+    return (v & mask) != 0;
+}
+
+extern void *D_0036D760[];
+extern void *D_0036D7D8;
+extern int MenuScenarioNoGet(void);
+
+/* Return a character's display-name pointer, special-cased for Shion pre-scenario-108 */
+/* TODO: near-miss (LOGIC) - the inner assignment compiles to a movn
+ * (conditional move) instead of the original's explicit branch; every
+ * if-shape tried (nested if, early-return chain) gives the same or worse
+ * diff count. Parked after 2 attempts. */
+void *MenuCharNameGet(int nId)
+{
+    void *p;
+
+    p = D_0036D760[nId];
+    if (nId == 5) {
+        if (MenuScenarioNoGet() < 108) {
+            p = D_0036D7D8;
+        }
+    }
+    return p;
+}
+
+extern int xglFlagsGet(int, int);
+extern int dataEvtBoxChk(int);
+
+/* Ask whether Shion's MWS (mobile weapon suit) is currently unlocked */
+int MenuShionMwsCheck(void)
+{
+    int scenario;
+
+    scenario = MenuScenarioNoGet();
+    if (scenario < 10) {
+        return 1;
+    }
+    if (xglFlagsGet(1023, 1) != 0) {
+        return 1;
+    }
+    return dataEvtBoxChk(10) != 0;
+}
