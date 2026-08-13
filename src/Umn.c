@@ -36,6 +36,21 @@ extern void xglSleep(void);
 extern void xglCdLoadOverlay(int nOverlay);
 extern void UmnMain2(int nMode);
 
+typedef struct { char b[3]; } MAIL_ATTACH;
+typedef struct { char b[0x90]; } MAIL_HEADER;
+typedef struct {
+    short nLimit;
+    unsigned short nPos;
+    char entries[1][8];
+} EVENT_TEXT_BUF;
+
+extern MAIL_ATTACH umn_attach_tbl[];
+extern MAIL_HEADER *UmnMailHeaderBuf[];
+extern EVENT_TEXT_BUF *uet_text_buf[];
+extern int uet_flag;
+extern int *UmnHistoryTreeBuf[];
+extern char *umn_text[];
+
 /* Debug hook for the menu print test, stubbed out in the retail build */
 void UmnPrintTest(void)
 {
@@ -96,6 +111,80 @@ void UmnMailBoxSet(int nNo)
             pBox[i] = nNo;
             break;
         }
+    }
+}
+
+/* Look up one mail attachment table entry by index */
+MAIL_ATTACH *UmnMailAttachGet(int nNo)
+{
+    return &umn_attach_tbl[nNo];
+}
+
+/* Look up one mail header table entry by index */
+MAIL_HEADER *UmnMailHeaderGet(int nNo)
+{
+    return &UmnMailHeaderBuf[0][nNo];
+}
+
+/* TODO: near-miss (LOGIC, register-alloc/scheduling) -- not registered. */
+/* Align the raw event-text buffer, install it, and return the entry table start */
+void *UmnEventTextInit(void *pRaw)
+{
+    EVENT_TEXT_BUF *pAligned = (EVENT_TEXT_BUF *)(((unsigned int)pRaw + 15) & ~15);
+    uet_text_buf[0] = pAligned;
+    uet_flag = 0;
+    return (char *)pAligned + 0x2000;
+}
+
+/* TODO: near-miss (LOGIC, register-alloc/scheduling) -- not registered. */
+/* Look up a history-tree slot by index; NULL if out of range */
+int *UmnHistoryTreeGet(int nNo)
+{
+    int *pRet = 0;
+    if ((unsigned int)nNo < 128) {
+        pRet = &UmnHistoryTreeBuf[0][nNo];
+    }
+    return pRet;
+}
+
+/* TODO: near-miss (LOGIC, register-alloc/scheduling) -- not registered. */
+/* Look up a plugin text slot by index; clamps to the base slot when out of range */
+char *UmnPluginTextGet(int nNo)
+{
+    char *pBase = umn_text[0];
+    char *pRet = pBase;
+    if ((unsigned int)nNo < 6) {
+        pRet = pBase + nNo * 128;
+    }
+    return pRet;
+}
+
+/* TODO: near-miss (LOGIC, register-alloc/scheduling) -- not registered. */
+/* Advance the event-text cursor by nInc entries and return the next entry slot */
+void *UmnEventTextNextGet(int nInc)
+{
+    EVENT_TEXT_BUF *pBuf = uet_text_buf[0];
+    unsigned short nNewPos = pBuf->nPos + nInc;
+    short nPos;
+
+    pBuf->nPos = nNewPos;
+    nPos = (short)nNewPos;
+    if (nPos < pBuf->nLimit) {
+        return (char *)pBuf + nPos * 8 + 4;
+    }
+    return 0;
+}
+
+/* TODO: near-miss (LOGIC, register-alloc/scheduling on the loop) -- not registered. */
+/* Skip the text cursor past a run of newline characters */
+void UmnEventTextGyouJump(char **ppText)
+{
+    unsigned char *p = (unsigned char *)*ppText;
+    if (*p == '\n') {
+        do {
+            p++;
+            *ppText = (char *)p;
+        } while (*p == '\n');
     }
 }
 

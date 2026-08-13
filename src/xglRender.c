@@ -62,6 +62,11 @@ void SyncDCache(void *pStart, void *pEnd);
 void xglDmaDirectNormal(u_int nCh, u_int nAddr, u_int nQwc);
 void sceGsSyncVCallback(int (*pFunc)(int));
 int sceGsSyncV(int nMode);
+void xglSleep(void);
+void xglRenderInit(void);
+void xglRenderMove(void);
+void xglSendSePacket(void);
+void xglPadRead(void);
 
 /* Vertical-sync interrupt callback: count syncs and check DMA activity */
 int xglRenderVSyncCallback(int nId)
@@ -190,4 +195,17 @@ void xglRenderClearOn(void)
 void xglRenderClearOff(void)
 {
     s_nClearFrame = 0;
+}
+
+/* Main render task entry point: init once, then loop forever */
+void xglRenderEntry(void)
+{
+    xglSleep();
+    xglRenderInit();
+    for (;;) {
+        xglRenderMove();
+        xglSendSePacket();
+        xglPadRead();
+        xglSleep();
+    }
 }

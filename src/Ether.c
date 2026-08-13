@@ -126,6 +126,22 @@ extern int MenuEtherSetCheck(int treeId, unsigned int objectId);
 extern int func_A19578(int treeId, unsigned int objectId);
 extern int MenuEtherTypeGet(unsigned int objectId);
 
+/* Find the object with the given id (linear scan over the fixed 80-slot table) */
+ETHER_OBJECT *EtherTreeObjectGet(unsigned int id)
+{
+    ETHER_OBJECT *p = EtherTreeObject;
+    int i = 0;
+    do {
+        unsigned short v = p->id;
+        if (v == id) {
+            return p;
+        }
+        p++;
+        i++;
+    } while (i < 80);
+    return 0;
+}
+
 /* Reset the object cursor to the start of the table */
 ETHER_OBJECT *EtherTreeObjectGetClear(void)
 {
@@ -146,29 +162,6 @@ ETHER_OBJECT *EtherTreeObjectWorkGet(void)
 void *EtherTreeFirstDataGet(void)
 {
     return &EtherTreeFirstData[EtherTreeSystem->wId - 1];
-}
-
-/* TODO: near-match - allocator swaps p/v between $v1/$a1 and emits bnez
- * where the original has bnezl; every natural variant (declaration order,
- * unused second parameter to steal $a1) gives the same allocation, so this
- * looks like the same class of unreachable-from-C tie-break documented for
- * SsdGetMemoryBlocks / xglDmaMFIFOLeave. Not registered in decompiled.txt. */
-/* Find the object with the given id, or NULL if the table has none */
-ETHER_OBJECT *EtherTreeObjectGet(unsigned int id)
-{
-    ETHER_OBJECT *p = EtherTreeObject;
-    int i = 0;
-    unsigned short v = p->id;
-
-    do {
-        if (v == id) {
-            return p;
-        }
-        p++;
-        i++;
-        v = p->id;
-    } while (i < 0x50);
-    return 0;
 }
 
 /* Zero every ether-tree work buffer */
