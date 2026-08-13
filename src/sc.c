@@ -165,21 +165,26 @@ int scGetCmdScript(SCOBJ *o) {
     if (val != 0) {
         adr = (short *)((char *)D_0041E7D0[_nowScript].pTable + val * 2);
     }
-    o->cmdBuf[uidx] = o->cmdBuf[uidx] + 1;
+    o->cmdBuf[(short)uidx] = o->cmdBuf[(short)uidx] + 1;
     return *adr;
 }
 
 /* Indirect register write: reg with bit 0x8000 set means "the register
  * number is itself stored in register (reg & ~0x8000)". */
 void scSetReg(int reg, int val) {
+    int *p;
     if ((reg & 0x8000) != 0) {
         reg = scGetReg(reg & 0xFFFF7FFF);
     }
     if ((unsigned int)reg >= 16) {
         tracePrint(D_004CC818, reg);
-        return;
+        p = 0;
+    } else {
+        p = &D_0041E7D0[_nowScript].regs[reg];
     }
-    D_0041E7D0[_nowScript].regs[reg] = val;
+    if (p != 0) {
+        *p = val;
+    }
 }
 
 /* scGetNumScript: resolve a script operand -- register indirection if the
@@ -224,11 +229,8 @@ int scRETURNScript(SCOBJ *o) {
 
 void *scGetAdrImmScript(SCOBJ *o) {
     int v1 = scGetAdrScript(o);
-    void *result = (void *)v1;
-    if (v1 != 0) {
-        result = (char *)D_0041E7D0[_nowScript].pTable + v1 * 2;
-    }
-    return result;
+    if (v1 == 0) return 0;
+    return (char *)D_0041E7D0[_nowScript].pTable + v1 * 2;
 }
 
 int scGetRegScript(SCOBJ *o) {
