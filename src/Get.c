@@ -152,8 +152,9 @@ void GetMdlFileName(void)
 {
 }
 
-/* TODO: near-match (LENGTH) - gcc schedules the range subtraction in the
- * xglSRand delay slot, leaving the build one instruction shorter. */
+/* TODO: near-match (LENGTH) - gcc schedules the range subtraction relative to
+ * the xglSRand call differently than the original; every variant tried
+ * (combined vs split subtraction/increment) is one instruction short. */
 /* Return a random integer in the inclusive range */
 int Get_Rnd(int minimum, int maximum)
 {
@@ -281,4 +282,70 @@ float Get_Decimal_Surplus_for_Radius(float angle)
         }
     }
     return angle;
+}
+
+typedef struct {
+    char pad0[0x10];
+    float fX;      /* 0x10 */
+    float fY;      /* 0x14 */
+    float fZ;      /* 0x18 */
+    char pad1C[0x86 - 0x1C];
+    short hType;   /* 0x86 */
+} CENTEROBJ;
+
+extern VECTOR D_004DC9D0;
+extern float D_00347D08;
+
+/* TODO: near-miss (LOGIC) - gcc schedules the branch-taken constant load with a
+ * bnezl and hoists the gp-relative float load unconditionally; both if/else
+ * orderings tried give the same 12-word diff (store-group reorder included). */
+/* Compute an object's on-screen center point, biasing Y by a type-dependent offset */
+void GetCenter(VECTOR *out, CENTEROBJ *p)
+{
+    float extra;
+
+    if (p->hType < 1618) {
+        extra = D_00347D08;
+    } else {
+        extra = 3.0f;
+    }
+    out->x = D_004DC9D0.x + p->fX;
+    out->y = D_004DC9D0.y + p->fY + extra;
+    out->w = 1.0f;
+    out->z = D_004DC9D0.z + p->fZ;
+}
+
+/* TODO: near-miss (LOGIC) - register/control-flow shape differs substantially
+ * from the natural indexed-loop C below (26/27 words differ); parked after 2
+ * attempts, needs a from-asm-first rewrite using a single advancing pointer
+ * rather than a separate index local. */
+/* Scan a (possibly SJIS double-byte) string for the byte preceding the terminator or the first
+   run of high-bit bytes, returning 0 for an empty or NULL string */
+int GetLastWord(char *s)
+{
+    int i;
+    signed char c;
+
+    if (s == 0) {
+        return 0;
+    }
+    i = 0;
+    c = s[0];
+    if (c != 0 && !(c & 0x80)) {
+        i = 1;
+        for (;;) {
+            c = s[i];
+            if (c == 0) {
+                break;
+            }
+            if (c & 0x80) {
+                break;
+            }
+            i++;
+        }
+    }
+    if (i == 0) {
+        return 0;
+    }
+    return s[i - 1];
 }

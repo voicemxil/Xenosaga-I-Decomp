@@ -822,3 +822,95 @@ int MenuBoxChk(int nId)
     }
     return nRes;
 }
+
+extern int BitToTecNo(int);
+
+/* Ask whether a technique's type flag (via BitToTecNo) equals 1 */
+int MenuTecTypeCheck(int nId, int nType)
+{
+    int tecNo;
+    unsigned char *pSave;
+    int idx;
+
+    idx = nId & 0xFFFF;
+    tecNo = BitToTecNo(nType);
+    pSave = MenuTecSaveDataGet(idx);
+    return pSave[tecNo + 8] == 1;
+}
+
+typedef struct {
+    char pad0[0x54];
+    short hPilotId;    /* 0x54 */
+} PILOTREC;
+
+extern PILOTREC *func_A191C0_2(int id);
+
+/* Search pilot slots 1-12 for the one whose pilot id matches nId */
+int MenuAgwsPilotCheck(int nId)
+{
+    int i;
+    PILOTREC *p;
+
+    for (i = 1; i < 13; i++) {
+        p = func_A191C0_2(i);
+        if (p->hPilotId == nId) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+extern unsigned char *D_0035CA5C;
+
+/* TODO: near-miss (LENGTH) - the nested-while form compiles the outer loop
+ * with an extra unconditional jump the original doesn't have (a top-test
+ * layout with a loop-back that reuses the byte already loaded in the
+ * previous iteration's delay slot); do-while and if-guard variants both
+ * made it worse (20 orig vs 22/23/25 built). Parked after 2 attempts. */
+/* Skip forward past (nIdx - 1) NUL-terminated strings in the segment info-text blob */
+unsigned char *MenuSegmentInfoTextGet(int nIdx)
+{
+    unsigned char *p;
+
+    p = D_0035CA5C;
+    while (nIdx >= 2) {
+        while (*p != 0) {
+            p++;
+        }
+        p++;
+        nIdx--;
+    }
+    return p;
+}
+
+/* Skip forward past (nIdx - 1) NUL-terminated strings in the segment item-name blob */
+unsigned char *MenuSegmentItemNameGet(int nIdx)
+{
+    unsigned char *p;
+
+    p = D_0035CA5C + 960;
+    while (nIdx >= 2) {
+        while (*p != 0) {
+            p++;
+        }
+        p++;
+        nIdx--;
+    }
+    return p;
+}
+
+/* Skip forward past (nIdx - 1) NUL-terminated strings in the segment map-name blob */
+unsigned char *MenuSegmentMapNameGet(int nIdx)
+{
+    unsigned char *p;
+
+    p = D_0035CA5C + 1344;
+    while (nIdx >= 2) {
+        while (*p != 0) {
+            p++;
+        }
+        p++;
+        nIdx--;
+    }
+    return p;
+}

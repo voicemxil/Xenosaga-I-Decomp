@@ -275,3 +275,133 @@ void PartyTimeDispChange(PARTY_TIME_DISP *pDisp)
         pDisp->nDay = pDisp->nDay + nMonth * 24 - 24;
     }
 }
+
+extern void PartyAttackerSet(int, int, int);
+
+/* Reset the starting friend/attacker roster and clear the leader slot */
+void PartyDataInit2(void)
+{
+    PartyFriendOn(3);
+    PartyFriendOn(1);
+    PartyFriendOn(2);
+    PartyAttackerSet(0, 3, 1);
+    PartyAttackerSet(1, 1, 2);
+    PartyAttackerSet(2, 2, 3);
+    PartyDataGet()->nLeader = 0;
+}
+
+/* Count the set bits (0-15) in the party-membership byte pair at the front of the record */
+int PartyCharNumGet(void)
+{
+    unsigned char *p;
+    int i;
+    int cnt;
+    int byteIdx;
+    int bitIdx;
+    unsigned char b;
+
+    p = (unsigned char *)PartyDataGet();
+    for (i = 0, cnt = 0; i < 16; i++) {
+        byteIdx = i / 8;
+        bitIdx = i - byteIdx * 8;
+        b = p[byteIdx];
+        cnt += (b >> bitIdx) & 1;
+    }
+    return cnt;
+}
+
+/* Count the set bits (0-15) in the AGWS-slot nibble-per-byte record at the front of the record */
+int PartyAgwsNumGet(void)
+{
+    unsigned char *p;
+    int i;
+    int cnt;
+    int byteIdx;
+    int bitIdx;
+    unsigned char b;
+
+    p = (unsigned char *)PartyDataGet();
+    for (i = 0, cnt = 0; i < 16; i++) {
+        byteIdx = i / 4;
+        bitIdx = i - byteIdx * 4;
+        b = p[byteIdx];
+        cnt += (b >> bitIdx) & 1;
+    }
+    return cnt;
+}
+
+typedef struct {
+    unsigned short nPos;
+    signed char nId;
+    char pad3;
+} ATTACKPOS;
+
+/* Search the 3-slot attack-position table by character id, return its assigned position */
+int PartyAttackPosCheck(int nId)
+{
+    ATTACKPOS *p;
+    int i;
+
+    p = (ATTACKPOS *)((char *)PartyDataGet() + 0x30);
+    for (i = 0; i < 3; i++, p++) {
+        if (p->nId == nId) {
+            return p->nPos;
+        }
+    }
+    return 0;
+}
+
+/* Search the 3-slot attack-position table by position, return its assigned character id */
+int PartyAttackPosGet(int nPos)
+{
+    ATTACKPOS *p;
+    int i;
+
+    p = (ATTACKPOS *)((char *)PartyDataGet() + 0x30);
+    for (i = 0; i < 3; i++, p++) {
+        if (p->nPos == nPos) {
+            return p->nId;
+        }
+    }
+    return 0;
+}
+
+/* Assign a character id to the attack-position table slot matching nPos */
+void PartyAttackPosSet(int nPos, int nId)
+{
+    ATTACKPOS *p;
+    int i;
+
+    p = (ATTACKPOS *)((char *)PartyDataGet() + 0x30);
+    for (i = 0; i < 3; i++, p++) {
+        if (p->nPos == nPos) {
+            p->nId = nId;
+            return;
+        }
+    }
+}
+
+extern int MenuMaryIdChange(int);
+
+/* TODO: near-miss - loop structure/scheduling diff (32 orig vs 35 built words); parked after 2 attempts. */
+/* Fill out[] with converted character ids for each nonzero attack-position slot, return the count */
+int PartyAttackerGet(int *out)
+{
+    ATTACKPOS *p;
+    int i;
+    int cnt;
+    int id;
+
+    p = (ATTACKPOS *)((char *)PartyDataGet() + 0x30);
+    cnt = 0;
+    for (i = 0; i < 3; i++, out++) {
+        if (p->nPos == 0) {
+            break;
+        }
+        id = MenuMaryIdChange(p->nPos);
+        p++;
+        cnt++;
+        *out = id;
+    }
+    return cnt;
+}
