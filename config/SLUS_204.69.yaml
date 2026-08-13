@@ -1,5 +1,5 @@
 name: Xenosaga Episode I - Der Wille zur Macht (USA)
-sha1: 089939037ac563764ce8f8db0c7005ad5fde9656
+sha1: ba1132845398d91cd9a921e92965eb51d915ec8b
 options:
   basename: SLUS_204.69
   target_path: config/SLUS_204.69.rom
@@ -96,5 +96,6 @@ segments:
     bss_size: 0x0
     subalign: null
     subsegments:
-      - [0x2DD000, asm, ov02/2DD000] # ov02
+      - [0x2DD000, asm, ov02/2DD000] # executable overlay code
+      - [0x2EC680, data, ov02/2EC680] # overlay data begins after UmnEventTextInit
   - [0x2F08EC]

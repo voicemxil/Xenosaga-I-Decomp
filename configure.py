@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # Project paths
@@ -18,6 +19,12 @@ ELF_PATH = BUILD_DIR / "SLUS_204.69.elf"
 # Original ELF
 ORIGINAL_ELF = ISO_DIR / "SLUS_204.69"
 ORIGINAL_SHA1 = "fd206d5715a322830f7fa9285fb4a09276ac2a63"
+
+# The ov02 ELF section is a separately loaded overlay.  Its ELF load address
+# cannot be used as an offset in Splat's logical ROM image: Splat expects the
+# section packed immediately after the main image at these offsets.
+OV02_ROM_START = 0x2DD000
+OV02_ROM_END = 0x2F08EC
 
 # Tools
 PS2DEV = "/usr/local/ps2dev"
@@ -101,6 +108,34 @@ def split():
              str(ORIGINAL_ELF), str(rom_path)],
             check=True,
         )
+
+    # `objcopy -O binary` honors the overlay's ELF load address and leaves the
+    # Splat ov02 range zero-filled.  Extract that section independently (where
+    # its first byte becomes offset zero), splice it at the logical ROM offset,
+    # and discard the large address-derived gap at the end of objcopy's image.
+    with tempfile.NamedTemporaryFile(prefix="xenosaga-ov02-", suffix=".bin",
+                                     delete=False) as tmp:
+        overlay_path = Path(tmp.name)
+    try:
+        subprocess.run(
+            [OBJCOPY, "-O", "binary", "--only-section=ov02",
+             str(ORIGINAL_ELF), str(overlay_path)],
+            check=True,
+        )
+        overlay = overlay_path.read_bytes()
+    finally:
+        overlay_path.unlink(missing_ok=True)
+
+    expected_size = OV02_ROM_END - OV02_ROM_START
+    if len(overlay) != expected_size:
+        raise RuntimeError(
+            f"ov02 is {len(overlay):#x} bytes, expected {expected_size:#x}"
+        )
+    with rom_path.open("r+b") as rom:
+        rom.seek(OV02_ROM_START)
+        rom.write(overlay)
+        rom.truncate(OV02_ROM_END)
+
     print("Running Splat...")
     subprocess.run(
         [sys.executable, "-m", "splat", "split", str(SPLAT_YAML)],

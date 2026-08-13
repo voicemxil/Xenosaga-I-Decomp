@@ -7,11 +7,10 @@
 
 Use this instead of grepping asm/cod/000000.s. Two reasons:
 
-1. `asm/ov02/2DD000.s` is a PLACEHOLDER -- 20k lines of zeros that were
-   never extracted from the real overlay. The 216 functions living in the
-   ov02 overlay (all the tskUmn* screens, and more) have no usable
-   disassembly there, but their real bytes are in the ELF and this reads
-   them correctly.
+1. Overlay functions live in a separate ELF load segment, so reading them
+   directly from the ELF avoids depending on a generated assembly reference.
+   (The ov02 reference is now generated from the real ELF section rather than
+   the old zero-filled logical-ROM placeholder.)
 2. The asm comment format is `/* FILEOFF VADDR */`, and reading the first
    column has cost this project twice -- once, 63 functions all wrong by
    0x200000. Here you pass a name and never see an address.
