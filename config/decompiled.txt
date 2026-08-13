@@ -1596,3 +1596,5 @@ dptoli = 0x0032C418, 0x9C; // fpbit.c
 dptofp = 0x0032C4E8, 0x54; // fpbit.c
 
 litodp = 0x0032C360, 0xB8; // fpbit.c
+
+fptodp = 0x0032BB88, 0x3C; // fpbit.c

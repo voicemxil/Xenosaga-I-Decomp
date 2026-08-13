@@ -929,17 +929,36 @@ df_to_sf (DFtype arg_a)
 }
 
 /* fptodp, 60 bytes -- sf_to_df from the FLOAT-config copy of this file.
-   __unpack_f is that copy's unpack_d (not implemented here); __make_dp is
-   this copy's constructor, sharing the same fp_number_type/fp_class_type
-   shapes so it can be called directly. */
+   __unpack_f is that copy's unpack_d (not implemented here); it fills a
+   fp_number_type shaped for the FLOAT config, where fractype is USItype
+   (32 bits), not this file's UDItype -- so its fraction union needs only
+   4-byte alignment and sits at offset 12, not 16. Using this file's own
+   fp_number_type here (64-bit fraction, padded to offset 16) gave a
+   16-byte-oversized frame and a wrong offset in the disassembly; this
+   private, FLOAT-shaped struct matches the real callee's layout.
+   __make_dp is this copy's constructor and takes the widened UDItype
+   fraction, so it's still declared against the normal fp_class_type. */
+typedef struct
+{
+  fp_class_type class;
+  unsigned int sign;
+  int normal_exp;
+
+  union
+    {
+      USItype ll;
+      UHItype l[2];
+    } fraction;
+} fp_number_type_sf;
+
 typedef union { SFtype value; USItype value_raw; } SFLO_union_type;
-extern void __unpack_f (SFLO_union_type *, fp_number_type *);
+extern void __unpack_f (SFLO_union_type *, fp_number_type_sf *);
 extern DFtype __make_dp (fp_class_type, unsigned int, int, UDItype);
 
 DFtype
 fptodp (SFtype arg_a)
 {
-  fp_number_type in;
+  fp_number_type_sf in;
   SFLO_union_type au;
 
   au.value = arg_a;
