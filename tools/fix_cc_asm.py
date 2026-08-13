@@ -52,6 +52,15 @@ RE_MEM_ABS = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS) +
 # the original ee-as used addu. Wrap in .set mips1 to get the 32-bit form.
 RE_MEM_BIGOFF = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS_BIGOFF) +
                            r')[ \t]([^,]*),(-?[0-9]+)(\(\$[a-z0-9]+\))[ \t]*$')
+# ld/sd indexed by a NAMED symbol plus a register (not a numeric offset),
+# e.g. `ld $2,Zero($3)` from `return Zero[idx];` on a >8-byte const array
+# (not gp-relative at -G8). Same daddu-vs-addu problem as RE_MEM_BIGOFF,
+# but the base is a symbol, not a numeric literal, so the hi/lo split
+# can't be computed here -- gas's own %hi()/%lo() operators do it instead.
+# The original reuses the destination register as the address-computation
+# scratch (lui v0,%hi; addu v0,v0,v1; ld v0,%lo(v0)) rather than $1/$at,
+# so mirror that exactly. Found via __ieee754_fmod's `Zero[sx>>31]`.
+RE_MEM_SYM_REG = re.compile(r'^\t(sd|ld)[ \t]([^,]*),([A-Za-z_][A-Za-z0-9_.]*)\((\$[a-z0-9]+)\)[ \t]*$')
 RE_LIS = re.compile(r'^\tli\.s[ \t](.*)$')
 # li.d loads a 64-bit double-precision bit pattern into a GPR (this target's
 # soft-float double ABI packs a double into one 64-bit register/register
@@ -392,6 +401,14 @@ def main(path, omitted_hazards, barrier_return_store=None,
                            f"\n\t{op}\t{reg},{lo}($1)")
             else:
                 out.append(wrap_mips1(line))
+            continue
+
+        m_symreg = RE_MEM_SYM_REG.match(line)
+        if m_symreg:
+            op, reg, sym, basereg = m_symreg.groups()
+            out.append(f"\tlui\t{reg},%hi({sym})\n"
+                       f"\taddu\t{reg},{reg},{basereg}\n"
+                       f"\t{op}\t{reg},%lo({sym})({reg})")
             continue
 
         if (barrier_return_store is not None
