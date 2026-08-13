@@ -106,8 +106,11 @@ atof (const char *s)
 void
 abort (void)
 {
-  raise (6);
-  _exit (1);
+  while (1)
+    {
+      raise (6);
+      _exit (1);
+    }
 }
 
 /* non-zero when x is an infinity */
@@ -190,11 +193,20 @@ strtod (const char *s, char **ptr)
   return _strtod_r (_REENT, s, ptr);
 }
 
+extern float dptofp (double);
+
+/* TODO: near-miss (LOGIC, 6/10 words) -- sibling-call blocker. The
+   original keeps `jal dptofp` + a real epilogue; 2.96 always sibcalls
+   the trailing non-void call as `j dptofp` with the epilogue hoisted
+   before it. Same unsolved class as the ~9 MAP/Enemy near-misses in
+   XENOSAGA_RESUME_PROMPT.md -- neither an intermediate local nor
+   inlining the call into the return expression changes it. Not
+   registered. */
 /* string to float */
 float
 strtodf (const char *s, char **ptr)
 {
-  return (float) strtod (s, ptr);
+  return dptofp (strtod (s, ptr));
 }
 
 /* ------------------------------------------------------------------ */
@@ -205,10 +217,11 @@ typedef struct _Bigint
 {
   struct _Bigint *_next;
   int _k, _maxwds, _sign, _wds;
-  unsigned long _x[1];
+  __uint32_t _x[1];
 } _Bigint;
 
-extern int errno;
+extern int errno[];
+#define errno (errno[0])
 extern void *sbrk (int);
 extern int close (int);
 extern int getpid (void);
@@ -229,11 +242,14 @@ struct _reent_full
 };
 
 /* linear congruential pseudo-random generator */
-long
+int
 rand (void)
 {
-  _REENT->_rand_next = _REENT->_rand_next * 6364136223846793005LL + 1;
-  return (long) ((_REENT->_rand_next >> 32) & 0x7fffffff);
+  unsigned long long next;
+
+  next = _REENT->_rand_next * 6364136223846793005LL + 1;
+  _REENT->_rand_next = next;
+  return (int) ((next >> 32) & 0x7fffffff);
 }
 
 /* allocate from the reentrant heap under the malloc lock */
