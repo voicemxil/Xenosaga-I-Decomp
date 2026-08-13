@@ -94,6 +94,12 @@ FILE_FIX_FLAGS = {
     # with a genuine nop in the slot. No other function in this file has
     # a legitimate delay-slot store, so the swap is safe file-wide here.
     "xglLight.c": "--hoist-return-store",
+    # nmlModelSetFadeInInterrupt: gcc emits the trailing s.s BEFORE j $31,
+    # but gas's own reorder pass pulls it into the delay slot; original
+    # keeps it before the branch with a plain nop in the slot. Whole-file
+    # --hoist-return-store regresses other nmlModel.c functions (see
+    # XENOSAGA_RESUME_PROMPT.md), so scope to just this one.
+    "nmlModel.c": "--barrier-return-store nmlModelSetFadeInInterrupt",
 }
 
 

@@ -79,6 +79,7 @@ nmlModelFadeDoit = 0x0022EDA0, 0x68; // nmlModel
 nmlModelSetFadeDoit = 0x0022EE08, 0xC; // nmlModel
 nmlModelSetFadeOutDispose = 0x0022EE18, 0x10; // nmlModel
 nmlModelSetFadeInDispose = 0x0022EE28, 0x10; // nmlModel
+nmlModelSetFadeInInterrupt = 0x0022EF00, 0x48; // nmlModel.c
 nmlModelGetFadeLevel = 0x0022F1A8, 0x48; // nmlModel
 nmlModelSetBackBufferToBattle = 0x0022F2E0, 0x2C; // nmlModel
 nmlModelSetBackBufferToEventSkip = 0x0022F310, 0x2C; // nmlModel
