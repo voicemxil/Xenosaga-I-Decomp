@@ -655,7 +655,42 @@ int MenuParaUpCheck(int nBase, int nType)
 }
 
 /* --- Tec (technique) speed/save-data plumbing --- */
-extern char *MenuTecSaveDataGet(int nId);
+
+/* Return the base address of one technique's save-data record, or NULL if the id is out of range */
+/* TODO: near-miss (LENGTH, 17 orig vs 16 built) - the +0x3c/-32 offset pair
+ * folds differently than the original's separate idx*32 and -32 terms;
+ * parked after 2 attempts. */
+char *MenuTecSaveDataGet(int nId)
+{
+    void *p;
+    int idx;
+    unsigned int t;
+    int off;
+
+    idx = nId & 0xFFFF;
+    p = PartyDataGet();
+    t = idx - 1;
+    off = idx * 32;
+    if (t >= 8) {
+        return 0;
+    }
+    return (char *)p + 0x3c + off - 32;
+}
+
+/* Ask whether a technique's tec-level is below its saved-data level cap */
+/* TODO: near-miss (LENGTH) - original computes pSave+nLev into two separate
+ * registers (redundant CSE-defeating computation); parked after 2 attempts. */
+int MenuTecTLevLimitCheck(int nId, int nLev)
+{
+    unsigned char *pSave;
+
+    pSave = (unsigned char *)MenuTecSaveDataGet(nId);
+    if (nLev < 0) {
+        return 0;
+    }
+    return pSave[nLev] < pSave[nLev + 24];
+}
+
 extern int MenuTecNextSpeedPointGet(int nId, int nSpeed);
 
 /* Mark a technique's speed-up slot used and deduct its point cost */
