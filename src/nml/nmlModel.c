@@ -6,10 +6,15 @@ typedef union {
     TI q;
 } VEC4;
 
+typedef union {
+    int n;
+    float f;
+} FADE_COL;
+
 typedef struct {
-    int nR;                 /* 0x00 */
-    int nG;                 /* 0x04 */
-    int nB;                 /* 0x08 */
+    FADE_COL uR;            /* 0x00 */
+    FADE_COL uG;            /* 0x04 */
+    FADE_COL uB;            /* 0x08 */
     int nUnkC;              /* 0x0C */
     int nTime;              /* 0x10 */
     int nTimeMax;           /* 0x14 */
@@ -364,9 +369,9 @@ void nmlModelSetFadeInInterrupt(int time, float r, float g, float b)
     s_inFadeIn.nUnkC = 0;
     s_inFadeIn.nTimeMax = time;
     s_inFadeIn.nTime = time;
-    s_inFadeIn.nR = (int)(r * 255.0f);
-    s_inFadeIn.nG = (int)(g * 255.0f);
-    s_inFadeIn.nB = (int)(b * 255.0f);
+    s_inFadeIn.uR.n = (int)(r * 255.0f);
+    s_inFadeIn.uG.n = (int)(g * 255.0f);
+    s_inFadeIn.uB.n = (int)(b * 255.0f);
 }
 
 /* Return whether none of the four fade controllers is currently active */
@@ -970,8 +975,8 @@ typedef struct {
     int nOutTime;           /* 0x58 */
     int nInTime;            /* 0x5C */
     char pad60[0x30];
-    float afOutColor[4];    /* 0x90 */
-    float afInColor[4];     /* 0xA0 */
+    FADE_COL afOutColor[4]; /* 0x90 */
+    FADE_COL afInColor[4];  /* 0xA0 */
 } FADE_PRESET;
 
 extern FADE_PRESET D_00338680;
@@ -981,14 +986,14 @@ void nmlFadePacketWrite(void *pPk);
 
 /* Prime a fade controller: time, color (x255 scale) and control words,
  * then point the fade packet writer at nmlFadePacketWrite */
-static void fade_set(FADE_CONTROL *pFade, float *pfCol, int nUnk18, int nTime,
+static void fade_set(FADE_CONTROL *pFade, FADE_COL *puCol, int nUnk18, int nTime,
                      int nUnk1C, int nUnk20, int nUnk2C)
 {
     pFade->nTime = nTime;
     pFade->nTimeMax = nTime;
-    pFade->nR = (int)(pfCol[0] * 255.0f);
-    pFade->nG = (int)(pfCol[1] * 255.0f);
-    pFade->nB = (int)(pfCol[2] * 255.0f);
+    pFade->uR.n = (int)(puCol[0].f * 255.0f);
+    pFade->uG.n = (int)(puCol[1].f * 255.0f);
+    pFade->uB.n = (int)(puCol[2].f * 255.0f);
     pFade->nUnk18 = nUnk18;
     pFade->nUnk1C = nUnk1C;
     pFade->nUnk20 = nUnk20;
@@ -1020,20 +1025,31 @@ void nmlModelSetFadeOut(int time, int n20)
 }
 
 /* Start a fade-in using the preset fade-in color, then reset the presets */
+/* TODO: near-miss (12 diffs, 33 orig vs 32 built) -- all stores now match
+ * in kind (FPR zero via mtc1 after the FADE_COL union conversion); the
+ * original leaves a genuine nop after the two mtc1's (gas mtc1->swc1
+ * hazard nop?) and keeps the stores in pure source order, while our
+ * schedule hoists the last two afOutColor stores into that slot. Same
+ * hazard-nop class as nmlModelFogPara / nmlPacketAddGsFogCol. */
 void nmlModelSetFadeIn(int time, int n20)
 {
+    float fZero;
+    float f30;
+
     fade_set(&s_inFadeIn, D_00338680.afInColor, D_00338680.nInTime,
              time, 1, n20, 0);
-    D_00338680.afOutColor[0] = 0.0f;
-    D_00338680.afOutColor[3] = 30.0f;
+    fZero = 0.0f;
+    f30 = 30.0f;
+    D_00338680.afOutColor[0].f = fZero;
+    D_00338680.afOutColor[3].f = f30;
     D_00338680.nOutTime = 0;
-    D_00338680.afInColor[2] = 0.0f;
-    D_00338680.afInColor[1] = 0.0f;
-    D_00338680.afInColor[0] = 0.0f;
-    D_00338680.afInColor[3] = 30.0f;
+    D_00338680.afInColor[2].f = fZero;
+    D_00338680.afInColor[1].f = fZero;
+    D_00338680.afInColor[0].f = fZero;
+    D_00338680.afInColor[3].f = f30;
     D_00338680.nInTime = 0;
-    D_00338680.afOutColor[2] = 0.0f;
-    D_00338680.afOutColor[1] = 0.0f;
+    D_00338680.afOutColor[2].f = fZero;
+    D_00338680.afOutColor[1].f = fZero;
 }
 
 /* --- Global point lights --- */
@@ -1053,9 +1069,12 @@ void nmlModelSetGlobalPointLightReset(void)
 /* Set one global point-light position */
 void nmlModelSetGlobalPointLightPos(int no, void *pPos)
 {
+    VEC4 *p;
+
     if ((unsigned int)no < 3U) {
+        p = &s_inGblPointP[no];
         __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
-            : : "r"(&s_inGblPointP[no]), "r"(pPos) : "$2", "memory");
+            : : "r"(p), "r"(pPos) : "$2", "memory");
         s_inLayout.nStatus |= 0x2000000;
     }
 }
@@ -1088,9 +1107,9 @@ void nmlModelSetPointLight(int no, void *pPos, void *pCol)
 
     if ((unsigned int)no < 3U) {
         pP = s_inLayout.aPointP;
-        pC = s_inLayout.aPointC;
         __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
             : : "r"(&pP[no]), "r"(pPos) : "$2", "memory");
+        pC = s_inLayout.aPointC;
         xglVectorScaleXYZ(&pC[no], pCol, 128.0f);
         s_inLayout.nStatus |= 0x1000;
     }
@@ -1255,17 +1274,19 @@ void nmlModelInitPartsVisible(void *pData, int nVisible)
     char *q;
 
     if (nmlModelLexDataCheck(pData) == 0) {
-        i = 0;
         pTop = (int *)((char *)pData + 0xB0);
-        pOfs = pTop;
-        while (i < *(int *)((char *)pData + 0x44)) {
-            q = (char *)pData + *pOfs++;
-            if (nVisible != 0) {
-                *(int *)(q + 32) &= ~8;
-            } else {
-                *(int *)(q + 32) |= 8;
-            }
-            i++;
+        i = 0;
+        if (*(int *)((char *)pData + 0x44) > 0) {
+            pOfs = pTop;
+            do {
+                q = (char *)pData + *pOfs++;
+                if (nVisible != 0) {
+                    *(int *)(q + 32) &= ~8;
+                } else {
+                    *(int *)(q + 32) |= 8;
+                }
+                i++;
+            } while (i < *(int *)((char *)pData + 0x44));
         }
     }
 }
@@ -1433,4 +1454,290 @@ int nmlModelCalcClipStudio(void *pPos, int nStudio)
         nRet |= xglCullingCheck(pCamera, pPos);
     }
     return nRet;
+}
+
+/* --- Movie-finish signal / non-linear camera ask --- */
+
+extern unsigned short D_004B9102[];
+
+/* Configure the back buffer and fade cancels for each movie-finish mode */
+/* TODO: near-miss (6 diffs, 66 orig vs 69 built) -- all five case bodies
+ * match; only the source-last case (mode 4) differs: the original keeps
+ * jal nmlModelSetFadeInCancel and falls through into the shared
+ * epilogue, while ours sibcall-converts it (j) and emits a separate
+ * default epilogue. default:break; does not change it. */
+void nmlModelSendSignalMovieFinish(int mode)
+{
+    switch (mode) {
+    case 1:
+        nmlModelSetBackBufferToBattle(D_004B9102[0]);
+        nmlModelSetFadeInCancel(30);
+        nmlModelSetFadeOutCancel(30);
+        break;
+    case 2:
+        nmlModelSetBackBuffer(38, 1, D_004B9102[0], 0);
+        nmlModelSetFadeInCancel(30);
+        break;
+    case 5:
+        nmlModelSetBackBuffer(38, 1, D_004B9102[0], 0);
+        nmlModelSetFadeOutCancel(30);
+        nmlModelSetFadeInCancel(30);
+        break;
+    case 3:
+        nmlModelSetBackBuffer(3, 1, D_004B9102[0], 0);
+        nmlModelSetFadeInCancel(30);
+        break;
+    case 4:
+        nmlModelSetBackBuffer(D_0095BB44[0], 1, D_004B9102[0], 1);
+        nmlModelSetFadeInCancel(30);
+        break;
+    default:
+        break;
+    }
+}
+
+float xglPointLength(void *pPos, void *pPos2);
+float fabsf(float);
+int s_nNonLinearCamera;
+VEC4 s_inNonLinearPos;
+VEC4 s_inNonLinearEye;
+extern float s_fNonLinearMin;
+extern float s_fNonLinearMax;
+
+/* Decide (once) whether the active camera is a non-linear one; returns
+ * 1 while the cached answer is "non-linear" */
+int nmlModelAskNonLinearCamera(void)
+{
+    VEC4 vTemp;
+    void *pCamera;
+    float fAbs;
+
+    if (s_nNonLinearCamera == 0) {
+        pCamera = xglStudioSelectGetActiveCamera(0);
+        if (pCamera != 0) {
+            s_nNonLinearCamera = 1;
+            if (1.0f <= xglPointLength(&s_inNonLinearPos, (char *)pCamera + 0xD0)) {
+                s_nNonLinearCamera = 2;
+            } else {
+                __asm__ __volatile__(".set noreorder\n"
+                    "lqc2 $vf3, 0x0(%1)\n"
+                    "lqc2 $vf2, 0x0(%2)\n"
+                    "vsub.xyz $vf2xyz, $vf2xyz, $vf3xyz\n"
+                    "sqc2 $vf2, 0x0(%0)\n"
+                    ".set reorder"
+                    : : "r"(&vTemp), "r"((char *)pCamera + 0xA0), "r"(&s_inNonLinearEye));
+                fAbs = fabsf(vTemp.f[1]);
+                if (s_fNonLinearMin < fAbs) {
+                    if (fAbs < s_fNonLinearMax) {
+                        s_nNonLinearCamera = 2;
+                    }
+                }
+            }
+        }
+    }
+    return (s_nNonLinearCamera ^ 2) == 0;
+}
+
+/* --- Lex data validation / parts visibility / direct DMA send --- */
+
+char *strstr(const char *, const char *);
+
+/* Validate a lex model block: address range, alignment, "lex" magic and
+ * (for named variants) the MagicCarpetCome marker; 0 means valid */
+/* TODO: near-miss (1 word, REGISTER) -- the aOfs[n] index address add is
+ * addu v0,s0,v0 in the original vs addu v0,v0,s0 here; every source
+ * shape tried (index expr, int-cast base, accumulate) keeps the mult
+ * operand first. Same class as Menu.c's jump-table base-pointer-add
+ * one-word near-miss. Everything else (56 words) matches, including the
+ * empty-asm nRet opacity that restores the slt+movn tail. */
+int nmlModelLexDataCheck(void *pData)
+{
+    char *p;
+    int nRet;
+    int n;
+    int nOfs;
+    char *q;
+    char *pStr;
+
+    p = (char *)pData;
+    nRet = 1;
+    if ((unsigned int)((int)p - 0x200000) <= 0x1DFFFFF && (((int)p & 0xF) == 0)) {
+        if ((*(long *)p & 0xFFFFFF) != 0x78656C) {
+            goto out;
+        }
+        __asm__ __volatile__("" : "+r"(nRet));
+        if (p[63] != 0 && *(int *)(p + 0x6C) == 0) {
+            n = *(int *)(p + 0x44);
+            nOfs = *(int *)((int)p + n * 4 + 0xAC);
+            q = p + nOfs;
+            pStr = q + *(int *)(q + 0x24);
+            if (*(int *)(p + 0xA0) != 0) {
+                pStr += n * 16;
+            }
+            if (strstr(pStr + *(int *)(q + 0x28), "MagicCarpetCome") == 0) {
+                goto out;
+            }
+        }
+        if (*(int *)(p + 0x44) > 0) {
+            nRet = 0;
+        }
+    }
+out:
+    return nRet;
+}
+
+typedef struct {
+    int nData;              /* 0x0 */
+    short nSize;            /* 0x4 */
+    short nType;            /* 0x6 */
+} DIRECT_ENTRY;
+
+unsigned int nmlPacketSetAttributeData16N(void *pData, int nNum);
+DIRECT_ENTRY s_aDirectEntry[5500];
+int s_nDirectNum;
+
+/* Queue one direct-send entry, copying packet-attribute data for the
+ * odd channels and referencing it for the even ones */
+void nmlModelDirectSend(int no, void *pData, int nSize)
+{
+    DIRECT_ENTRY *p;
+
+    if (s_nPacketSignal == 0) {
+        if (s_nDirectNum < 5500) {
+            p = &s_aDirectEntry[s_nDirectNum];
+            p->nSize = nSize;
+            p->nType = 1;
+            switch (no) {
+            case 1: case 3: case 5: case 7: case 9: case 11:
+                p->nData = nmlPacketSetAttributeData16N(pData, nSize);
+                break;
+            case 2: case 4: case 6: case 8: case 10: case 12:
+                p->nData = (int)pData;
+                break;
+            }
+            switch (no) {
+            case 1: case 2:
+                p->nType = 1;
+                break;
+            case 3: case 4:
+                p->nType = 2;
+                break;
+            case 5: case 6:
+                p->nType = 3;
+                break;
+            case 7: case 8:
+                p->nType = 4;
+                break;
+            case 9: case 10:
+                p->nType = 5;
+                break;
+            case 11: case 12:
+                p->nType = 6;
+                break;
+            }
+            s_nDirectNum++;
+        }
+    }
+}
+
+typedef union {
+    unsigned long l;
+    unsigned int w[2];
+} XTXREG;
+
+typedef struct {
+    char pad00[0x20];
+    XTXREG uUnk20;          /* 0x20 */
+    char pad28[0x18];
+    XTXREG uUnk40;          /* 0x40 */
+} DIRECT_XTX;
+
+extern DIRECT_XTX D_004B9170;
+
+/* Send every mip block of an XTX texture: a transfer-descriptor entry
+ * followed by the texel data itself */
+void nmlModelDirectXtxSub(void *pTex, int no1, int no2)
+{
+    char *p;
+    int i;
+    unsigned int nHead;
+    unsigned int nLow;
+    unsigned int nHigh;
+
+    i = 0;
+    p = (char *)pTex + *(int *)((char *)pTex + 12);
+    if (*(int *)((char *)pTex + 8) > 0) {
+        do {
+            nHead = *(unsigned int *)p;
+            nLow = nHead & 0xFFFF;
+            nHigh = nHead >> 16;
+            if (nHead == nLow) {
+                nHigh = ((int)nLow + 63) >> 6;
+            }
+            i++;
+            D_004B9170.uUnk20.l = ((unsigned long)((*(unsigned int *)(p + 8) >> 6) + 0x3800) << 32)
+                | ((unsigned long)nHigh << 48);
+            D_004B9170.uUnk40.l = ((unsigned long)*(unsigned int *)(p + 4) << 32) | nLow;
+            nmlModelDirectSend(no1, &D_004B9170, 6);
+            nmlModelDirectSend(no2, (char *)pTex + *(int *)(p + 16), *(int *)(p + 12));
+            p += 20;
+        } while (i < *(int *)((char *)pTex + 8));
+    }
+}
+
+char s_aHideParts[1024];
+int s_nHidePartsNum;
+
+/* Show or hide one named part of a lex model; parts hidden before the
+ * model exists are queued for later */
+/* TODO: near-miss (46 diffs but pure REGISTER/layout skew, 63 orig vs 65
+ * built) -- logic verified against asm. The loop preheader emits an
+ * extra b/nop rotation and nSet/nMask land in t1/t0 vs the original's
+ * t0/a3; guarded do-while, while, and split-increment forms all keep
+ * the same shape. */
+void nmlModelSetPartsVisible(void *pData, int nParts, int nVisible)
+{
+    int i;
+    int *pOfs;
+    char *q;
+    int nSet;
+    int nMask;
+    int nCnt;
+
+    if (nmlModelLexDataCheck(pData) != 0) {
+        return;
+    }
+    if (nParts >= *(int *)((char *)pData + 0x40)) {
+        return;
+    }
+    pOfs = (int *)((char *)pData + 0xB0);
+    if ((*(int *)((char *)pData + pOfs[0] + 0xC0) & 0x10) != 0) {
+        nSet = 8;
+        nMask = -1;
+        if (nVisible != 0) {
+            nSet = 0;
+            nMask = ~8;
+        }
+        i = 0;
+        if (*(int *)((char *)pData + 0x44) > 0) {
+            do {
+                q = (char *)pData + *pOfs;
+                if (*(int *)(q + 0x2C) == nParts) {
+                    pOfs++;
+                    *(int *)(q + 0x20) = (*(int *)(q + 0x20) | nSet) & nMask;
+                } else {
+                    pOfs++;
+                }
+                i++;
+            } while (i < *(int *)((char *)pData + 0x44));
+        }
+        return;
+    }
+    if (nVisible == 0) {
+        if (s_nHidePartsNum < 1023) {
+            nCnt = s_nHidePartsNum + 1;
+            s_aHideParts[nCnt] = nParts;
+            s_nHidePartsNum = nCnt;
+        }
+    }
 }
