@@ -918,10 +918,8 @@ unsigned char *MenuSegmentInfoTextGet(int nIdx)
 
     p = D_0035CA5C;
     while (nIdx >= 2) {
-        while (*p != 0) {
-            p++;
+        while (*p++ != 0) {
         }
-        p++;
         nIdx--;
     }
     return p;
@@ -934,10 +932,8 @@ unsigned char *MenuSegmentItemNameGet(int nIdx)
 
     p = D_0035CA5C + 960;
     while (nIdx >= 2) {
-        while (*p != 0) {
-            p++;
+        while (*p++ != 0) {
         }
-        p++;
         nIdx--;
     }
     return p;
@@ -950,10 +946,8 @@ unsigned char *MenuSegmentMapNameGet(int nIdx)
 
     p = D_0035CA5C + 1344;
     while (nIdx >= 2) {
-        while (*p != 0) {
-            p++;
+        while (*p++ != 0) {
         }
-        p++;
         nIdx--;
     }
     return p;
@@ -1040,8 +1034,9 @@ int MenuEtherJoutoCheck(int nId)
 typedef struct {
     char pad0[0x42];
     short id;                  /* 0x42 */
+    char pad44[2];
 } MAPNAMEENT;
-extern MAPNAMEENT D_0036A1A4[37];
+extern MAPNAMEENT *save_map_text_p __asm__("save_map_text");
 
 /* TODO: near-miss (LOGIC) - same bnezl loop-back-reuses-delay-slot-load
  * shape as MenuSegmentInfoTextGet/ItemNameGet/MapNameGet; unresolved there
@@ -1049,11 +1044,11 @@ extern MAPNAMEENT D_0036A1A4[37];
 /* Search the save-map-name table for a matching id, else return the table base */
 void *MenuSaveMapNameGet(int nId)
 {
-    MAPNAMEENT *p;
+    register MAPNAMEENT *p __asm__("$5");
     MAPNAMEENT *base;
     int i;
 
-    p = D_0036A1A4;
+    p = save_map_text_p;
     base = p;
     for (i = 0; i < 37; i++) {
         if (p->id == nId) {
@@ -1064,8 +1059,6 @@ void *MenuSaveMapNameGet(int nId)
     return base;
 }
 
-extern int D_00532B10[];
-
 /* TODO: near-miss (LENGTH, 17 orig vs 21 built) - constant folding of the
  * table base + shifted index differs from the original's separate
  * lui/addiu/addu sequence. Parked after 2 attempts. */
@@ -1073,16 +1066,19 @@ extern int D_00532B10[];
 int MenuSortCheck(int nIdx)
 {
     int *p;
-    int cnt;
+    register int cnt __asm__("$3");
+    int v;
 
-    p = (int *)((char *)D_00532B10 + (nIdx << 10));
     cnt = 0;
-    if (*p != 0) {
-        p++;
-        while (*p != 0) {
+    p = sort[nIdx];
+    v = *p;
+    p++;
+    if (v != 0) {
+        do {
+            v = *p;
             p++;
             cnt++;
-        }
+        } while (v != 0);
     }
     return cnt;
 }
@@ -1100,15 +1096,18 @@ typedef struct {
 /* Ask whether a character's ether point value has reached the type's requirement */
 int MenuEtherCharPointCheck(int nId, int nPoint)
 {
-    ETHERINFO *p;
-    int s10;
-    short s08;
+    PARAOBJ *p1;
+    ETHERINFO *p2;
+    int pt;
 
-    func_A19210(nId & 0xFFFF);
-    p = (ETHERINFO *)func_A1A488(nPoint & 0xFFFF);
-    s10 = p->s10;
-    s08 = p->s08;
-    return s10 >= s08;
+    nPoint = nPoint & 0xFFFF;
+    p1 = func_A19210(nId & 0xFFFF);
+    pt = p1->f10;
+    p2 = (ETHERINFO *)func_A1A488(nPoint);
+    pt = pt < p2->s08;
+    __asm__("" : "+r"(pt));
+    __asm__("" : "+r"(pt));
+    return pt == 0;
 }
 
 extern int func_A1A5E8(int);
