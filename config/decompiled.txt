@@ -1968,3 +1968,5 @@ MenuSortCheck = 0x002907F0, 0x44; // Menu.c
 MenuEtherCharPointCheck = 0x002A9F80, 0x48; // Menu.c
 MenuSkillEquip = 0x0028F7A8, 0x8C; // Menu.c
 MenuTairetuLoad = 0x00275560, 0x104; // Menu.c
+MenuEtherCapSet = 0x002AA160, 0x9C; // Menu.c
+MenuSystem = 0x002B55B8, 0xA8; // Menu.c

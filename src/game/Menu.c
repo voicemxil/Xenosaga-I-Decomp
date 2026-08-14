@@ -2232,10 +2232,11 @@ int MenuParaPtNowGet(int nId, int nType)
     return 0;
 }
 
-/* TODO: near-miss (LENGTH) - the original's inner while (i < 12) loop is
-   not exit-test-duplicated (single top test, backward branch), while every
-   variant tried (for, while, goto, i++-in-condition) gets the test
-   duplicated at entry. Parked. */
+/* Matched: the inner loop is goto-shaped (single top test, backward branch)
+   with cont=i<12 computed before the i++, an explicit alignment nop on the
+   fall-in path, and -- the real key -- i resets PER CHARACTER: the retail
+   `move s2,zero` sits in the outer jal's delay slot, so the old shared-i
+   draft was semantically wrong as well as unmatched. */
 /* Recompute every character's total set-ether capacity byte */
 void MenuEtherCapSet(void)
 {
@@ -2244,22 +2245,30 @@ void MenuEtherCapSet(void)
     char *e;
     int i;
     int nChr;
+    int cont;
     short v;
 
-    i = 0;
     for (nChr = 1; nChr < 8; nChr++) {
+        i = 0;
         p = (unsigned char *)func_A191C0_2(nChr);
         p[23] = 0;
         q = (short *)(p + 142);
-        while (i++ < 12) {
-            v = *q;
-            q++;
-            if (v == 0) {
-                break;
-            }
-            e = (char *)func_A1A488(v);
-            p[23] = p[23] + *(unsigned char *)(e + 4);
+        __asm__ volatile("nop");
+    inner:
+        cont = i < 12;
+        i++;
+        if (cont == 0) {
+            goto next;
         }
+        v = *q;
+        q++;
+        if (v == 0) {
+            goto next;
+        }
+        e = (char *)func_A1A488(v);
+        p[23] = p[23] + *(unsigned char *)(e + 4);
+        goto inner;
+    next:;
     }
 }
 
@@ -2400,29 +2409,34 @@ int MenuBoxInc(int nId)
 
 extern void ChangeTopLevel(int);
 
-/* TODO: near-miss (LENGTH, 42 orig vs 43 built) - the original keeps both
-   ChangeTopLevel calls as jal (no sibcall) and rematerializes &MenuWork
-   after subMenuSystemMain; ours converts the tail call to j. Parked. */
+/* Matched: `two` (=2) survives into the case-0 sb (repurposed compare temp
+   in $s1), the goto-shared `top:` label hand-merges the two ChangeTopLevel
+   jals (gcc would not cross-jump them), and w2 pinned $4 keeps the &MenuWork
+   remat addressed off the kept $s2 lui half. */
 /* Drive the sub-menu system state machine (init, main tick, teardown handoff) */
 int MenuSystem(void)
 {
     MENUTECWORK *w;
-    MENUTECWORK *w2;
+    register MENUTECWORK *w2 __asm__("$4");
+    int st;
+    int two;
 
     w = &MenuWork;
+    two = 2;
     switch (w->state) {
     case 0:
         subMenuSystemInit(MainMenuWorkEnd);
+        w->state = two;
     case 2:
-        w->state = 2;
         subMenuSystemMain();
         w2 = &MenuWork;
         if (w2->bEnd == 0xFF) {
             w2->state = 4;
-            ChangeTopLevel(0);
+            goto top;
         }
         break;
     case 4:
+    top:
         ChangeTopLevel(0);
         break;
     }
