@@ -325,3 +325,9 @@ int sefExecLineData(SEF_LINE *p, int mode)
     }
     return 1;
 }
+
+/* Raise the hit-effect signal flag */
+void sefHitEffect(void)
+{
+    _hitFlag = 1;
+}

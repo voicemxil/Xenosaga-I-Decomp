@@ -108,3 +108,37 @@ char *srsGetComboName(int idx)
     sprintf(msg_2_00795220, D_004CC6B8, *data, D_004DBB28);
     return msg_2_00795220;
 }
+
+/* --- srs CD-read state accessors --- */
+
+extern int _nRead;
+
+void srsInitCdRead(void)
+{
+    _nRead = 0;
+}
+
+int srsLeaveCdRead(void)
+{
+    return _nRead;
+}
+
+void srsSetLoadMode(int nMode)
+{
+    srsLoadMode = nMode;
+}
+
+extern char srsViewPath[];
+char *strcpy(char *, const char *);
+
+void srsSetViewPath(char *pPath)
+{
+    strcpy(srsViewPath, pPath);
+}
+
+extern int fileLoad(int a, int b, int c);
+
+int srsFileLoad(int a, int b, int c)
+{
+    return fileLoad(a, b, c);
+}
