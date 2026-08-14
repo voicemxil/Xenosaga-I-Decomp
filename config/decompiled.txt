@@ -1711,3 +1711,13 @@ dptoul = 0x0032C540, 0xA0; // fpbit_df
 __make_fp = 0x0032DC58, 0x2C; // fpbit_sf
 
 // __do_global_dtors = 0x0032BA00, 0x8C; // _main -- TODO: 24d. The original is the static-p walk PLUS an atexit-chain drain (statics p.0@0x4AD6E8, chain@0x4AD6EC) merged INTO __do_global_dtors -- no mainline gcc rev has that shape (checked 12 revs 1999-2000), so it is Sony's target DO_GLOBAL_DTORS_BODY macro. Reconstructing it needs the drain loop modeled from the disasm. __do_global_ctors (47d) likely the CTORS_BODY sibling.
+
+eMessageSpriteReset = 0x0027AC78, 0x8; // eMessage
+eMessageDrawType00 = 0x0027AC80, 0x8; // eMessage
+eMessageHalfSpaseCheck = 0x0027AC88, 0x3C; // eMessage
+eMessageModeChange = 0x0027BC68, 0x8; // eMessage
+eMessageSet = 0x0027BC70, 0x74; // eMessage
+eMessageTextChange = 0x0027BCE8, 0x60; // eMessage
+eMessageNextPage = 0x0027BD48, 0x68; // eMessage
+eMessageDraw = 0x0027BDB0, 0x14; // eMessage
+eMessageCpy = 0x0027BDC8, 0x1C; // eMessage

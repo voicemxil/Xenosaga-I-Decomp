@@ -55,7 +55,7 @@ def compile_c(src, obj, cc=CC96, cflags=CFLAGS96, fixflags=(), keep_asm=None,
               extra=(), asflags=""):
     """Compile `src` to `obj`. Returns (ok, log). `keep_asm` keeps the .s."""
     asm = keep_asm or obj + ".s"
-    r = subprocess.run([cc] + cflags.split() + list(extra) + ["-S", "-o", asm, src],
+    r = subprocess.run([cc] + cflags.split() + ["-Iinclude"] + list(extra) + ["-S", "-o", asm, src],
                        capture_output=True, text=True)
     if r.returncode != 0:
         return False, (r.stderr or r.stdout)
