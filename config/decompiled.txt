@@ -1627,3 +1627,10 @@ __sseek = 0x00337770, 0x64; // newlib_stdio
 __sclose = 0x003377D8, 0x1C; // newlib_stdio
 _fwalk = 0x00336040, 0x94; // newlib_fwalk
 __smakebuf = 0x003361C0, 0x154; // newlib_makebuf
+
+std = 0x00335438, 0x5C; // newlib_findfp
+__sfmoreglue = 0x00335498, 0x78; // newlib_findfp
+__sfp = 0x00335510, 0xF8; // newlib_findfp
+_cleanup_r = 0x00335608, 0x1C; // newlib_findfp
+_cleanup = 0x00335628, 0x1C; // newlib_findfp
+__sinit = 0x00335648, 0x8C; // newlib_findfp
