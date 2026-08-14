@@ -43,7 +43,10 @@ unsigned int sceVif1PkSize(Vif1Packet *pkt)
     return ((unsigned int)((unsigned char*)pkt->current - base)) >> 4;
 }
 
-/* Reserve space for a number of 32-bit values */
+/* Reserve space for a number of 32-bit values; returns the reserved block.
+   The return value is load-bearing: sceVif1PkRefLoadImage writes the GIF tag
+   through it, and keeping $v0 live as the result is exactly what forces the
+   `addu $a1,$v0,$a1` (rd==rt) form that looked like a compiler-build wall. */
 unsigned int *sceVif1PkReserve(Vif1Packet *pkt, unsigned int count)
 {
     unsigned int *p = pkt->current;
@@ -482,82 +485,93 @@ void sceVif1PkCloseGifTag(Vif1Packet *pkt)
     pkt->current = p;
 }
 
-/* Build a VIF1 packet to load an image into the GS */
-void sceVif1PkRefLoadImage(Vif1Packet *pkt, unsigned int a1, unsigned int a2, unsigned int a3, 
-                           unsigned int t0, unsigned int t1, unsigned int t2, unsigned int t3,
-                           unsigned int fp)
+/* GIF tag template in rodata: NLOOP=0, EOP=0, FLG=PACKED, NREG=1, REGS={A+D} */
+extern const long D_004D53C0[2];
+
+/* Defined below under PS2_HARDWARE; the packet builder passes the tag as a
+   single 128-bit value (the original does `lq $a1,0($sp)` at the call site). */
+void sceVif1PkOpenGifTag(Vif1Packet *pkt, u128 tag);
+
+/* Build a VIF1 packet that uploads an image to the GS: a DIRECTHL block sets up
+   BITBLTBUF/TRXPOS/TRXREG/TRXDIR, then the pixel data is chained in as REF
+   transfers of at most 32767 quadwords each. */
+/* TODO: near-miss (58 of 122 words).  Rewritten from the disassembly: length
+   parity, identical control flow and identical constants.  The whole middle of
+   the REF loop (the min(), the Cnt/Align/AddCode/Reserve sequence, the GIF-tag
+   movz and the qwc/addr updates) is word-exact.  What is left is a callee-saved
+   allocation permutation plus entry-block scheduling:
+     - two independent allocator cycles - {dpsm,rrw} want $s3/$s2 (we produce
+       $s2/$s3) and {addr,dsay,dsax} want $s4/$s5/$s6 (we produce $s6/$s4/$s5);
+     - gcc emits the BITBLTBUF shifts in the entry block instead of after the
+       OpenGifTag call, and orders the sd/move interleave in the prologue
+       differently.
+   Ruled out: all 6 orderings of the three mask statements, masking inline at
+   the AddGsAD call sites (114 words - much worse), separate locals for the
+   masks, struct-typed / whole-struct-copy / reversed-element forms of the
+   D_004D53C0 read, and swapped operand order in the TRXPOS/TRXREG expressions.
+   Two levers did help and are kept below: reading the rodata halves into
+   `g0`/`g1` first (aligns the lui/addiu pair, -2 words) and materialising the
+   EOP GIF tag constant before the non-EOP one (-2 words).  Introducing a fresh
+   `src` local for the walking address aligns the entire prologue (indices 0-28)
+   but pushes `pkt` into $s8 and spills, ending up worse (62). */
+void sceVif1PkRefLoadImage(Vif1Packet *pkt, unsigned int dbp, unsigned int dpsm,
+                           unsigned int dbw, unsigned int addr, unsigned int qwc,
+                           unsigned int dsax, unsigned int dsay,
+                           unsigned int rrw, unsigned int rrh)
 {
-    unsigned int s0, s1, s2, s3, s4, s5, s6, s7;
+    U128 tag;
+    long g0, g1;
 
-    /* save registers (represented as locals here) */
-    s7 = (unsigned int)pkt;
-    s6 = t2;
-    s5 = t3;
-    s4 = t0;
-    s3 = a2 & 0xFF;
-    s1 = a3 & 0xFFFF;
-    s0 = a1 & 0xFFFF;
-    fp = fp;
-    
-    /* start building packet */
-    sceVif1PkCnt(s7, 0);
-    sceVif1PkOpenDirectHLCode(s7, 0);
+    dpsm = dpsm & 0xFF;
+    dbw  = dbw & 0xFFFF;
+    dbp  = dbp & 0xFFFF;
 
-    /* open GIF tag for data */
-    sceVif1PkOpenGifTag(s7, *(unsigned long long *)0); // value from stack/sp
+    g0 = D_004D53C0[0];
+    g1 = D_004D53C0[1];
+    tag.d[0] = g0;
+    tag.d[1] = g1;
 
-    /* build GS ADDR packet entries */
-    s0 = (s0 << 0) | (s1 << 16);
-    s3 <<= 24;
-    sceVif1PkAddGsAD(s7, 0x50, s0 | s3);
+    sceVif1PkCnt(pkt, 0);
+    sceVif1PkOpenDirectHLCode(pkt, 0);
+    sceVif1PkOpenGifTag(pkt, tag.q);
 
-    s6 <<= 0;
-    s5 <<= 16;
-    sceVif1PkAddGsAD(s7, 0x51, s6 | s5);
+    sceVif1PkAddGsAD(pkt, 0x50, ((unsigned long)dbp << 32) | ((unsigned long)dbw << 48)
+                                | ((unsigned long)dpsm << 56));
+    sceVif1PkAddGsAD(pkt, 0x51, ((unsigned long)dsax << 32) | ((unsigned long)dsay << 48));
+    sceVif1PkAddGsAD(pkt, 0x52, (unsigned long)rrw | ((unsigned long)rrh << 32));
+    sceVif1PkAddGsAD(pkt, 0x53, 0);
 
-    s2 <<= 0;
-    s2 >>= 0;
-    s0 = *(unsigned int *)(0xC8); // load some value
-    s0 <<= 0;
-    sceVif1PkAddGsAD(s7, 0x52, s2 | s0);
+    sceVif1PkCloseGifTag(pkt);
+    sceVif1PkCloseDirectHLCode(pkt);
 
-    /* close GIF tag and Direct HL code */
-    sceVif1PkCloseGifTag(s7);
-    sceVif1PkCloseDirectHLCode(s7);
-
-    /* optional: loop for remaining image data */
-    if (fp)
+    if (qwc != 0)
     {
-        unsigned int s5_reg = 0x08000000 | 0x8000;
-        unsigned int s3_reg = 0x13000;
-        unsigned int s2_reg = 0x51000000;
-
         do
         {
-            unsigned int s0_reg, v1, a1, a2, a0, t0, v1_alt;
-            s0_reg = (fp < fp) ? fp : fp;
-            sceVif1PkCnt(s7, 0);
-            sceVif1PkAlign(s7, 2, 3);
-            sceVif1PkAddCode(s7, 0x51000001);
-            sceVif1PkReserve(s7, 4);
+            unsigned int n;
+            unsigned long *p;
+            unsigned long gt;
 
-            v1 = s0_reg;
-            a1 = s0_reg ^ fp;
-            a2 = s0_reg;
-            a0 = v1 | s5_reg;
-            t0 = s0_reg | s2_reg;
-            v1_alt = v1 | s3_reg;
+            n = (0x7FFF < qwc) ? 0x7FFF : qwc;
 
-            /* reference the image chunk */
-            sceVif1PkRef(s7, s4, a1, a2, s0, fp);
+            sceVif1PkCnt(pkt, 0);
+            sceVif1PkAlign(pkt, 2, 3);
+            sceVif1PkAddCode(pkt, 0x51000001);
+            p = (unsigned long *)sceVif1PkReserve(pkt, 4);
 
-            s0_reg <<= 4;
-            fp -= s0_reg;
-            s4 += s0_reg;
-        } while (fp != 0);
+            gt = (unsigned long)n | 0x0800000000008000L;
+            if (n != qwc)
+                gt = (unsigned long)n | 0x0800000000000000L;
+            p[1] = 0;
+            p[0] = gt;
+
+            sceVif1PkRef(pkt, addr, n, 0, n | 0x51000000, 0);
+
+            qwc -= n;
+            addr += n << 4;
+        }
+        while (qwc != 0);
     }
-
-    /* restore registers */
 }
 
 
