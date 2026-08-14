@@ -1903,3 +1903,4 @@ MenuBgTaskInit = 0x00275320, 0x180; // tskMenuBg.c
 xglMatrixReverse = 0x00229C40, 0x7C; // xglMatrix.c
 xglMatrixFrustum = 0x0022A2D8, 0xD8; // xglMatrix.c
 xglTaskInitial = 0x0021C528, 0x94; // xglTask.c
+MenuFaceEpidGet = 0x0028EE18, 0x184; // Menu

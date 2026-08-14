@@ -90,6 +90,7 @@ FILE_CFLAGS_OVERRIDE = {
     # Three camera functions need -fno-strict-aliasing; verified per-file
     # only (the flag regresses xglTask.c's matches if applied globally).
     "xglCamera.c": "-O2 -G8 -fno-strict-aliasing",
+    "tskMenuPause.c": "-O2 -G8 -fno-thread-jumps",
     "malloc_lock.c": "-O2 -G0",
     # libgcc2 64-bit division TUs: Sony built libgcc with -mlong32 (long is
     # 32-bit), which keeps __ll_B's `1L << 16` in SImode -- plain `sll`
@@ -189,7 +190,10 @@ FILE_FIX_FLAGS = {
     "newlib_ungetc.c": "--barrier-return-store ungetc",
     # MenuRWeaponCheck2: the original keeps its trailing store above the
     # jr with a genuine nop in the slot (found by the Menu subagent).
-    "Menu.c": "--barrier-return-store MenuRWeaponCheck2",
+    # MenuFaceEpidGet: one branch-likely annul bit at site 3 (flagged by
+    # the wave-3 Menu subagent, site index found by sweep).
+    "Menu.c": ("--barrier-return-store MenuRWeaponCheck2 "
+               "--branch-likely MenuFaceEpidGet:3"),
     # xgl delay-slot shapes found by the xgl subagent (all verified):
     "xglTimer.c": "--barrier-return-store xglTimer0Reset",
     "xglMovie.c": "--barrier-branch-move xglMovieClose",
