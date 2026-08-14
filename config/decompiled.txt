@@ -1911,3 +1911,4 @@ GamePauseDispCf = 0x00246340, 0x54; // tskMenuPause.c
 GamePauseDispEvent = 0x00246398, 0x90; // tskMenuPause.c
 xglSoundStreamStop = 0x00226B00, 0x10C; // xglSound.c
 TMENU_setItem = 0x0025F1E8, 0xE0; // TMENU.c
+xglAsin = 0x00317060, 0x88; // xglMath.c

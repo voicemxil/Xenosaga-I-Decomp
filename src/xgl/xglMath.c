@@ -14,27 +14,25 @@ float I2F(int nValue)
 
 extern float sqrtf(float);
 
-/* TODO: near-miss (16/34 words, REGISTER/OPERANDS class per triage.py) -
- * plain sqrtf(1.0f-x) already reproduces the hardware sqrt.s + NaN-check
- * + software-sqrtf-fallback expansion (this compiler's own sqrtf()
- * lowering does that automatically -- no manual NaN check needed in the
- * source). Remaining diffs are pure float-register allocation: original
- * keeps the polynomial accumulator in $f0 (freed by the sqrt call) and
- * the sqrt result in $f5; every natural statement order tried keeps the
- * same registers just shuffled ($f1/$f2/$f6). Logic and constants are
- * fully verified against asm/data/cod's .lit4 pool. */
+/* Matched via the compound-assignment lever (r *= x; r -= c;) keeping
+ * the poly accumulator in-place in $f0, plus a fresh temp for the final
+ * s*r so the mul keeps s as first operand (two-address form otherwise
+ * commutes it). */
 /* asin(x) via sqrt(1-x) times a cubic minimax poly; the hardware sqrt.s
  * result is checked for NaN and falls back to the software sqrtf() */
 float xglAsin(float x)
 {
-    float s, r;
+    float s, r, t;
 
     s = sqrtf(1.0f - x);
-    r = x * -0.01872929931f + 0.07426100224f;
-    r = r * x - 0.2121143937f;
-    r = r * x + 1.570728779f;
-    r = s * r;
-    r = 1.570796371f - r;
+    r = x * -0.01872929931f;
+    r += 0.07426100224f;
+    r *= x;
+    r -= 0.2121143937f;
+    r *= x;
+    r += 1.570728779f;
+    t = s * r;
+    r = 1.570796371f - t;
     return r;
 }
 
