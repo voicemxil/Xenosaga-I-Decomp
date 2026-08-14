@@ -565,7 +565,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          no_fill_delay=None, expand_sym_loads=False,
          unfill_slots=None, barrier_lo_load=None,
          branch_likely=None, branch_unlikely=None,
-         war_restore=None, pin_slot=None):
+         war_restore=None, pin_slot=None, lis_hazard_nop=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -769,8 +769,39 @@ def main(path, omitted_hazards, barrier_return_store=None,
             out.append(wrapped)
             continue
 
-        if RE_LIS.match(line):
-            wrapped = wrap_mips1(line)
+        m_lis = RE_LIS.match(line)
+        if m_lis:
+            # ee-as synthesized li.s inline (lui $at / mtc1) whenever the
+            # value's significant bits fit a 16-bit window anchored at the
+            # top set bit -- same rule as the li.d macro above.  Modern gas
+            # sends every li.s to .lit4 instead; expand the synthesizable
+            # ones ourselves.  (A/B experiment: xglAtan2's `+ 1.0f`.)
+            reg, valstr = [s.strip() for s in m_lis.group(1).split(",", 1)]
+            fbits = struct.unpack("<I", struct.pack("<f", float(valstr)))[0]
+            if fbits and (fbits & 0xFFFF) == 0:
+                wrapped = ("\tlui\t$1,%d\n\tmtc1\t$1,%s"
+                           % ((fbits >> 16) & 0xFFFF, reg))
+                # ee-as put a hazard nop after the expansion's mtc1 when
+                # the next instruction is a COP1 compute -- even one that
+                # does not read the destination (xglAtan2's poly tail,
+                # where the li.s sits in a gp-relative lwc1 cluster).
+                # -G0 sites with a preceding integer-synth li.s show NO
+                # nop (libm atanf), so this is opt-in per function via
+                # XENO_LIS_HAZARD_FUNCS (proposed flag: --lis-hazard-nop).
+                prev = previous_insn(lines, i)
+                prev_fp_load = re.match(r'^\t(lwc1|li\.s)[ \t]', prev)
+                if (lis_hazard_nop is not None
+                        and RE_FPCOMPUTE.match(following) and prev_fp_load
+                        and in_scope(owner[i], lis_hazard_nop)
+                        and not needs_hazard_nop):
+                    wrapped += "\n\tnop"
+            elif re.match(r'^\t(j\t\$31|jr\t\$(ra|31))\b', following):
+                # ee-as never let the li.s expansion's lwc1 slide into a
+                # following return's delay slot; modern gas does.  Barrier
+                # the expansion so the jr keeps its genuine nop.
+                wrapped = wrap_mips1_noreorder(line)
+            else:
+                wrapped = wrap_mips1(line)
             if needs_hazard_nop:
                 wrapped += "\n\tnop"
             out.append(wrapped)
@@ -823,7 +854,16 @@ def main(path, omitted_hazards, barrier_return_store=None,
         for i, line in enumerate(flat):
             nxt = flat[i + 1] if i + 1 < len(flat) else ""
             prev = flat[i - 1] if i else ""
-            if ((RE_RETURN_MOVE.match(line) or RE_BARRIER_ALU.match(line))
+            if (RE_STORE.match(line)
+                    and re.match(r'^\tjal\t', next_insn(flat, i) or "")
+                    and "noreorder" not in prev
+                    and "volatile" in nxt):
+                # A (volatile MMIO) store left in reorder mode right
+                # before a call: ee-as left the call's slot as a nop
+                # instead of stealing the store (xglMovieClose).
+                res.append("\t.set push\n\t.set noreorder\n" + line +
+                           "\n\t.set pop")
+            elif ((RE_RETURN_MOVE.match(line) or RE_BARRIER_ALU.match(line))
                     and RE_ANY_BRANCH.match(nxt)
                     and "noreorder" not in prev):
                 res.append("\t.set push\n\t.set noreorder\n" + line +
@@ -859,6 +899,10 @@ if __name__ == "__main__":
                         help="keep a preceding move out of ANY branch delay "
                              "slot (incl. conditional branches); optionally "
                              "a comma-separated function-name list")
+    parser.add_argument("--lis-hazard-nop", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="add the ee-as hazard nop after a synthesized "
+                             "li.s mtc1 when a COP1 compute follows")
     parser.add_argument("--barrier-lo-load", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="keep %%lo() loads and la macros out of a "
@@ -913,4 +957,5 @@ if __name__ == "__main__":
          scope(args.no_fill_delay), args.expand_sym_loads,
          scope(args.unfill_gcc_slots), scope(args.barrier_lo_load),
          scope(args.branch_likely), scope(args.branch_unlikely),
-         scope(args.war_restore_swap), scope(args.pin_slot_nop))
+         scope(args.war_restore_swap), scope(args.pin_slot_nop),
+         scope(args.lis_hazard_nop))

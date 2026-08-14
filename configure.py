@@ -197,7 +197,7 @@ FILE_FIX_FLAGS = {
     "xglTimer.c": "--barrier-return-store xglTimer0Reset",
     "tskMenuPause.c": "--pin-slot-nop PauseMenu:0",
     "xglMovie.c": "--barrier-branch-move xglMovieClose",
-    "xglMath.c": "--omit-hazard qmtc2",
+    "xglMath.c": "--omit-hazard qmtc2 --lis-hazard-nop xglAtan2",
     "newlib_mprec.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtod.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtoul.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
