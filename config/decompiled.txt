@@ -1636,3 +1636,7 @@ _cleanup = 0x00335628, 0x1C; // newlib_findfp
 __sinit = 0x00335648, 0x8C; // newlib_findfp
 __swsetup = 0x00333D58, 0x10C; // newlib_wsetup
 __sfvwrite = 0x00335C60, 0x3E0; // newlib_fvwrite
+fflush = 0x00335320, 0x114; // newlib_fflush
+lflush = 0x00337448, 0x34; // newlib_refill
+__srefill = 0x00337480, 0x17C; // newlib_refill
+fread = 0x003356D8, 0x11C; // newlib_fread
