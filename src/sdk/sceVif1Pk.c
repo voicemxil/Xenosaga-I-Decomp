@@ -122,27 +122,33 @@ void sceVif1PkAddDataN(Vif1Packet *pkt, unsigned int *src, unsigned int count)
 /* Append a 128-bit UNPACK data value (written as four 32-bit words) */
 void sceVif1PkAddUpkData128(Vif1Packet *pkt, u128 value)
 {
-    /* TODO: near-miss (14 words).  The sq/ld union spill, the dsll32+dsra32
-       sign-extractions and the dest++ / dest+3 pointer stepping all match; only
-       the order of the four extractions differs.  The original emits
-       hi>>32, (int)lo, (int)hi, [store], lo>>32; we emit them in source order.
-       Hoisting any of them into named temps before the stores flips the two
-       `ld`s (d[0] gets loaded first instead of d[1]) and costs 2 more words,
-       for every ordering tried - so the extraction order is a scheduler
-       artefact, not source order. */
+/* TODO: near-miss (REGISTER, 12 words, was 14).  The sq/ld spill, the ld
+       order (hi first), the extraction order and the store/pointer shapes all
+       match with the ordering below: hi and hi>>32 hoisted ahead of the lo
+       block, lo>>32 extracted inline after the first store.  What is left is
+       a pure 3-cycle in local-alloc: dest wants $v0 (we give $a2), lo wants
+       $v1 (we give $v0), (int)lo wants $a2 (we give $v1).  Permuter-exhausted:
+       all 5040 orderings of the head statements (with l0/h0/h1 as temps and
+       dest init as a movable statement) and all 720 orderings without the
+       temps compile to 12+ diffs; initialising dest late does flip dest into
+       $v0 but drags lo into $a1 (the spill slot of the 128-bit arg gives lo
+       an $a1 preference) for 14.  No source-level lever found for the last
+       rotation. */
     U128 u;
     unsigned int *dest = pkt->current;
     long lo, hi;
+    int h1;
 
     u.q = value;
-    lo = u.d[0];
     hi = u.d[1];
+    h1 = (int)(hi >> 32);
+    lo = u.d[0];
     dest[0] = (int)lo;
     dest++;
     dest[0] = (int)(lo >> 32);
     pkt->current = dest + 3;
     dest[1] = (int)hi;
-    dest[2] = (int)(hi >> 32);
+    dest[2] = h1;
 }
 
 /* Close a previously opened UNPACK code and patch its element count */
@@ -186,11 +192,14 @@ unsigned int sceVif1PkTerminate(Vif1Packet *pkt)
         *current++ = 0;
     }
 
-    /* Patch the size of an open DIRECT/HL code if one exists */
+    /* Patch the size of an open DIRECT/HL code if one exists.
+       Loading *open into its own temp BEFORE computing n is load-bearing:
+       it wins the $v0/$v1 register tie-break (n in $v0, *open in $v1). */
     if (open != 0)
     {
+        unsigned int v = *open;
         int n = (((int)current - (int)open) >> 4) - 1;
-        *open = *open + n;
+        *open = v + n;
     }
 
     /* Clear open pointer */
@@ -216,8 +225,12 @@ void sceVif1PkCnt(Vif1Packet *pkt, unsigned int flags)
        the control word; the original emits the `or` first.  EXHAUSTED: all
        5040 orderings of the 7 statements below were compiled (tools/permute.py)
        and none reaches 0 - best is this one at 2.  `0x10000000 | flags`,
-       `current[i]` instead of `*current`, and hoisting the reserved store all
-       reproduce the same 2-word swap, so the lever is not statement order. */
+       `current[i]` instead of `*current`, hoisting the reserved store, a
+       fresh temp for the or'd value, a volatile-cast reserved store and an
+       early-hoisted constant temp all reproduce the same 2-word swap, so the
+       lever is neither statement order nor expression shape.  gcc's own .s
+       already has the swap (it is sched2, not gas), and no fix_cc_asm flag
+       covers a mid-block swap. */
     current = pkt->current;
     flags |= 0x10000000;
     pkt->reserved = start;
@@ -253,26 +266,45 @@ void sceVif1PkEnd(Vif1Packet *pkt, unsigned int flags)
 /* Align the packet current pointer to a 16-byte (quadword) boundary */
 void sceVif1PkAlign(Vif1Packet *pkt, unsigned int padding, unsigned int boundary)
 {
-    /* TODO: near-miss (20 words).  ROOT CAUSE ISOLATED: gcc sinks the
-       `pkt->current = cur` store out of the fill loop (our `sw v1,0(a0)` lands
-       after the `bnez`), while the original keeps it inside and therefore peels
-       the first iteration (`b` into the middle of the rotated loop).  Rewriting
-       the body with a fresh `next` local, and `(target + 1) + mask` explicitly
-       parenthesised, changes nothing - the store still sinks.  The remaining
-       $v0/$v1 swap in the mask setup is downstream of that.  Next lever to try
-       is something that defeats the sink (e.g. re-reading pkt->current). */
+/* TODO: near-miss (8 words, was 21).  Three levers found and kept below:
+       (1) the zero-fill store is written through `unsigned int **` so that
+       under gcc 2.9's type-based aliasing it MAY alias pkt->current - a plain
+       int store lets the compiler prove the in-loop `pkt->current = ...` dead
+       and sink it out of the loop; (2) the loop is a do-while entered by a
+       goto into its middle, reproducing the original's peeled entry (the
+       plain while gets either cross-jumped or left in jump-to-test form);
+       (3) `t1 = target + 1` in its own statement stops the reassociation
+       into target + (mask + 1).  Remaining 8 words: the mask-setup constants
+       32 and 0xFFFFFFFF swap $v0/$v1 (allocation tie, statement order and
+       temps do not move it, permuter-exhausted) and in the loop body cse
+       rewrites `next = cur + 1` into `addiu v1,v1,4` via the cur=next copy,
+       which then schedules after the store instead of before it. */
     unsigned int p = (padding + 2) & 0x1F;
-    unsigned int mask = 0xFFFFFFFF >> (32 - p);
+    unsigned int amt = 32 - p;
+    unsigned int mask = 0xFFFFFFFF >> amt;
     unsigned int *cur = pkt->current;
     unsigned int target = ((unsigned int)cur & ~mask) + (boundary << 2);
 
     if (target < (unsigned int)cur)
-        target = target + 1 + mask;
-
-    while ((unsigned int)cur < target)
     {
-        *cur++ = 0;
-        pkt->current = cur;
+        unsigned int t1 = target + 1;
+        target = t1 + mask;
+    }
+
+    if ((unsigned int)cur < target)
+    {
+        unsigned int *next = cur + 1;
+        *(unsigned int **)cur = 0;
+        goto join;
+        do
+        {
+            cur = next;
+            next = cur + 1;
+            *(unsigned int **)cur = 0;
+    join:
+            pkt->current = next;
+        }
+        while ((unsigned int)next < target);
     }
 }
 
@@ -325,16 +357,17 @@ void sceVif1PkOpenDirectHLCode(Vif1Packet *pkt, unsigned int flags)
 /* Add N 128-bit DIRECT data units to the VIF1 packet */
 void sceVif1PkAddDirectDataN(Vif1Packet *pkt, const long *src, unsigned int count)
 {
-    /* TODO: near-miss (25 words).  ROOT CAUSE ISOLATED: the original loop body
-       is exactly sceVif1PkAddUpkData128's shape - `dest[0] = lo; dest++;
-       dest[0] = lo>>32; dest[1] = hi; dest[2] = hi>>32; dest += 3;` - which the
-       original compiles to `addiu a2,a2,4` + `move v0,a2` (a strength-reduced
-       giv) + offsets 0/4/8 off the copy.  In a loop gcc 2.9 instead FOLDS the
-       two increments into one `addiu ...,16` and rewrites the offsets, so the
-       `move` never appears.  Tried: fresh `next`/`p` locals for the advanced
-       pointer (folds anyway), and hoisting `src += 2` (gcc then hoists the
-       `+4` out of the loop entirely, 27 words).  Needs a lever that blocks the
-       induction-variable rewrite. */
+/* TODO: near-miss (26 words).  The original loop body keeps TWO pointer
+       increments per iteration (`addiu a2,a2,4` ... `move v0,a2` +
+       `addiu a2,v0,12`, offsets 0/0/4/8) - the body below is written in that
+       split form.  gcc 2.9's loop strength reduction instead folds the two
+       increments into one `addiu +16`, rewrites the store offsets (-4...)
+       and inits `dest+1` in the preheader.  Tried: explicit `d = ++dest`
+       intermediate (reduced to a walking giv anyway), int-casting the
+       second increment (loop.c sees through it), goto-formed loop (kills
+       the LOOP notes: loses the alignment nop and the hoisted 0xffffffff,
+       though the increment pair then survives).  Needs a lever that makes
+       the walking-giv rewrite unprofitable while keeping loop notes. */
     unsigned int i = count - 1;
 
     if (count != 0)
@@ -346,10 +379,11 @@ void sceVif1PkAddDirectDataN(Vif1Packet *pkt, const long *src, unsigned int coun
             long lo = src[0];
             long hi = src[1];
             dest[0] = (int)lo;
-            dest[1] = (int)(lo >> 32);
-            dest[2] = (int)hi;
-            dest[3] = (int)(hi >> 32);
-            dest += 4;
+            dest++;
+            dest[0] = (int)(lo >> 32);
+            dest[1] = (int)hi;
+            dest[2] = (int)(hi >> 32);
+            dest += 3;
             src += 2;
         }
         while (--i != 0xFFFFFFFF);
@@ -361,7 +395,7 @@ void sceVif1PkAddDirectDataN(Vif1Packet *pkt, const long *src, unsigned int coun
 /* Add multiple 128-bit UPK data units to the VIF1 packet */
 void sceVif1PkAddUpkData128N(Vif1Packet *pkt, const long *src, unsigned int count)
 {
-    /* TODO: near-miss (29 words) - identical body to sceVif1PkAddDirectDataN
+/* TODO: near-miss (26 words) - identical body to sceVif1PkAddDirectDataN
        (same original instruction stream); same induction-variable folding
        problem, see the analysis on that function. */
     unsigned int i = count - 1;
@@ -375,10 +409,11 @@ void sceVif1PkAddUpkData128N(Vif1Packet *pkt, const long *src, unsigned int coun
             long lo = src[0];
             long hi = src[1];
             dest[0] = (int)lo;
-            dest[1] = (int)(lo >> 32);
-            dest[2] = (int)hi;
-            dest[3] = (int)(hi >> 32);
-            dest += 4;
+            dest++;
+            dest[0] = (int)(lo >> 32);
+            dest[1] = (int)hi;
+            dest[2] = (int)(hi >> 32);
+            dest += 3;
             src += 2;
         }
         while (--i != 0xFFFFFFFF);
@@ -448,16 +483,15 @@ void sceVif1PkRef(Vif1Packet *pkt, unsigned int a1, unsigned int a2, unsigned in
 /* Close a currently open GIF tag in the VIF1 packet */
 void sceVif1PkCloseGifTag(Vif1Packet *pkt)
 {
-    /* TODO: near-miss (REGISTER, 13 words).  Structure now matches exactly: the
-       `nloop >>= 1` really is outside the `flg != 2` test in the original (the
-       movn sits in the beq's delay slot, so it runs unconditionally), and the
-       fill loop walks a fresh copy `p` of `current` (that is the `move a1,t2`).
-       What is left is a 3-cycle in local-alloc: flg wants $v1, `nloop >> 1`
-       wants $a0 and the literal 2 wants $a1; we get $a0/$a1/$v1.  Neither
-       declaration order, statement order nor `if (2 != flg)` moves it.  Pinning
-       `nloop >> 1` to $4 and `p` to $5 gets it down to 5 words, but gcc 2.9
-       silently ignores an __asm__ register spec on `flg` (any register), so the
-       last swap cannot be forced from the source. */
+        /* The `two` temp is load-bearing: materialising the literal 2 early gives
+       its pseudo a long live range and therefore a LOW local-alloc priority,
+       which rotates the 3-cycle {flg, nloop>>1, 2} into the original's
+       $v1/$a0/$a1 assignment.  With a bare `flg != 2` the constant is born at
+       the compare, gets top priority, steals $v1, and 13 words swap registers.
+       Also note `nloop >>= 1` really is outside the `flg != 2` test (the movn
+       sits in the beq's delay slot, so it runs unconditionally), and the fill
+       loop walks a fresh copy `p` of `current` (that is the `move a1,t2`). */
+    unsigned int two = 2;
     unsigned int *current = pkt->current;
     unsigned int *openGif = pkt->openGif;
     unsigned long tag = *(unsigned long *)openGif;
@@ -468,7 +502,7 @@ void sceVif1PkCloseGifTag(Vif1Packet *pkt)
     if (flg != 1)
         nloop = nloop >> 1;
 
-    if (flg != 2) {
+    if (flg != two) {
         unsigned int nreg = (unsigned int)(tag >> 60);
         if (nreg == 0)
             nreg = 16;
