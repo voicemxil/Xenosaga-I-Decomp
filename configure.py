@@ -221,7 +221,11 @@ FILE_FIX_FLAGS = {
     # --as-g0: libm.c is also assembled with `as -G0` (asflags_for below),
     # which changes when a li.s float literal carries the mtc1 COP1 hazard
     # nop -- see fix_cc_asm.py's ASSUME_NO_LIT4 comment.
-    "libm.c": "--barrier-return-store fabs,__ieee754_fmod --as-g0",
+    # ... plus: gas steals .lit4 %lo loads / la macros into call slots
+    # the original keeps as nops (diagnosed function-by-function; see
+    # libm.c's header comment).
+    "libm.c": ("--barrier-return-store fabs,__ieee754_fmod --as-g0 "
+               "--barrier-branch-move --barrier-lo-load"),
     # _dtoa_r: `dpcmp(d.d, 0.0)`'s `a1 = 0` argument setup is left as a
     # separate instruction (with a genuine nop in the jal delay slot) in
     # the original, but gas's reorder pass steals it into the jal's delay

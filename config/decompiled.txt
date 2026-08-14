@@ -1729,3 +1729,9 @@ __do_global_dtors = 0x0032BA00, 0x8C; // _main
 __do_global_ctors = 0x0032BA90, 0xC0; // _main
 __unpack_f = 0x0032DBF8, 0x5C; // fpbit_sf
 __pack_f = 0x0032DF70, 0xD0; // fpbit_sf
+
+__ieee754_sqrt = 0x003264A8, 0x31C; // libm
+floor = 0x00329720, 0x214; // libm
+__kernel_sin = 0x00328200, 0x238; // libm
+__kernel_cos = 0x003273D8, 0x2D4; // libm
+atan = 0x00329220, 0x4C8; // libm

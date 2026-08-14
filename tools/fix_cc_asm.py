@@ -435,7 +435,7 @@ def unfill_gcc_slots(flat, scope, owner_of):
 def main(path, omitted_hazards, barrier_return_store=None,
          hoist_return_store=None, barrier_branch_move=None,
          no_fill_delay=None, expand_sym_loads=False,
-         unfill_slots=None):
+         unfill_slots=None, barrier_lo_load=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -537,6 +537,18 @@ def main(path, omitted_hazards, barrier_return_store=None,
                        f"\t{op}\t{reg},%lo({sym})({reg})")
             continue
 
+        # --barrier-lo-load: a %lo() memory load directly before a plain
+        # branch/call must not be stolen into the delay slot (confirmed on
+        # libm.c's atan/floor, where the .lit4 constant load sits above
+        # the jal with a genuine nop in the slot).
+        if (barrier_lo_load is not None
+                and re.match(r"^\t(ld|lw|lwu|lh|lhu|lb|lbu)\t[^,]*,.*%lo", line)
+                and re.match(r"^\t(jal|j|b)\t[A-Za-z_$]", following)
+                and in_scope(owner[i], barrier_lo_load)):
+            out.append("\t.set push\n\t.set noreorder\n" + line +
+                       "\n\t.set pop")
+            continue
+
         if (barrier_return_store is not None
                 and ((RE_STORE.match(line) and RE_RETURN.match(following))
                      or (RE_RETURN_MOVE.match(line)
@@ -564,6 +576,13 @@ def main(path, omitted_hazards, barrier_return_store=None,
             # a leaf return, the modern assembler pulls its final addu into
             # the jr delay slot; the original ee-as left a nop. Barrier it.
             if RE_LA.match(line) and RE_RETURN.match(following):
+                out.append(wrap_mips1_noreorder(line))
+                continue
+            # --barrier-lo-load also pins an la macro above a call the
+            # same way (la-before-jal, mirroring la-before-return).
+            if (barrier_lo_load is not None and RE_LA.match(line)
+                    and re.match(r"^\t(jal|j)\t[A-Za-z_]", following)
+                    and in_scope(owner[i], barrier_lo_load)):
                 out.append(wrap_mips1_noreorder(line))
                 continue
             # gas also steals a conversion into a following CALL's delay
@@ -697,6 +716,10 @@ if __name__ == "__main__":
                         help="keep a preceding move out of ANY branch delay "
                              "slot (incl. conditional branches); optionally "
                              "a comma-separated function-name list")
+    parser.add_argument("--barrier-lo-load", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="keep %%lo() loads and la macros out of a "
+                             "following call/branch delay slot")
     parser.add_argument("--unfill-gcc-slots", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="hoist gcc's own branch-delay-slot fills back "
@@ -729,4 +752,4 @@ if __name__ == "__main__":
     main(args.path, set(args.omit_hazard), scope(args.barrier_return_store),
          scope(args.hoist_return_store), scope(args.barrier_branch_move),
          scope(args.no_fill_delay), args.expand_sym_loads,
-         scope(args.unfill_gcc_slots))
+         scope(args.unfill_gcc_slots), scope(args.barrier_lo_load))
