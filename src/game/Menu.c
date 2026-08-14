@@ -542,14 +542,16 @@ void *MenuEtherDataGet(int nId)
 {
     int idx;
     int t;
+    char *p;
 
     idx = nId & 0xFFFF;
     t = idx - 1;
+    idx = idx << 2;
+    p = (char *)MenuEtherDataBuf;
     if ((unsigned int)t >= 0x50) {
         return 0;
     }
-    idx = idx << 2;
-    return (char *)MenuEtherDataBuf + idx - 4;
+    return p + idx - 4;
 }
 
 /* Look up an ether's element-type byte through the two ether-info indirections */
@@ -572,14 +574,16 @@ void *MenuTecDataGet(int nId)
 {
     int idx;
     int t;
+    char *p;
 
     idx = nId & 0xFFFF;
     t = idx - 1;
+    idx = idx << 6;
+    p = (char *)MenuTecDataBuf;
     if ((unsigned int)t >= 0x8) {
         return 0;
     }
-    idx = idx << 6;
-    return (char *)MenuTecDataBuf + idx - 0x40;
+    return p + idx - 64;
 }
 
 /* Test whether a technique's trigger-condition bits are set */
@@ -663,19 +667,20 @@ int MenuParaUpCheck(int nBase, int nType)
  * parked after 2 attempts. */
 char *MenuTecSaveDataGet(int nId)
 {
-    void *p;
+    char *p;
     int idx;
     unsigned int t;
     int off;
 
     idx = nId & 0xFFFF;
-    p = PartyDataGet();
+    p = (char *)PartyDataGet();
     t = idx - 1;
     off = idx * 32;
+    p = p + 0x3C;
     if (t >= 8) {
         return 0;
     }
-    return (char *)p + 0x3c + off - 32;
+    return p + off - 32;
 }
 
 /* Ask whether a technique's tec-level is below its saved-data level cap */
@@ -684,12 +689,15 @@ char *MenuTecSaveDataGet(int nId)
 int MenuTecTLevLimitCheck(int nId, int nLev)
 {
     unsigned char *pSave;
+    unsigned char *q;
 
     pSave = (unsigned char *)MenuTecSaveDataGet(nId);
+    q = (unsigned char *)(nLev + (int)pSave);
+    __asm__("" : "+r"(pSave));
     if (nLev < 0) {
         return 0;
     }
-    return pSave[nLev] < pSave[nLev + 24];
+    return pSave[nLev] < q[24];
 }
 
 extern int MenuTecNextSpeedPointGet(int nId, int nSpeed);
@@ -974,29 +982,40 @@ void MenuModelDrawTypeMain(DRAWTYPEARG *p)
     }
 }
 
-extern int D_004AF104[8];
-extern int D_0036C278[8];
+extern char sRender_0[0x5C] __asm__("sRender");
+extern int D_0036C278[8] __asm__("MenuCfTaiki");
 
-/* TODO: near-miss (LOGIC) - original walks with plain pointer increments
- * (a0/a2 += 4) not indexed loads; pointer-walk rewrite got closer (12 diffs)
- * but still not exact. Parked after 2 attempts. */
+/* TODO: near-miss (SCHEDULING, 2) - was LOGIC 12. Fixed by: base-launder to
+ * split lo(sRender)+0x24, cont=i<8 + launder (blocks loop reversal, pins slti
+ * position), pinned cont $3, v-launder before the dst store (anchors the
+ * sw/addiu tail and the delay slot). Remaining: the loop-head lw/addiu-i pair
+ * issues in the opposite order; every head permute flips the tail back. */
 /* Push the 8 cached "taiki" (waiting) slots into the save buffer and clear the cache */
 void MenuCfTaikiPush(void)
 {
+    char *base;
     int *src;
     int *dst;
     int i;
     int v;
+    int cont;
 
-    src = D_004AF104;
+    base = sRender_0;
+    __asm__("" : "+r"(base));
     dst = D_0036C278;
-    for (i = 0; i < 8; i++) {
+    src = (int *)(base + 0x24);
+    i = 0;
+    do {
         v = *src;
+        i++;
+        cont = i < 8;
+        __asm__("" : "+r"(cont));
         *src = 0;
+        __asm__("" : "+r"(v));
         *dst = v;
-        dst++;
         src++;
-    }
+        dst++;
+    } while (cont != 0);
 }
 
 /* TODO: near-miss (LENGTH) - the bit-14 test compiles via srl/xori/andi
@@ -1006,15 +1025,16 @@ int MenuEtherJoutoCheck(int nId)
 {
     int idx;
     void *p;
-    unsigned short v;
+    int t;
 
     idx = nId & 0xFFFF;
     if ((unsigned int)(idx - 1) >= 80) {
         return 0;
     }
     p = func_A1A488(idx);
-    v = *(unsigned short *)((char *)p + 2);
-    return (v & 0x4000) == 0;
+    t = *(unsigned short *)((char *)p + 2) & 0x4000;
+    __asm__("" : "+r"(t));
+    return t == 0;
 }
 
 typedef struct {
@@ -2157,10 +2177,11 @@ int MenuParaPtNowGet(int nId, int nType)
             return *(unsigned short *)(p + 10);
         case 4:
             t = *(unsigned char *)(p + 12);
-            return ((t << 24) >> 24) & 0xFFFF;
+            goto sign;
         case 5:
             t = *(unsigned char *)(p + 13);
-            return ((t << 24) >> 24) & 0xFFFF;
+        sign:
+            return (unsigned short)(signed char)t;
         case 6:
             return *(unsigned short *)(p + 0);
         case 7:
@@ -2807,6 +2828,7 @@ void MenuTecTLevUp(int nId, int nLev)
     v = *q + 1;
     *q = v;
     m = v & 0xFF;
+    __asm__("" : "+r"(m));
     mm = m * 3 - 3;
     *pSh = mm;
     t2 = *pPt - nextPoint;
