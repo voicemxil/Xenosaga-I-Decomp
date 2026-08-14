@@ -432,6 +432,50 @@ def unfill_gcc_slots(flat, scope, owner_of):
     return res
 
 
+RE_PIN_BRANCH = re.compile(
+    r"^\t(b|beq|bne|beqz|bnez|blez|bgtz|bltz|bgez"
+    r"|beql|bnel|beqzl|bnezl|blezl|bgtzl|bltzl|bgezl|j|jal)[ \t]")
+
+
+def pin_slot_nops(flat, sites):
+    """Pin a literal nop into an explicitly named branch's delay slot.
+
+    The original build leaves some reorder-mode branch/call delay slots
+    as literal nops where our gas pulls the preceding instruction in
+    (e.g. _vfprintf_r's `ld $4,504($sp)` staying ABOVE `jal isnan`).
+    Site-keyed like flip_branch_likely: FUNC:N names the Nth
+    reorder-mode branch/jump of FUNC (0-based, asm order); the branch is
+    wrapped in .set noreorder with an explicit nop so gas cannot fill
+    the slot.  Branches already inside noreorder blocks (gcc-filled
+    slots) are not counted and not eligible.
+    """
+    res = []
+    cur = None
+    idx = 0
+    noreorder = False
+    for line in flat:
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            idx = 0
+            noreorder = False
+        s = line.strip().replace("\t", " ")
+        if s == ".set noreorder":
+            noreorder = True
+        elif s in (".set reorder", ".set pop"):
+            noreorder = False
+        if not noreorder and RE_PIN_BRANCH.match(line):
+            if f"{cur}:{idx}" in sites:
+                res.append("\t.set\tnoreorder")
+                res.append(line)
+                res.append("\tnop")
+                res.append("\t.set\treorder")
+                idx += 1
+                continue
+            idx += 1
+        res.append(line)
+    return res
+
+
 RE_WAR_ALU = re.compile(r"^\t(?:daddu|addu|move|or)\t(\$\w+),(.*)$")
 RE_SP_RESTORE = re.compile(r"^\tld\t(\$\w+),\d+\(\$sp\)$")
 
@@ -521,7 +565,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          no_fill_delay=None, expand_sym_loads=False,
          unfill_slots=None, barrier_lo_load=None,
          branch_likely=None, branch_unlikely=None,
-         war_restore=None):
+         war_restore=None, pin_slot=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -765,6 +809,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
             owners.append(cur)
         out = unfill_gcc_slots(flat, unfill_slots, lambda i: owners[i])
 
+    if pin_slot:
+        flat = "\n".join(out).split("\n")
+        out = pin_slot_nops(flat, pin_slot)
+
     if barrier_branch_move is not None:
         # Post-pass so it also covers lines synthesized by earlier passes
         # (e.g. the li.d expansion's trailing dsll32): keep a simple ALU
@@ -819,6 +867,10 @@ if __name__ == "__main__":
                         default=None, metavar="FUNCS",
                         help="hoist gcc's own branch-delay-slot fills back "
                              "above the branch, leaving a literal nop")
+    parser.add_argument("--pin-slot-nop", default=None, metavar="SITES",
+                        help="comma-separated FUNC:N sites whose Nth "
+                             "reorder-mode branch/jump (0-based, asm order) "
+                             "gets a literal nop pinned into its delay slot")
     parser.add_argument("--war-restore-swap", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="swap two adjacent epilogue $sp restores when "
@@ -861,4 +913,4 @@ if __name__ == "__main__":
          scope(args.no_fill_delay), args.expand_sym_loads,
          scope(args.unfill_gcc_slots), scope(args.barrier_lo_load),
          scope(args.branch_likely), scope(args.branch_unlikely),
-         scope(args.war_restore_swap))
+         scope(args.war_restore_swap), scope(args.pin_slot_nop))
