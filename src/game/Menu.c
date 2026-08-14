@@ -1095,40 +1095,38 @@ extern int func_A1A5E8(int);
 extern int func_A1A598(int);
 extern void *chrEquipGet(int);
 
-/* Ask whether a character has an engine-slot item equipped matching the mask */
-/* TODO: near-miss (REGISTER) - a 3-register allocator swap ($s0 vs $v0/$v1)
- * identical to the SsdGetMemoryBlocks/MenuEtherDataGet class; every source
- * variant tried reproduces the same swap, looks unreachable from C. */
+/* Ask whether a character has an engine-slot item equipped matching the mask.
+   (The old REGISTER near-miss here was really swapped roles: the halfword is
+   read from the func_A1A5E8 record, and chrEquipGet supplies the mask.) */
 int MenuEngineEquipCheck(int nId, int nMask)
 {
-    int mask;
-    void *equip;
+    char *pRec;
+    int equip;
     unsigned short v;
 
     if (nMask == 0) {
         return 0;
     }
-    mask = func_A1A5E8(nMask);
-    equip = chrEquipGet(nId);
-    v = *(unsigned short *)((char *)equip + 6);
-    return (v & mask) != 0;
+    pRec = (char *)func_A1A5E8(nMask);
+    equip = (int)chrEquipGet(nId);
+    v = *(unsigned short *)(pRec + 6);
+    return (v & equip) != 0;
 }
 
 /* Ask whether a character has a frame-slot item equipped matching the mask */
-/* TODO: near-miss (REGISTER) - same allocator swap as MenuEngineEquipCheck. */
 int MenuFrameEquipCheck(int nId, int nMask)
 {
-    int mask;
-    void *equip;
+    char *pRec;
+    int equip;
     unsigned short v;
 
     if (nMask == 0) {
         return 0;
     }
-    mask = func_A1A598(nMask);
-    equip = chrEquipGet(nId);
-    v = *(unsigned short *)((char *)equip + 6);
-    return (v & mask) != 0;
+    pRec = (char *)func_A1A598(nMask);
+    equip = (int)chrEquipGet(nId);
+    v = *(unsigned short *)(pRec + 6);
+    return (v & equip) != 0;
 }
 
 extern void *D_0036D760[];
@@ -1698,7 +1696,9 @@ typedef struct {
     char pad41[2];
     signed char b43;           /* 0x43 */
     signed char bSel;          /* 0x44 */
-    char pad45[0x54 - 0x45];
+    char pad45;
+    signed char b46;           /* 0x46: current ether character */
+    char pad47[0x54 - 0x47];
     signed char b54;           /* 0x54 */
     signed char b55;           /* 0x55 */
     signed char b56;           /* 0x56 */
@@ -2103,7 +2103,7 @@ extern MWLIST *MenuListMake(int nIdx, int nType);
 void MenuTecListMake00(void)
 {
     int n;
-    MENUTECLISTENT *p;
+    register MENUTECLISTENT *p __asm__("$16");
     int *pSort;
     MENUTECWORK *w;
     short nTec;
@@ -2230,8 +2230,9 @@ void MenuTecWaitUp(int nId, int nWait)
     int nMask;
     int nOfs;
     int nextPoint;
-    unsigned char *q;
-    int v;
+    register unsigned char *q __asm__("$6");
+    register int v __asm__("$3");
+    register int t __asm__("$5");
 
     nMask = nId & 0xFFFF;
     pSave = (unsigned char *)MenuTecSaveDataGet(nId);
@@ -2245,7 +2246,9 @@ void MenuTecWaitUp(int nId, int nWait)
     v = *q + 255;
     *q = v;
     *(unsigned short *)(nWait * 12 + (int)p + 78) = v & 0xFF;
-    p->fC = p->fC - nextPoint;
+    t = p->fC - nextPoint;
+    __asm__ volatile("" : "+r"(t));
+    p->fC = t;
 }
 
 extern int dataItmBoxDec(int);
@@ -2781,11 +2784,13 @@ void MenuTecTLevUp(int nId, int nLev)
     unsigned char *pSave;
     PARAOBJ *p;
     int nextPoint;
-    unsigned char *q;
-    int *pPt;
+    register unsigned char *q __asm__("$6");
+    register int *pPt __asm__("$8");
     unsigned short *pSh;
-    int v;
-    int m;
+    register int v __asm__("$3");
+    register int m __asm__("$7");
+    register int t2 __asm__("$4");
+    register int mm __asm__("$3");
 
     idx = nId & 0xFFFF;
     pSave = (unsigned char *)MenuTecSaveDataGet(idx);
@@ -2800,8 +2805,11 @@ void MenuTecTLevUp(int nId, int nLev)
     v = *q + 1;
     *q = v;
     m = v & 0xFF;
-    *pSh = m * 3 - 3;
-    *pPt -= nextPoint;
+    mm = m * 3 - 3;
+    *pSh = mm;
+    t2 = *pPt - nextPoint;
+    __asm__ volatile("" : "+r"(t2));
+    *pPt = t2;
 }
 
 /* Ask whether a character's (or the whole party's) HP is already full */
@@ -3282,11 +3290,11 @@ void MenuEtherListMake02(int nIdx)
 {
     MENUTECLISTENT *p2;
     int nM1;
-    int nOn;
+    register int nOn __asm__("$19");
     void *ptr;
     MENUTECWORK *w2;
     PARAOBJ *rec;
-    int n;
+    register int n __asm__("$18");
     int v;
     int f4;
 
@@ -3305,17 +3313,17 @@ void MenuEtherListMake02(int nIdx)
         do {
             p2->f4 = *(short *)((char *)func_A1A488(*(short *)ptr) + 8);
             v = MenuEtherWhoCheck(*(short *)ptr);
-            ptr = (int *)ptr + 1;
             f4 = p2->f4;
+            ptr = (int *)ptr + 1;
             if (f4 == 0) {
                 p2->b8 = nOn;
                 p2->f4 = nM1;
             } else if (w2->bChr != v) {
                 p2->b8 = nOn;
-            } else if (rec->f10 < f4 / 2) {
-                p2->b8 = nOn;
-            } else {
+            } else if (rec->f10 >= f4 / 2) {
                 p2->b8 = 0;
+            } else {
+                p2->b8 = nOn;
             }
             n--;
             p2++;
@@ -3534,6 +3542,7 @@ void MenuAgwsListMake_Gun(void)
     int *pS;
     unsigned char *q;
     SHOPWINSP *win;
+    MENUTECWORK *w;
     int n;
     int cnt;
 
@@ -3544,11 +3553,12 @@ void MenuAgwsListMake_Gun(void)
     MenuListMake(0, 0);
     n = MenuSortCheck(0);
     if (n > 0) {
-        pS = pSort;
         q += 8;
+        pS = pSort;
+        w = &MenuWork;
         cnt = n;
         do {
-            if (MenuBulletCheck(MenuWork.h26, *(short *)pS) != 0) {
+            if (MenuBulletCheck(w->h26, *(short *)pS) != 0) {
                 *q = 0;
             } else {
                 *q = 1;
@@ -3622,9 +3632,9 @@ extern int MenuWeaponEquipPosCheck(int, int, int, int);
 /* Build the AGWS pilot list: gray taken/empty pilots, flag the current one */
 void MenuAgwsListMake_Pilot(void)
 {
-    int *pSort;
-    int *pS;
-    unsigned char *q;
+    register int *pSort __asm__("$17");
+    register int *pS __asm__("$18");
+    register unsigned char *q __asm__("$16");
     SHOPWINSP *win;
     MENUTECWORK *w;
     PILOTREC *rec;
@@ -3636,36 +3646,37 @@ void MenuAgwsListMake_Pilot(void)
     win = (SHOPWINSP *)(AgwsList + 0x130);
     MenuSortSet(0, 32, 1);
     MenuListMake(0, 0);
+    __asm__ volatile("" : "+r"(pSort));
     n = MenuSortCheck(0);
     if (n > 0) {
         pS = pSort;
-        q += 9;
         w = &MenuWork;
+        q += 9;
         cnt = n;
         do {
             rec = func_A191C0_2(*(short *)pS);
             pS++;
             if (rec->hPilotId == w->h64) {
                 q[-1] = 0;
-            } else if (rec->hPilotId == 0) {
-                q[-1] = 0;
-            } else {
+            } else if (rec->hPilotId != 0) {
                 q[-1] = 1;
-            }
-            if (rec->hPilotId != w->h64) {
-                q[0] = 0;
             } else {
+                q[-1] = 0;
+            }
+            if (rec->hPilotId == w->h64) {
                 q[0] = 1;
+            } else {
+                q[0] = 0;
             }
             cnt--;
             q += 12;
         } while (cnt != 0);
     }
+    win->h0C = 208;
     win->h0E = 144;
     win->b14 = 1;
     win->b15 = 5;
     win->b01 = 3;
-    win->h0C = 208;
     win->p10 = D_004C6F38;
     win->p1C = MenuListGet(0);
     WindowSPItemChange(win);
@@ -3722,15 +3733,372 @@ void MenuAgwsListMake_Wpn(void)
         &D_0036C200[*((signed char *)&MenuWork + MenuWork.b56 + 0x10) * 5 - 5]);
 }
 
+/* ================= Wave 4: mid-size Menu functions ================= */
+
+extern char *xglStudioGetCamera2_2(int) __asm__("xglStudioGetCamera2");
+extern void xglCameraInit(char *);
+
+/* TODO: near-miss (LENGTH, 90 orig vs 87-88 built) - the retail build keeps
+   pList/pSort/w in s6/s5/s3 with real loop-entry copies into s0/s1/s4; gcc
+   coalesces the copies away (pins ignored, `+r` reinforcement too; a
+   liveness-forcing asm after the loop recovers one copy but rotates the
+   callee-saved assignment). Same coalescer wall as MenuSkillListChange01. */
+/* Build ether sub-list nIdx for the set-ether screen: temporarily set the
+   selected ether's learned bit, sort/build the list, clear the bit again,
+   then fill cost per entry and flag the currently-selected ether */
+void MenuEtherListMake03(int nIdx)
+{
+    MENUTECLISTENT *pList;
+    MENUTECLISTENT *p;
+    int *pSort;
+    int *pS;
+    MENUTECWORK *w;
+    MENUTECWORK *w2;
+    char *p2;
+    PARAOBJ *rec;
+    int one;
+    int nOn;
+    int n;
+    int cnt;
+    int m;
+
+    pList = (MENUTECLISTENT *)MenuListGet(nIdx);
+    one = 1;
+    pSort = MenuSortAddrGet(nIdx);
+    w = &MenuWork;
+    rec = func_A19210(w->b46);
+    m = w->bSel - 1;
+    p2 = (char *)rec + m / 8 + 40;
+    *p2 |= one << (m % 8);
+    MenuSortSet(nIdx, 128, w->b46);
+    m = w->bSel - 1;
+    *p2 &= ~(one << (m % 8));
+    MenuListMake(nIdx, 0);
+    n = MenuSortCheck(nIdx);
+    if (n > 0) {
+        w2 = w;
+        nOn = 1;
+        p = pList;
+        pS = pSort;
+        cnt = n;
+        do {
+            p->f4 = *(short *)((char *)func_A1A488(*(short *)pS) + 8);
+            if (*(short *)pS == w2->bSel) {
+                p->b8 = nOn;
+            } else {
+                p->b8 = 0;
+            }
+            pS++;
+            cnt--;
+            p++;
+        } while (cnt != 0);
+    }
+}
+
+/* --- Para (stat) level-up apply --- */
+
+/* Apply one stat advance: bump the stat (clamped to the party max for
+   HP/EP) and deduct the advance's point cost */
+void MenuParaUp(int nId, int nType)
+{
+    char *p;
+    PARAOBJ *rec;
+    int nextPoint;
+    register int t __asm__("$16");
+    register short t2 __asm__("$16");
+
+    p = (char *)func_A191C0_2(nId);
+    rec = func_A19210(nId);
+    nextPoint = MenuParaNextPointGet(nId, nType, 0);
+    switch (nType) {
+    case 0:
+        *(unsigned short *)(p + 4) += 1;
+        break;
+    case 1:
+        *(unsigned short *)(p + 6) += 1;
+        break;
+    case 2:
+        *(unsigned short *)(p + 8) += 1;
+        break;
+    case 3:
+        *(unsigned short *)(p + 10) += 1;
+        break;
+    case 4:
+        *(unsigned char *)(p + 12) += 1;
+        break;
+    case 5:
+        *(unsigned char *)(p + 13) += 1;
+        break;
+    case 6:
+        t = *(unsigned short *)(p + 0) + 10;
+        *(unsigned short *)(p + 0) = t;
+        t2 = t;
+        if (MenuParaUpMaxGet(nType) < t2) {
+            *(unsigned short *)(p + 0) = MenuParaUpMaxGet(nType);
+        }
+        break;
+    case 7:
+        t = *(unsigned short *)(p + 2) + 2;
+        *(unsigned short *)(p + 2) = t;
+        t2 = t;
+        if (MenuParaUpMaxGet(nType) < t2) {
+            *(unsigned short *)(p + 2) = MenuParaUpMaxGet(nType);
+        }
+        break;
+    }
+    rec->fC -= nextPoint;
+}
+
+/* --- Tairetu (formation) file load --- */
+typedef struct {
+    char d[26];
+} TAIRETUNAME;
+extern TAIRETUNAME D_004C3220;
+extern int D_004DA640;
+extern int D_004DA644;
+extern int D_004DA648;
+extern int D_004DA64C;
+
+/* TODO: near-miss (REGISTER 14) - the three block-address temps live in $a3
+   in the retail build (with each sw stolen into the MenuLoadFile jal slot);
+   ours keeps them in $v0/$v1. $7 pins collide with the filename-copy lui
+   half and every barrier variant reorders the sb patch bytes. Parked. */
+/* Queue the four tairetu blobs (xt0/xt1/le1/le0) into the aligned scratch
+   area and return the second texture block's address */
+char *MenuTairetuLoad(int nMemory)
+{
+    TAIRETUNAME name;
+    int aligned;
+
+    aligned = (nMemory + 127) & ~127;
+    D_004DA640 = aligned;
+    name = D_004C3220;
+    name.d[22] = 'x';
+    name.d[23] = 't';
+    name.d[20] = '0';
+    MenuLoadFile(name.d, (void *)aligned);
+    D_004DA648 = D_004DA640 + 0x3000;
+    name.d[20] = '1';
+    MenuLoadFile(name.d, (void *)D_004DA648);
+    D_004DA64C = D_004DA648 + 0x800;
+    name.d[22] = 'l';
+    name.d[23] = 'e';
+    MenuLoadFile(name.d, (void *)D_004DA64C);
+    D_004DA644 = D_004DA64C + 0x1000;
+    name.d[20] = '0';
+    MenuLoadFile(name.d, (void *)D_004DA644);
+    return (char *)(D_004DA644 + 0x800);
+}
+
+/* --- Model sub-window setup --- */
+extern char D_0036D5D0[];
+extern void xglStudioChange(int);
+extern void nmlModelSetWindow(int);
+
+/* Bind model nId to a studio sub-window: fill its sub-window object, reset
+   camera 0 onto it and hand the window to the renderer */
+void MenuModelSubWindowSet(SUBWIN *p, int nId, int nType)
+{
+    SUBOBJ2 *q;
+    char *pCam;
+    int nOn;
+    int v;
+
+    v = *(int *)((char *)p + 32);
+    if (nId == 0) {
+        return;
+    }
+    if (v == 0) {
+        return;
+    }
+    q = (SUBOBJ2 *)(D_0036D5D0 + (nId << 4) - 16);
+    nOn = 1;
+    ((SUBWIN *)p)->f4C = q;
+    q->b1 = 0;
+    q->b2 = nId;
+    q->b3 = nType;
+    xglStudioChange(nId);
+    pCam = (char *)xglStudioGetCamera2_2(0);
+    q->fC = (int)pCam;
+    xglCameraInit(pCam);
+    xglCameraSetWindow((int)pCam, 0, 0, 0, 0);
+    *(int *)pCam = nOn;
+    *(int *)(pCam + 4) = nOn;
+    nmlModelUseSubWindow(nId, nType);
+    if (nType == nOn) {
+        nmlModelSetWindow(nId);
+    }
+    xglStudioChange(0);
+}
+
+/* --- Item list 1 (per-category sorted views) --- */
+extern signed char D_0036C1B3[];
+extern char D_0036C20A[];
+
+/* Re-sort item list nIdx by its category preset and refresh the item window */
+void MenuItemListMake01(int nIdx)
+{
+    ITEMLISTWORK *w;
+
+    switch (nIdx) {
+    case 0:
+        MenuSortSet(0, 4, -1);
+        break;
+    case 1:
+        MenuSortSet(0, 16, -1);
+        break;
+    case 2:
+        MenuSortSet(0, 8, -1);
+        break;
+    case 3:
+        MenuSortSet(0, 4, -2);
+        break;
+    case 4:
+        MenuSortSet(0, 16, -2);
+        break;
+    case 5:
+        MenuSortSet(0, 8, -2);
+        break;
+    }
+    MenuSortChange(0, 0);
+    MenuSortChange(0, D_0036C1B3[nIdx]);
+    MenuListMake(0, 0);
+    w = MenuItemList;
+    w->b0D = 7;
+    w->p1C = D_004C4F60;
+    MenuItemList->b20 = 2;
+    MenuItemList->b21 = 11;
+    MenuItemList->h18 = 468;
+    MenuItemList->h1A = MenuItemList->b21 * 24 + 6;
+    MenuItemList->p28 = MenuListGet(0);
+    WindowSPItemChange((char *)MenuItemList + 12);
+    WindowSPSetSelect((char *)MenuItemList + 12, &D_0036C20A[nIdx * 5]);
+}
+
+/* --- AGWS camera keep block --- */
+typedef struct {
+    char d[16];
+} CAMVEC;
+typedef struct {
+    long long d[4];
+} CAMKEEP;
+extern CAMKEEP D_004C7190;
+
+/* Reset studio camera 0 and load the fixed AGWS-view position/target vectors */
+void MenuAgwsCameraSet(void)
+{
+    CAMKEEP keep;
+    char *pCam;
+
+    keep = D_004C7190;
+    pCam = xglStudioGetCamera2_2(0);
+    xglCameraInit(pCam);
+    *(CAMVEC *)(pCam + 0xD0) = *(CAMVEC *)&keep;
+    *(int *)(pCam + 4) = 1;
+    *(CAMVEC *)(pCam + 0xA0) = *((CAMVEC *)&keep + 1);
+}
+
+/* --- AGWS parameter window set --- */
+extern void ParaSet(void *, void *, int *, int *);
+extern char MenuAgwsPara[];
+extern char MenuAgwsPara2[];
+
+/* Fill the AGWS parameter window rows; nType 0 adds the second row block,
+   nType 10 re-renders it with the pilot-id halfword temporarily kept */
+void MenuAgwsParaSet(int nId, int nType)
+{
+    int buf1[4];
+    int buf2[4];
+    char *pChr;
+    void *rec;
+    short keep;
+
+    if (nId == 0) {
+        return;
+    }
+    pChr = (char *)func_A191C0_2(nId);
+    keep = *(short *)(pChr + 52);
+    rec = func_A11108(nId, buf1, buf2);
+    ParaSet(rec, MenuAgwsPara2, buf1, buf2);
+    if (nType == 0) {
+        ParaSet(rec, MenuAgwsPara, buf1, buf2);
+    }
+    if (nType == 10) {
+        ParaSet(rec, MenuAgwsPara, buf1, buf2);
+        *(short *)(pChr + 52) = keep;
+    }
+}
+
+/* --- Shop list color refresh --- */
+typedef struct {
+    char pad0[0x10];
+    unsigned char b10;         /* 0x10: sell-mode flag */
+} SHOPCOLWORK;
+extern SHOPCOLWORK *D_004DC5F8;
+extern int MenuBoxMoneyGet(int, int);
+extern int dataMoneyBoxChk();
+extern int subMenuShopEquipCheck(int, int);
+
+/* Recolor one shop list: gray entries the player cannot afford (buy view)
+   or flag no-sale entries (sell view) */
+void MenuShopListColorChange(int nIdx, int nType)
+{
+    int *pSort;
+    char *pList;
+    unsigned char *q;
+    char *p2;
+    int n;
+    int i;
+    int one;
+    int v;
+    int m;
+
+    pSort = MenuSortAddrGet(nIdx);
+    n = MenuSortCheck(nIdx);
+    pList = (char *)MenuListGet(nIdx);
+    if (D_004DC5F8->b10 == 0 || nType == 2) {
+        i = 0;
+        if (n > 0) {
+            q = (unsigned char *)pList + 8;
+            one = 1;
+            do {
+                v = MenuSortGet(nIdx, i);
+                i++;
+                m = MenuBoxMoneyGet(v, 0);
+                if (dataMoneyBoxChk() < m) {
+                    *q = one;
+                }
+                q += 12;
+            } while (i < n);
+        }
+    } else {
+        i = 0;
+        while (i < n) {
+            MenuBoxChk(MenuSortGet(nIdx, i));
+            subMenuShopEquipCheck(MenuSortGet(nIdx, i), 0);
+            v = MenuShopNoSaleCheck(pSort[i]);
+            p2 = pList + i * 12;
+            i++;
+            if (v == 1) {
+                p2[8] = v;
+            }
+        }
+    }
+}
+
 /* --- Skill list window --- */
 extern char *MenuSkillList;
 extern int SkillSetLvGet(int);
 extern char D_004DB640[];
 
-/* TODO: near-miss (REGISTER ~40) - body, K&R MenuSkillEquipCheck call and
-   window tail are exact; the four callee-saved assignments (walker ptr,
-   list/pS ptr2, pSort, win) come out rotated (s0/s1/s2/s3 -> s3/s0/s4/s2).
-   Same allocator-priority tie class as MenuEtherListMake02. */
+/* TODO: near-miss (REGISTER ~39) - the b9 beqzl polarity now matches (wave-4
+   arm-swap lever: branch-likely slot always takes the ELSE arm, so write the
+   condition so the else arm is the one the original annuls). The remaining
+   callee-saved rotation (s0/s1/s2/s3 -> s3/s0/s4/s2) resists the register-pin
+   idiom: gcc coalesces plain pins away, and the `+r` asm reinforcement pins
+   the early pair but derails the delay-slot capture scheduling (32→39 diffs
+   both ways). The window tail's five li/sb-sh stores are also emitted in a
+   scheduler-shuffled order unreachable from plain source order permutes. */
 /* Rebuild the skill list for the current character and refresh its window */
 void MenuSkillListChange01(void)
 {
@@ -3756,10 +4124,10 @@ void MenuSkillListChange01(void)
         cnt = n;
         do {
             ((MENUTECLISTENT *)ptr)->f4 = SkillSetLvGet(*(int *)ptr2);
-            if (MenuSkillEquipCheck(w2->bChr, *(int *)ptr2) == 0) {
-                ((MENUTECLISTENT *)ptr)->b9 = 0;
-            } else {
+            if (MenuSkillEquipCheck(w2->bChr, *(int *)ptr2) != 0) {
                 ((MENUTECLISTENT *)ptr)->b9 = 1;
+            } else {
+                ((MENUTECLISTENT *)ptr)->b9 = 0;
             }
             ptr2 = (int *)ptr2 + 1;
             cnt--;
