@@ -397,9 +397,45 @@ def hoist_return_delay_stores(lines, scope=()):
     return out
 
 
+def unfill_gcc_slots(flat, scope, owner_of):
+    """Rewrite gcc's own delay-slot fills back to hoisted-insn + nop.
+
+    gcc -fdelayed-branch emits
+        .set noreorder / .set nomacro / <branch> / <slot> / .set macro
+        / .set reorder
+    The original compiler build declines to fill some of these; with
+    this pass the slot instruction is moved ABOVE the branch and a
+    literal nop takes its place. Safe because gcc only fills a slot
+    with an instruction that neither feeds the branch condition nor
+    depends on it. Opt-in per function like the barrier passes.
+    """
+    res = []
+    i = 0
+    while i < len(flat):
+        if (flat[i].strip() == ".set	noreorder" or
+                flat[i].strip() == ".set noreorder") and i + 3 < len(flat):
+            block = [x.strip().replace("\t", " ") for x in flat[i:i+4]]
+            if (block[1].startswith(".set") and "nomacro" in block[1]
+                    and RE_ANY_BRANCH.match(flat[i+2])
+                    and flat[i+3].startswith("\t")
+                    and not flat[i+3].strip().startswith(".")
+                    and in_scope(owner_of(i), scope)):
+                res.append(flat[i+3])          # hoisted slot insn
+                res.append(flat[i])            # .set noreorder
+                res.append(flat[i+1])          # .set nomacro
+                res.append(flat[i+2])          # branch
+                res.append("\tnop")
+                i += 4
+                continue
+        res.append(flat[i])
+        i += 1
+    return res
+
+
 def main(path, omitted_hazards, barrier_return_store=None,
          hoist_return_store=None, barrier_branch_move=None,
-         no_fill_delay=None, expand_sym_loads=False):
+         no_fill_delay=None, expand_sym_loads=False,
+         unfill_slots=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -613,6 +649,17 @@ def main(path, omitted_hazards, barrier_return_store=None,
             out.append(f"\t.word {hi32}")
 
 
+    if unfill_slots is not None:
+        flat = "\n".join(out).split("\n")
+        # function ownership for post-pass lines: track .ent markers
+        owners = []
+        cur = None
+        for line in flat:
+            if line.startswith("\t.ent\t"):
+                cur = line.split("\t")[-1]
+            owners.append(cur)
+        out = unfill_gcc_slots(flat, unfill_slots, lambda i: owners[i])
+
     if barrier_branch_move is not None:
         # Post-pass so it also covers lines synthesized by earlier passes
         # (e.g. the li.d expansion's trailing dsll32): keep a simple ALU
@@ -650,6 +697,10 @@ if __name__ == "__main__":
                         help="keep a preceding move out of ANY branch delay "
                              "slot (incl. conditional branches); optionally "
                              "a comma-separated function-name list")
+    parser.add_argument("--unfill-gcc-slots", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="hoist gcc's own branch-delay-slot fills back "
+                             "above the branch, leaving a literal nop")
     parser.add_argument("--expand-sym-loads", action="store_true",
                         help="also manually expand integer loads with "
                              "symbol(+off)(reg) addresses (see "
@@ -677,4 +728,5 @@ if __name__ == "__main__":
     ASSUME_NO_LIT4 = args.as_g0
     main(args.path, set(args.omit_hazard), scope(args.barrier_return_store),
          scope(args.hoist_return_store), scope(args.barrier_branch_move),
-         scope(args.no_fill_delay), args.expand_sym_loads)
+         scope(args.no_fill_delay), args.expand_sym_loads,
+         scope(args.unfill_gcc_slots))
