@@ -1709,3 +1709,5 @@ __main = 0x0032BB50, 0x38; // _main
 __make_dp = 0x0032C4B8, 0x2C; // fpbit_df
 dptoul = 0x0032C540, 0xA0; // fpbit_df
 __make_fp = 0x0032DC58, 0x2C; // fpbit_sf
+
+// __do_global_dtors = 0x0032BA00, 0x8C; // _main -- TODO: 24d. The original is the static-p walk PLUS an atexit-chain drain (statics p.0@0x4AD6E8, chain@0x4AD6EC) merged INTO __do_global_dtors -- no mainline gcc rev has that shape (checked 12 revs 1999-2000), so it is Sony's target DO_GLOBAL_DTORS_BODY macro. Reconstructing it needs the drain loop modeled from the disasm. __do_global_ctors (47d) likely the CTORS_BODY sibling.
