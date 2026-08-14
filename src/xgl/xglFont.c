@@ -12,6 +12,8 @@ typedef struct
     u_char   nBank;       /* 0x0A */
     u_char   nDebugMode;  /* 0x0B */
     u_short  nLineHeight; /* 0x0C */
+    char     pad0E[0xE];  /* 0x0E */
+    u_char  *pStream;     /* 0x1C */
 } FSDATA;
 
 extern FSDATA FS;
@@ -36,7 +38,7 @@ extern int xglCdReadFile(char *pName, int nAddr, int nOfs, int nCb);
 void xglFontPrintDirectOT(int nOT, char *pStr);
 int xglFontGetStringWidth2(void *pStr, int nArg);
 void set_ot(int nOT);
-void set_xyz(int nOT);
+void set_xyz();
 void xglFontPrintDirectCore(char *pStr);
 void xglFontPrintSub(char *pStr);
 
@@ -159,4 +161,34 @@ int xglFontLoad(int nBank, int nNow)
         xglCdReadFile("data\\font1.tex", *(int *)&FS, nOfs, nCb);
     }
     return nOld;
+}
+/* TODO: near-miss (11 words). Logic and the 8-byte command layout are
+ * right; ours converts the nDebugMode test to bnezl with the
+ * FS.pStream lw hoisted into the annulled slot, the original keeps
+ * plain bnez + nop and loads after the join. A memory barrier after
+ * the if regresses (blocks the +=8 reload CSE). */
+/* Queue a debug hex-print command (11) into the font stream buffer */
+void xglFontDebugHex(int nX, int nY, unsigned int nValue, int nDigits)
+{
+    u_char *p;
+
+    if ((FS.nFlags & 3) != 3) {
+        return;
+    }
+    if (nDigits == 0) {
+        return;
+    }
+    if (FS.nDebugMode == 0) {
+        set_xyz(nX << 1, nY << 1, -1);
+    }
+    p = FS.pStream;
+    p[0] = 11;
+    p[1] = 16;
+    p[2] = nDigits - 1;
+    p[3] = nValue >> 24;
+    p[4] = nValue >> 16;
+    p[5] = nValue >> 8;
+    p[6] = nValue;
+    p[7] = 0;
+    FS.pStream += 8;
 }

@@ -1875,3 +1875,4 @@ xglCdStreamRewind = 0x0021EAD8, 0x64; // xglCd.c
 xglCdArcInitSub0 = 0x0021F698, 0x94; // xglCd.c
 MenuItemListMake00 = 0x0028B548, 0x180; // Menu
 MenuItemListMake00_1 = 0x0028B6C8, 0x168; // Menu
+xglMcEUC2SJIS = 0x0021FC78, 0x98; // xglMc.c
