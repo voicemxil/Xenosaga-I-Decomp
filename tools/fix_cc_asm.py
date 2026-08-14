@@ -64,8 +64,24 @@ RE_MEM_BIGOFF = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS_BI
 # _dtoa_r's `tens[k-1]`-style indexing); gas folds it into %lo() exactly
 # the same way, so accept it here too rather than letting that form fall
 # through to gas's own daddu-based expansion.
+# Loads may use their destination as the address scratch, so any
+# integer load with a symbol(+offset)(reg) address gets the same manual
+# lui/addu/%lo expansion (confirmed on _strtoul_r's `_ctype_+1($17)`
+# lbu, where the mips1-wrap fallback materializes a load-delay nop the
+# original does not have). Stores must not clobber their source, so
+# they keep the old sd/ld-only handling.
 RE_MEM_SYM_REG = re.compile(
     r'^\t(sd|ld)[ \t]([^,]*),([A-Za-z_][A-Za-z0-9_.]*(?:[+-][0-9]+)?)'
+    r'\((\$[a-z0-9]+)\)[ \t]*$')
+# Opt-in (--expand-sym-loads) variant covering the narrower integer
+# loads: dest doubles as the address scratch, exactly the original's
+# lui/addu/%lo shape for e.g. _strtoul_r's `lbu $2,_ctype_+1($17)`.
+# The default mips1-wrap fallback materializes a load-delay nop there
+# that the original does not have -- but several game TUs rely on that
+# wrap shape, so this must not be blanket behavior.
+RE_MEM_SYM_REG_LOAD = re.compile(
+    r'^\t(lb|lbu|lh|lhu|lw|lwu)[ \t]([^,]*),'
+    r'([A-Za-z_][A-Za-z0-9_.]*(?:[+-][0-9]+)?)'
     r'\((\$[a-z0-9]+)\)[ \t]*$')
 RE_LIS = re.compile(r'^\tli\.s[ \t](.*)$')
 # li.d loads a 64-bit double-precision bit pattern into a GPR (this target's
@@ -383,7 +399,7 @@ def hoist_return_delay_stores(lines, scope=()):
 
 def main(path, omitted_hazards, barrier_return_store=None,
          hoist_return_store=None, barrier_branch_move=None,
-         no_fill_delay=None):
+         no_fill_delay=None, expand_sym_loads=False):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -476,6 +492,8 @@ def main(path, omitted_hazards, barrier_return_store=None,
             continue
 
         m_symreg = RE_MEM_SYM_REG.match(line)
+        if not m_symreg and expand_sym_loads:
+            m_symreg = RE_MEM_SYM_REG_LOAD.match(line)
         if m_symreg:
             op, reg, sym, basereg = m_symreg.groups()
             out.append(f"\tlui\t{reg},%hi({sym})\n"
@@ -632,6 +650,10 @@ if __name__ == "__main__":
                         help="keep a preceding move out of ANY branch delay "
                              "slot (incl. conditional branches); optionally "
                              "a comma-separated function-name list")
+    parser.add_argument("--expand-sym-loads", action="store_true",
+                        help="also manually expand integer loads with "
+                             "symbol(+off)(reg) addresses (see "
+                             "RE_MEM_SYM_REG_LOAD)")
     parser.add_argument("--no-fill-delay", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="pin an explicit nop into every plain branch's "
@@ -655,4 +677,4 @@ if __name__ == "__main__":
     ASSUME_NO_LIT4 = args.as_g0
     main(args.path, set(args.omit_hazard), scope(args.barrier_return_store),
          scope(args.hoist_return_store), scope(args.barrier_branch_move),
-         scope(args.no_fill_delay))
+         scope(args.no_fill_delay), args.expand_sym_loads)

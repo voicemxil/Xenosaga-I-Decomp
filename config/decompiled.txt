@@ -1665,3 +1665,5 @@ _ratio = 0x00337308, 0xCC; // newlib_mprec
 _mprec_log10 = 0x003373D8, 0x70; // newlib_mprec
 _d2b = 0x00337180, 0x184; // newlib_mprec
 strtodf = 0x003311E8, 0x28; // newlib_strtod
+_strtoul_r = 0x003377F8, 0x22C; // newlib_strtoul
+_strtol_r = 0x00331210, 0x238; // libc.c

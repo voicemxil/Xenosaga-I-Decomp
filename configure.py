@@ -103,14 +103,17 @@ FILE_CFLAGS_OVERRIDE = {
     "_umoddi3.c": "-O2 -G8 -mlong32",
 }
 
-# Vendored newlib 1.8.2 TUs (newlib/ dir): compiled against the vendored
-# header tree plus the toolchain's own stddef/stdarg. The gcc include dir
-# lives in the dev container.
-NEWLIB_CFLAGS = ("-O2 -G8 -Inewlib/libc/stdlib -Inewlib/libc/stdio -Inewlib/libc/string "
+# Vendored newlib 1.9.0 TUs (newlib/ dir): compiled against the vendored
+# header tree plus the toolchain's own stddef/stdarg (gcc include dir in
+# the dev container). -G0 because Sony's libc keeps _impure_ptr/_ctype_
+# etc. out of small data. newlib/gccinc overrides stdarg/va-mips.h with
+# the fetch-then-advance va_arg the original uses.
+NEWLIB_CFLAGS = ("-O2 -G0 -Inewlib/gccinc -Inewlib/libc/stdlib "
+                 "-Inewlib/libc/stdio -Inewlib/libc/string "
                  "-Inewlib/libc/include "
                  "-I/usr/local/ps2dev/ee-gcc/lib/gcc-lib/ee/2.9-ee-991111/include")
 for _f in ("newlib_reallocr.c", "newlib_callocr.c", "newlib_ungetc.c",
-           "newlib_strtod.c",
+           "newlib_strtod.c", "newlib_strtoul.c",
            "newlib_mbtowc.c", "newlib_strlwr.c", "newlib_vfscanf.c",
            "newlib_mprec.c", "newlib_quorem.c"):
     FILE_CFLAGS_OVERRIDE[_f] = NEWLIB_CFLAGS
@@ -170,6 +173,7 @@ FILE_FIX_FLAGS = {
     "newlib_ungetc.c": "--barrier-return-store ungetc",
     "newlib_mprec.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtod.c": "--barrier-return-store --barrier-branch-move",
+    "newlib_strtoul.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     # The libgcc float<->DI conversion TUs never let gas fill a delay
     # slot with a preceding copy/ALU op -- barrier both classes
     # (whole-file; each TU is one function).
@@ -191,7 +195,7 @@ FILE_FIX_FLAGS = {
     # the original, but gas's reorder pass steals it into the jal's delay
     # slot here. Same RE_RETURN_MOVE fingerprint as fabs/__ieee754_fmod
     # above, just against a `jal` instead of a leaf return.
-    "libc.c": "--barrier-return-store _dtoa_r",
+    "libc.c": "--barrier-return-store _dtoa_r --expand-sym-loads",
 }
 
 
