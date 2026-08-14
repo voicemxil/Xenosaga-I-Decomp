@@ -699,3 +699,85 @@ void xglMatrixFrustum(XGL_MATRIX *pDst, XGL_MATRIX *pSrc,
     aMtx[15] = 0.0f;
     xglMatrixMul(pDst, pSrc, aMtx);
 }
+
+void xglVectorOuter(float *pDest, const float *pLeft, const float *pRight);
+void xglVectorNormal(void *pDest, void *pSource);
+void xglVectorInner(float *pDest, const float *pLeft, const float *pRight);
+
+/* Build a plane (unit normal + d) from three points: normal comes from
+ * the cross of the two edge vectors (VU0 subtracts), d from -dot(n, p0) */
+void xglPlaneParameter(float *pPlane, float *pP0, float *pP1, float *pP2)
+{
+    float aA[4];
+    float aB[4];
+
+    __asm__ __volatile__(
+        "lqc2 $vf3, 0x0(%1)\n"
+        "lqc2 $vf2, 0x0(%2)\n"
+        "vsub.xyz $vf2xyz, $vf2xyz, $vf3xyz\n"
+        "sqc2 $vf2, 0x0(%0)\n"
+        : : "r"(aA), "r"(pP0), "r"(pP1) : "memory");
+    __asm__ __volatile__(
+        "lqc2 $vf3, 0x0(%1)\n"
+        "lqc2 $vf2, 0x0(%2)\n"
+        "vsub.xyz $vf2xyz, $vf2xyz, $vf3xyz\n"
+        "sqc2 $vf2, 0x0(%0)\n"
+        : : "r"(aB), "r"(pP1), "r"(pP2) : "memory");
+    xglVectorOuter(pPlane, aA, aB);
+    xglVectorNormal(pPlane, pPlane);
+    xglVectorInner(&pPlane[3], pPlane, pP0);
+    pPlane[3] = -pPlane[3];
+}
+
+/* Normalized linear interpolation between two quaternions on VU0: dot
+ * test picks the short arc (negating B when the dot goes negative),
+ * then blends with the two supplied weights and renormalizes */
+void xglQuaternionInterpolateLinear(void *pDst, void *pA, void *pB,
+                                    float fWeightA, float fWeightB)
+{
+    __asm__ __volatile__(".set noreorder\n.set noat\n"
+        "mfc1 $3, $f12\n"
+        "mfc1 $7, $f13\n"
+        "qmtc2 $3, $vf10\n"
+        "qmtc2 $7, $vf11\n"
+        "lqc2 $vf20, 0x0(%1)\n"
+        "lqc2 $vf21, 0x0(%2)\n"
+        "vmul.xyzw $vf18, $vf20, $vf21\n"
+        "li $1, 0\n"
+        "mtc1 $1, $f0\n"
+        "vsubw.x $vf1x, $vf0x, $vf0w\n"
+        "vaddy.x $vf23x, $vf0x, $vf18y\n"
+        "vaddz.x $vf24x, $vf0x, $vf18z\n"
+        "vaddw.x $vf25x, $vf0x, $vf18w\n"
+        "vmulaw.x $ACCx, $vf18x, $vf0w\n"
+        "vmaddaw.x $ACCx, $vf23x, $vf0w\n"
+        "vmaddaw.x $ACCx, $vf24x, $vf0w\n"
+        "vmaddw.x $vf26x, $vf25x, $vf0w\n"
+        "qmfc2 $2, $vf26\n"
+        "mtc1 $2, $f1\n"
+        "nop\n"
+        "c.lt.s $f0, $f1\n"
+        "nop\n"
+        "bc1t 1f\n"
+        "nop\n"
+        "vmulx.xyzw $vf21, $vf21, $vf1x\n"
+        "1:\n"
+        "vmulx.xyzw $vf20, $vf20, $vf10x\n"
+        "vmulx.xyzw $vf21, $vf21, $vf11x\n"
+        "vadd.xyzw $vf22, $vf20, $vf21\n"
+        "vmul.xyzw $vf19, $vf22, $vf22\n"
+        "vaddy.x $vf23x, $vf0x, $vf19y\n"
+        "vaddz.x $vf24x, $vf0x, $vf19z\n"
+        "vaddw.x $vf25x, $vf0x, $vf19w\n"
+        "vmulaw.x $ACCx, $vf19x, $vf0w\n"
+        "vmaddaw.x $ACCx, $vf23x, $vf0w\n"
+        "vmaddaw.x $ACCx, $vf24x, $vf0w\n"
+        "vmaddw.x $vf26x, $vf25x, $vf0w\n"
+        "vrsqrt $Q, $vf0w, $vf26x\n"
+        "vwaitq\n"
+        "vmulq.xyzw $vf22, $vf22, $Q\n"
+        "sqc2 $vf22, 0x0(%0)\n"
+        ".set at\n.set reorder"
+        : : "r"(pDst), "r"(pA), "r"(pB)
+        : "$1", "$2", "$3", "$7", "$f0", "$f1", "memory");
+}

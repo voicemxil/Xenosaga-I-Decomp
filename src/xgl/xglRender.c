@@ -384,3 +384,47 @@ void xglRenderFinalPacket(void)
         pCallback++;
     }
 }
+
+void FlushCache(int nMode);
+
+/* TODO: near-miss (23 words, pure SCHEDULING -- same multiset shifted
+ * 1-2 slots). Levers that got here: volatile pRender for the fbp
+ * loads/stores with a plain-cast pPlain for the signed lh nWidth/nPsm
+ * reads (reproduces the store-then-reload of nFrontFbp without andi
+ * masks), $5/$8 pins for nDisp/nFront, scratch-store source order
+ * 14/tag/76/77 fixing the t3/t2/t1/a2 constant allocation. Residue:
+ * sched2 hoists li 14 above the tag lui triple and delays lhu t0/sh
+ * by two slots; sd 40($a3) sits late instead of splitting the or pair. */
+/* Swap the display/draw frame pointers and kick the scratchpad FRAME/
+ * DISPFB flip packet through DMA channel 2 */
+void xglRenderDrawFlip(void)
+{
+    volatile XGLRENDER *pRender = &sRender;
+    XGLRENDER *pPlain = (XGLRENDER *)&sRender;
+    u_long *p = (u_long *)0x70000000;
+    int nFbw;
+    register u_short nDisp __asm__("$5");
+    register u_short nFront __asm__("$8");
+    u_long nFrame;
+
+    nFbw = pPlain->nWidth;
+    nDisp = pRender->nDrawFbp;
+    nFront = pRender->nFrontFbp;
+    pRender->nFrontFbp = nDisp;
+    if (nFbw < 0) {
+        nFbw += 63;
+    }
+    nFbw >>= 6;
+    p[1] = 14;
+    p[0] = 0x1000000000008002;
+    p[3] = 76;
+    p[5] = 77;
+    nFrame = pRender->nFrontFbp | ((u_long)nFbw << 16)
+           | ((u_long)pPlain->nPsm << 24);
+    pRender->nDrawFbp = nFront;
+    p[4] = nFrame;
+    p[2] = nFrame;
+    __asm__ __volatile__("sync" : : : "memory");
+    FlushCache(0);
+    xglDmaDirectNormal(2, 0x70000000, 3);
+}

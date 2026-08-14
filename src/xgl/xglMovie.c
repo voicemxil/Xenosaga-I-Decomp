@@ -1,9 +1,14 @@
 /* MPEG/IPU initialization wrappers */
 
 typedef struct {
-    char pad00[0x46];
+    char pad00[0x40];
+    short nWidth;        /* 0x40 */
+    short nHeight;       /* 0x42 */
+    short pad44;         /* 0x44 */
     short nUnk46;        /* 0x46 */
-    char pad48[0x51];
+    int pad48;           /* 0x48 */
+    int nUnk4C;          /* 0x4C */
+    char pad50[0x49];
     unsigned char nUnk99;/* 0x99 */
     unsigned char nUnk9A;/* 0x9A */
     char pad9B[0x1D];
@@ -80,6 +85,53 @@ int xglMovieClose(XGLMOVIEINFO *pInfo)
         nRet = 0;
     }
     return nRet;
+}
+
+/* TODO: near-miss (2 words, SCHEDULING). Everything matches except the
+ * final zero stores: ours emits `sw $0,0($t2)` grouped with the earlier
+ * t2-based stores, the original keeps it after the sd 40/48 pair. Every
+ * source permutation of the zero stores leaves the sw hoisted; barrier
+ * and passthrough attempts fix the order but cascade a v0/v1 allocation
+ * swap through the whole body. swap-adjacent can't help (two memory
+ * ops are ineligible). Levers that got this far: hand-written 5-op
+ * li/dsll/ori asm for the 0x0050005800005458 GIF tag (gas's own dli
+ * synthesizes the shorter lui form), $4-pinned empty-asm passthrough
+ * for the 0x0000001000000001 constant. */
+/* Build the GS transfer header (BITBLTBUF/TRXPOS/TRXREG/TRXDIR + image
+ * GIF tag) for one decoded movie frame, returning the payload address */
+void *xglMovieMakeXtxHeader(XGLMOVIEINFO *pInfo, char *pBuf)
+{
+    long long *p = (long long *)pBuf;
+    int *q;
+    int nBase = pInfo->nUnk4C;
+    int nWidth = pInfo->nWidth;
+    int nHeight = pInfo->nHeight;
+    register long long nTag __asm__("$8");
+    register long long nGif __asm__("$4");
+
+    __asm__("li %0, 80\n\t"
+            "dsll %0, %0, 16\n\t"
+            "ori %0, %0, 0x58\n\t"
+            "dsll %0, %0, 16\n\t"
+            "ori %0, %0, 0x5458" : "=r"(nTag));
+    __asm__("" : "=r"(nGif) : "0"(0x0000001000000001LL));
+    q = (int *)(pBuf + 16);
+    q[3] = nBase + 2;
+    q[0] = 0x40000 + nWidth;
+    q[1] = nHeight;
+    q[2] = 0;
+    q = (int *)(pBuf + 56);
+    q[3] = 0x8000000;
+    p[0] = nTag;
+    p[1] = nGif;
+    p[4] = 48;
+    q[1] = 0x50000001 + nBase;
+    q[2] = 0x8000 + nBase;
+    p[6] = 0;
+    q[0] = 0;
+    p[5] = 0;
+    p[9] = 0;
+    return pBuf + 80;
 }
 
 /* Tear down the MPEG decoder and VAG audio stream for a movie */

@@ -27,6 +27,9 @@ typedef struct {
     int nUnk18;          /* 0x18 */
     int nUnk1C;          /* 0x1C */
     int nUnk20;          /* 0x20 */
+    int nRingBytes;      /* 0x24 */
+    int nReadPos;        /* 0x28 */
+    int nWritePos;       /* 0x2C */
 } XGLCDSTREAM;
 
 typedef struct {
@@ -250,6 +253,27 @@ int xglCdStreamReadRingCore(void *pStr)
         return StreamReadRingCoreXss(pStr);
     }
     return StreamReadRingCoreNormal(pStr);
+}
+
+/* Advance the ring write cursor by a sector-aligned byte count, kick the
+ * ring core and spin until the read cursor catches up */
+int xglCdStreamReadRing(XGLCDSTREAM *pStr, int nBytes)
+{
+    register int nBusy __asm__("$2");
+
+    nBytes = (nBytes + 2047) & -2048;
+    pStr->nWritePos = (pStr->nWritePos + nBytes) % pStr->nRingBytes;
+    for (;;) {
+        xglCdStreamReadRingCore(pStr);
+        __asm__("" : "=r"(nBusy) : "0"(pStr->nUnk18));
+        if (nBusy == 0) {
+            break;
+        }
+        if (pStr->nReadPos == pStr->nWritePos) {
+            break;
+        }
+    }
+    return 0;
 }
 
 extern u_char ArcHeader[];

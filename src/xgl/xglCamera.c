@@ -164,3 +164,53 @@ void xglCameraScreenInit(void *pCamera)
     *(float *)(pScreen + 0x58) = sRender.nWidth;
     *(float *)(pScreen + 0x5C) = sRender.nHeight;
 }
+
+extern void xglCameraTravelManual(void *pCamera);
+extern void xglCameraTravelChase(void *pCamera);
+
+/* TODO: VERIFIED FULL MATCH (164/164 bytes, masked_compare diffs == [])
+ * under FILE_FIX_FLAGS["xglCamera.c"] = "--branch-likely
+ * xglCameraTravelProc:3" (site found by 0..5 ccpipe sweep; only site 3
+ * yields the original 50400008 beqzl). No FILE_FIX_FLAGS entry exists
+ * for xglCamera.c, which this agent may not create -- flag request.
+ * Levers already in-source: int (not void) return type suppresses the
+ * sibcall `j` of xglCameraTravelManual back to the original jal+b; the
+ * cross-jumped press-test tail is a literal goto into case 3; the
+ * $3-pinned empty-asm passthrough gives both case blocks their own
+ * in-place lui/addiu PadData materialization. */
+/* Per-frame travel dispatch on the camera's travel mode: manual mode
+ * (2) hands off to the pad-driven mover unless SELECT is held, chase
+ * mode (3) follows the target unless SELECT debugging is active; in
+ * both, SELECT+R3 rearms the travel state */
+int xglCameraTravelProc(void *pCamera)
+{
+    XGLCAMERA *p = (XGLCAMERA *)pCamera;
+    register XGLPADDATA *pPad __asm__("$3");
+
+    switch (p->nUnk04) {
+    case 0:
+    case 1:
+    case 4:
+        break;
+    case 2:
+        __asm__("" : "=r"(pPad) : "0"(PadData));
+        if ((pPad[1].nButton & 0x100) != 0) {
+            goto press_check;
+        }
+        xglCameraTravelManual(pCamera);
+        goto done;
+    case 3:
+        __asm__("" : "=r"(pPad) : "0"(PadData));
+        if ((pPad[1].nButton & 0x100) != 0) {
+press_check:
+            if ((pPad[1].nPress & 0x10) == 0) {
+                break;
+            }
+            xglCameraTravelInit(pCamera);
+        } else {
+            xglCameraTravelChase(pCamera);
+        }
+        break;
+    }
+done:;
+}
