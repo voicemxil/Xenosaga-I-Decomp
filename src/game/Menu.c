@@ -3279,6 +3279,10 @@ void MenuEtherListMake00(void)
     }
 }
 
+/* TODO: near-miss (REGISTER, 16 renames) - a clean $s1<->$s3 swap between the
+   repurposed walker pointer and the pSort/enable-constant variable; the
+   repurposed-variable dance (nM1/nOn/ptr) reproduces every copy and reuse the
+   retail build shows except this final allocation tie. Parked. */
 /* Build one ether sub-list: points per entry, enable by owner/ep checks */
 void MenuEtherListMake02(int nIdx)
 {
@@ -3348,4 +3352,66 @@ void MenuItemListMake02(void)
     MenuItemList->p28 = MenuListGet(0);
     WindowSPItemChange((char *)MenuItemList + 12);
     WindowSPSetSelect((char *)MenuItemList + 12, D_0036C205);
+}
+
+/* --- Ether char record (via func_A191C0_2) --- */
+typedef struct {
+    char pad0[23];
+    signed char bCap;          /* 0x17: total set-ether capacity */
+    char pad18[0x8E - 24];
+    short hEther[12];          /* 0x8E: set-ether slots */
+} ETHERREC;
+
+/* TODO: near-miss (LENGTH, 85 orig vs 87 built) - everything lines up except
+   the constant 12 of the trailing nSet==12 compare: the retail build
+   rematerializes `li v0,12` every outer iteration while ours loop-hoists it
+   into $s8 (one extra callee-saved + frame growth, cascading renames).
+   Goto-shaped outer kills ALL hoists (too far the other way); inner-loop
+   shape variants (while/do-while/goto/for) don't change it. Parked. */
+/* Build ether list 0's cost/name entries; enable by capacity, flag set slots */
+void MenuEtherListMake01(void)
+{
+    MENUTECLISTENT *p;
+    void *ptr;
+    int *pS;
+    ETHERREC *rec;
+    int n;
+    int i;
+    int nSet;
+    int cost;
+
+    i = 0;
+    p = (MENUTECLISTENT *)MenuListGet(0);
+    ptr = MenuSortAddrGet(0);
+    n = MenuSortCheck(0);
+    rec = (ETHERREC *)func_A191C0_2(MenuWork.bChr);
+    MenuListMake(0, 0);
+    if (n > 0) {
+        pS = (int *)ptr;
+        do {
+            ptr = func_A1A488(*(short *)pS);
+            func_A1A378(*(short *)((char *)ptr + 6));
+            p->f0 = *(int *)MenuTextGet(*pS);
+            cost = *(short *)((char *)ptr + 4);
+            p->f4 = cost;
+            if (rec->bCap + cost < 13) {
+                p->b8 = 0;
+            } else {
+                p->b8 = 1;
+            }
+            for (nSet = 0; nSet < 12; nSet++) {
+                if (rec->hEther[nSet] == *(short *)pS) {
+                    break;
+                }
+            }
+            if (nSet == 12) {
+                p->b9 = 0;
+            } else {
+                p->b9 = 1;
+            }
+            i++;
+            p++;
+            pS++;
+        } while (i < n);
+    }
 }
