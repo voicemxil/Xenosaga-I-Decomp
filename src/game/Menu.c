@@ -2095,7 +2095,8 @@ typedef struct {
     int f0;                    /* 0x00 */
     int f4;                    /* 0x04: equip count */
     unsigned char b8;          /* 0x08 */
-    char pad9[3];
+    unsigned char b9;          /* 0x09 */
+    char padA[2];
 } MENUTECLISTENT;
 extern MWLIST *MenuListMake(int nIdx, int nType);
 
@@ -3098,4 +3099,135 @@ void MenuTecListMake01(void)
     }
     MenuWork.b43 = nKeep43;
     MenuWork.bSel = nKeepSel;
+}
+
+/* --- Item list window work --- */
+typedef struct {
+    char pad0[0xD];
+    unsigned char b0D;         /* 0x0D */
+    char pad0E[0x18 - 0x0E];
+    unsigned short h18;        /* 0x18 */
+    unsigned short h1A;        /* 0x1A */
+    void *p1C;                 /* 0x1C */
+    unsigned char b20;         /* 0x20 */
+    signed char b21;           /* 0x21: read back with lb */
+    char pad22[0x28 - 0x22];
+    void *p28;                 /* 0x28 */
+} ITEMLISTWORK;
+extern ITEMLISTWORK *MenuItemList;
+extern char D_004C4F50[];
+extern char D_0036C200[];
+extern void MenuSortSet(int, int, int);
+extern void WindowSPItemChange(void *);
+extern void WindowSPSetSelect(void *, void *);
+
+/* Build item list 0 (sorted): per entry, classify menu usability into the
+   enable/type bytes, then refresh the item window strings and selection */
+void MenuItemListMake00(void)
+{
+    ITEMLISTWORK *w;
+    MENUTECLISTENT *p;
+    int *pSort;
+    int *pS;
+    int n;
+    int cnt;
+    int v;
+
+    p = (MENUTECLISTENT *)MenuListGet(0);
+    pSort = MenuSortAddrGet(0);
+    MenuSortSet(0, 1, 0);
+    MenuSortChange(0, 0);
+    MenuSortChange(0, MenuWork.b31);
+    MenuListMake(0, 0);
+    n = MenuSortCheck(0);
+    if (n > 0) {
+        pS = pSort;
+        cnt = n;
+        do {
+            v = MenuItemUseCheck(*(short *)pS);
+            pS++;
+            if (v != 0) {
+                if (v > 0) {
+                    goto arm1;
+                }
+                if (v != -1) {
+                    goto arm1;
+                }
+                p->b8 = 1;
+                p->b9 = 2;
+                goto next;
+            }
+            p->b8 = 1;
+            p->b9 = 1;
+            goto next;
+arm1:
+            p->b8 = 0;
+            p->b9 = 0;
+next:
+            cnt--;
+            p++;
+        } while (cnt != 0);
+    }
+    w = MenuItemList;
+    w->b0D = 7;
+    w->p1C = D_004C4F50;
+    MenuItemList->b20 = 1;
+    MenuItemList->b21 = 11;
+    MenuItemList->h18 = 224;
+    MenuItemList->h1A = MenuItemList->b21 * 24 + 6;
+    MenuItemList->p28 = MenuListGet(0);
+    WindowSPItemChange((char *)MenuItemList + 12);
+    WindowSPSetSelect((char *)MenuItemList + 12, D_0036C200);
+}
+
+/* Rebuild item list 0 without re-sorting, then refresh the item window */
+void MenuItemListMake00_1(void)
+{
+    ITEMLISTWORK *w;
+    MENUTECLISTENT *p;
+    int *pSort;
+    int *pS;
+    int n;
+    int cnt;
+    int v;
+
+    p = (MENUTECLISTENT *)MenuListGet(0);
+    pSort = MenuSortAddrGet(0);
+    MenuListMake(0, 0);
+    n = MenuSortCheck(0);
+    if (n > 0) {
+        pS = pSort;
+        cnt = n;
+        do {
+            v = MenuItemUseCheck(*(short *)pS);
+            pS++;
+            switch (v) {
+            case -1:
+                p->b8 = 1;
+                p->b9 = 2;
+                break;
+            case 0:
+                p->b8 = 1;
+                p->b9 = 1;
+                break;
+            case 1:
+            case 2:
+                p->b8 = 0;
+                p->b9 = 0;
+                break;
+            }
+            cnt--;
+            p++;
+        } while (cnt != 0);
+    }
+    w = MenuItemList;
+    w->b0D = 7;
+    w->p1C = D_004C4F50;
+    MenuItemList->b20 = 1;
+    MenuItemList->b21 = 11;
+    MenuItemList->h18 = 224;
+    MenuItemList->h1A = MenuItemList->b21 * 24 + 6;
+    MenuItemList->p28 = MenuListGet(0);
+    WindowSPItemChange((char *)MenuItemList + 12);
+    WindowSPSetSelect((char *)MenuItemList + 12, D_0036C200);
 }
