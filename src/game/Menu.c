@@ -1694,14 +1694,15 @@ typedef struct {
     signed char bHdd;          /* 0x22: HDD present flag */
     char pad23[0x30 - 0x23];
     unsigned char b30;         /* 0x30 */
-    unsigned char b31;         /* 0x31 */
+    signed char b31;           /* 0x31: read back with lb */
     unsigned char b32;         /* 0x32 */
     unsigned char b33;         /* 0x33: radar display option */
     char pad34;
     unsigned char b35;         /* 0x35: HDD activate result */
     char pad36[0x40 - 0x36];
     signed char bChr;          /* 0x40 */
-    char pad41[3];
+    char pad41[2];
+    signed char b43;           /* 0x43 */
     signed char bSel;          /* 0x44 */
 } MENUTECWORK;
 extern MENUTECWORK MenuWork;
@@ -2091,7 +2092,7 @@ typedef struct {
     unsigned char b8;          /* 0x08 */
     char pad9[3];
 } MENUTECLISTENT;
-extern void MenuListMake(int, int);
+extern MWLIST *MenuListMake(int nIdx, int nType);
 
 /* TODO: near-miss (LENGTH, 38 orig vs 42 built) - the original calls
    MenuTecEquipCheck without caller-side argument narrowing (lb/lh passed
@@ -2367,7 +2368,8 @@ typedef struct {
     unsigned char b44;         /* 0x44 */
 } MENUSAVEWORK;
 typedef struct {
-    char pad0[0x34];
+    char pad0[0x32];
+    unsigned short h32;        /* 0x32: repeat/level mirror of trig */
     unsigned short trig;       /* 0x34 */
     char pad36[0x56 - 0x36];
     unsigned char b56;         /* 0x56 */
@@ -2561,9 +2563,10 @@ int MenuParaUpMaxGet(int nType)
 }
 
 typedef struct {
-    char pad0[2];
+    short h0;                  /* 0x00 */
     short h2;                  /* 0x02 */
-    char pad4[0x36 - 4];
+    char pad4[0x34 - 4];
+    short h34;                 /* 0x34 */
     short h36;                 /* 0x36 */
 } MENUEPOBJ;
 extern MENUEPOBJ *func_A11108(int, int *, int *);
@@ -2608,4 +2611,440 @@ loop:
         return 1;
     }
     return 0;
+}
+
+/* ================= Wave 3: mid-size Menu functions ================= */
+
+/* Sum the WAGL (weapon agility) halfwords of an AGWS's three weapon slots */
+int MenuAgwsWaglGet(int nId)
+{
+    short *p;
+    int nSum;
+    int i;
+    int v;
+
+    nSum = 0;
+    if (nId == 0) {
+        return 0;
+    }
+    p = (short *)((char *)func_A191C0_2(nId) + 94);
+    for (i = 2; i >= 0; i--) {
+        v = *p;
+        p++;
+        if (v != 0) {
+            nSum += *(short *)((char *)func_A1A3D8(v) + 18);
+        }
+    }
+    return nSum;
+}
+
+/* --- List construction driver --- */
+extern void subListMake00(void *, int);
+extern void subListMake01(void *, int);
+extern char msg_12[] __asm__("msg.12");
+
+/* Build one menu work list from its sort chain, then append the terminator entry */
+MWLIST *MenuListMake(int nIdx, int nType)
+{
+    MENUTECLISTENT *p;
+    MWLIST *pList;
+    int *pSort;
+    void (*pFunc)(void *, int);
+    int v;
+
+    pList = &mw_list[nIdx];
+    p = (MENUTECLISTENT *)pList;
+    pSort = sort[nIdx];
+    if (nType == -10) {
+        pFunc = subListMake01;
+    } else {
+        pFunc = subListMake00;
+    }
+    v = *pSort;
+    while (v != 0) {
+        pFunc(p, v);
+        p++;
+        pSort++;
+        v = *pSort;
+    }
+    p->f4 = -1;
+    p->f0 = (int)msg_12;
+    p[1].f0 = 0;
+    p->b8 = 0;
+    return pList;
+}
+
+/* --- Scenario-number flag table --- */
+typedef struct {
+    int nNo;                   /* 0x00: scenario number at the top flag */
+    int nHi;                   /* 0x04: first (highest) flag to test */
+    int nLo;                   /* 0x08: last (lowest) flag to test */
+} SCENREC;
+typedef struct {
+    SCENREC rec[5];
+} SCENTBL;
+extern SCENTBL D_004C5140;
+
+/* Scan the scenario flag ranges from high to low and return the matching number */
+int MenuScenarioNoGet(void)
+{
+    SCENTBL tbl;
+    int i;
+    int nFlag;
+    int nNo;
+
+    tbl = D_004C5140;
+    for (i = 0; i < 5; i++) {
+        nFlag = tbl.rec[i].nHi;
+        nNo = tbl.rec[i].nNo;
+        while (nFlag >= tbl.rec[i].nLo) {
+            if (xglFlagsGet(nFlag, 1) != 0) {
+                return nNo;
+            }
+            nFlag--;
+            nNo--;
+        }
+    }
+    return nNo;
+}
+
+/* --- Sort compare-function table (function-local static in the original TU) --- */
+extern void (*f_11[6])(int *, int *) __asm__("f.11");
+
+/* Bubble-sort one sort chain in place with the type's compare/swap callback */
+void MenuSortChange(int nRow, int nType)
+{
+    int *base;
+    void (*pFunc)(int *, int *);
+    int count;
+    int last;
+    int i;
+    int j;
+    int *p;
+    int v;
+
+    base = sort[nRow];
+    pFunc = f_11[nType];
+    count = 0;
+    if (*base != 0) {
+        p = base + 1;
+        do {
+            v = *p;
+            p++;
+            count++;
+        } while (v != 0);
+    }
+    last = count - 1;
+    if (count == 0) {
+        return;
+    }
+    if (last <= 0) {
+        return;
+    }
+    for (i = 0; i < last; i++) {
+        for (j = i + 1; j < count; j++) {
+            pFunc(&base[i], &base[j]);
+        }
+    }
+}
+
+/* Compute the point cost of a stat's next advance from base, rate and current value */
+int MenuParaNextPointGet(int nBase, int nType, int nNum)
+{
+    int base;
+    int rate;
+    int now;
+    int t;
+    unsigned short total;
+
+    base = MenuParaPtBaseGet(nBase, nType);
+    rate = MenuParaPtRateGet(nBase, nType);
+    now = MenuParaPtNowGet(nBase, nType);
+    if (nType == 0) {
+        t = now + nNum * 10;
+    } else if (nType == 1) {
+        t = now + nNum * 2;
+    } else {
+        t = now + nNum;
+    }
+    total = t;
+    if (nType != 0) {
+        return base + rate * total / 99;
+    }
+    return base + rate * (unsigned short)(total / 10) / 99;
+}
+
+/* Mark a technique's level-up slot used: bump its level, refresh the derived
+   attack halfword and deduct the point cost */
+void MenuTecTLevUp(int nId, int nLev)
+{
+    int idx;
+    unsigned char *pSave;
+    PARAOBJ *p;
+    int nextPoint;
+    unsigned char *q;
+    int *pPt;
+    int v;
+
+    idx = nId & 0xFFFF;
+    pSave = (unsigned char *)MenuTecSaveDataGet(idx);
+    p = func_A19210(idx);
+    if (nLev < 0) {
+        return;
+    }
+    nextPoint = MenuTecNextTLevPointGet(nId, nLev);
+    pPt = &p->fC;
+    q = pSave + nLev;
+    v = *q + 1;
+    *q = v;
+    *(unsigned short *)(nLev * 12 + (int)pPt + 64) = (v & 0xFF) * 3 - 3;
+    *pPt -= nextPoint;
+}
+
+/* Ask whether a character's (or the whole party's) HP is already full */
+int MenuCharHpCheck(int nChr)
+{
+    int buf1[4];
+    int buf2[4];
+    int list[16];
+    MENUEPOBJ *p;
+    int *q;
+    int n;
+    int i;
+
+    if (nChr == 0) {
+        return 0;
+    }
+    if (nChr < 0) {
+        n = PartyAllPartyGet(list, 0);
+        i = 0;
+        q = list;
+loop:
+        if (i < n) {
+            p = func_A11108(*q, buf1, buf2);
+            q++;
+            if (p->h34 == p->h0) {
+                i++;
+                goto loop;
+            }
+        }
+        if (i != n) {
+            return 0;
+        }
+        return 1;
+    }
+    func_A191C0_2(nChr);
+    p = func_A11108(nChr, buf1, buf2);
+    if (p->h34 == p->h0) {
+        return 1;
+    }
+    return 0;
+}
+
+/* Move a selection index up/down from the pad, wrapping at the list bounds */
+int MenuSelectMove(int nSel, int nMax, int nFlag)
+{
+    int nMove;
+
+    nMove = 0;
+    if (nMax < 2) {
+        return nSel;
+    }
+    if (PadData.trig == 0x1000) {
+        if (nSel != 0) {
+            nMove = -1;
+        } else if (nFlag != 0) {
+            nMove = -1;
+        } else if (PadData.h32 == PadData.trig) {
+            nMove = -1;
+        }
+    }
+    if (PadData.trig == 0x4000) {
+        if (nSel != nMax - 1) {
+            nMove = 1;
+        } else if (nFlag != 0) {
+            nMove = 1;
+        } else if (PadData.h32 == PadData.trig) {
+            nMove = 1;
+        }
+    }
+    if (nMove == 0) {
+        return nSel;
+    }
+    nSel = nSel + nMove;
+    if (nSel < 0) {
+        nSel = nMax - 1;
+    }
+    if (nMax - 1 < nSel) {
+        nSel = 0;
+    }
+    xglSoundEffectNormalID(3, 0);
+    return nSel;
+}
+
+/* --- Party leader/attacker mask --- */
+extern int MenuScenarioNo;
+extern int PartyAttackerCheck(int);
+extern int PartyLeaderCheck(int);
+
+/* Classify a character's leader mask for the current scenario window:
+   1 not selectable, 2 not attacker, 3 leader, 0 plain member */
+int MenuCharLeaderMask(int nId)
+{
+    int nChr;
+    int v;
+    int nRet;
+
+    nChr = nId & 0xFFFF;
+    v = MenuScenarioNo;
+    if ((unsigned int)(v - 1) < 34) {
+        if (nChr != 3) {
+            return 1;
+        }
+    } else if ((unsigned int)(v - 46) < 3) {
+        if (nChr != 3) {
+            return 1;
+        }
+    } else if (v == 126) {
+        if (nChr != 3) {
+            return 1;
+        }
+    } else if ((unsigned int)(v - 142) < 3) {
+        if (nChr != 3) {
+            return 1;
+        }
+    } else if ((unsigned int)(v - 159) < 2) {
+        if (nChr != 3 && nChr != 1 && nChr != 5) {
+            return 1;
+        }
+    }
+    if (((unsigned int)(nChr + 0xFFFF) & 0xFFFF) >= 7) {
+        return 1;
+    }
+    if (PartyAttackerCheck(nChr) == 0) {
+        return 2;
+    }
+    nRet = 3;
+    if (PartyLeaderCheck(nChr) == 0) {
+        nRet = 0;
+    }
+    return nRet;
+}
+
+/* --- Tec sort-range table --- */
+typedef struct {
+    short lo;
+    short hi;
+} TECRANGE;
+typedef struct {
+    TECRANGE r[7];
+} TECRANGETBL;
+extern TECRANGETBL D_004D92E8;
+
+/* Rebuild sort chain 0 from the current character's technique id range */
+void MenuTecSortSet00(void)
+{
+    int *pSort;
+    TECRANGETBL tbl;
+    MENUTECWORK *w;
+    int nId;
+
+    pSort = MenuSortAddrGet(0);
+    tbl = D_004D92E8;
+    w = &MenuWork;
+    nId = tbl.r[w->bChr - 1].lo;
+    if (tbl.r[w->bChr - 1].hi < nId) {
+        *pSort = 0;
+        return;
+    }
+    do {
+        if (func_A197E8(w->bChr, nId) != 0) {
+            *pSort = 0xA0000 + (nId & 0xFFFF);
+            pSort++;
+        }
+        nId++;
+    } while (tbl.r[w->bChr - 1].hi >= nId);
+    *pSort = 0;
+}
+
+/* --- Tec list flag tables --- */
+extern unsigned char D_0036DC58[];
+extern unsigned char D_0036DC60[];
+
+/* Refresh the per-entry enable byte of tec list 0 from type/trigger checks */
+void MenuTecListMake00_2(void)
+{
+    MENUTECLISTENT *p;
+    int *pSort;
+    MENUTECWORK *w;
+    int n;
+    int nFlag;
+    int v;
+    unsigned char t;
+
+    p = (MENUTECLISTENT *)MenuListGet(0);
+    pSort = MenuSortAddrGet(0);
+    n = MenuSortCheck(0);
+    w = &MenuWork;
+    nFlag = w->b31 < 2;
+    if (n > 0) {
+        do {
+            v = MenuTecTypeCheck(w->bChr, *pSort);
+            if (v != nFlag && v != 1) {
+                p->b8 = 1;
+            } else {
+                t = (w->bChr != 7 ? D_0036DC58 : D_0036DC60)[w->b31];
+                if (t != MenuTecTrgCheck(*pSort)) {
+                    p->b8 = 1;
+                } else {
+                    p->b8 = 0;
+                }
+            }
+            n--;
+            p++;
+            pSort++;
+        } while (n != 0);
+    }
+}
+
+/* Build tec list 0's equip counts and up-check enable bytes */
+void MenuTecListMake01(void)
+{
+    MENUTECWORK *w;
+    MENUTECLISTENT *p;
+    int *pSort;
+    int n;
+    signed char nKeepSel;
+    signed char nKeep43;
+    unsigned char c;
+
+    w = &MenuWork;
+    p = (MENUTECLISTENT *)MenuListGet(0);
+    pSort = MenuSortAddrGet(0);
+    n = MenuSortCheck(0);
+    nKeep43 = w->b43;
+    nKeepSel = w->bSel;
+    MenuListMake(0, 0);
+    if (n > 0) {
+        do {
+            p->f4 = MenuTecEquipCheck(w->bChr, *(short *)pSort);
+            c = *(unsigned char *)pSort;
+            pSort++;
+            w->b43 = c;
+            w->bSel = BitToTecNo((signed char)c);
+            if (MenuTecCharTLevUpCheck() != 0) {
+                p->b8 = 0;
+            } else if (MenuTecCharWaitUpCheck() != 0) {
+                p->b8 = 0;
+            } else if (MenuTecCharSpeedUpCheck() == 0) {
+                p->b8 = 1;
+            } else {
+                p->b8 = 0;
+            }
+            n--;
+            p++;
+        } while (n != 0);
+    }
+    w->bSel = nKeepSel;
+    w->b43 = nKeep43;
 }
