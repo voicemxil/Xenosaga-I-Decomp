@@ -1295,28 +1295,10 @@ void MenuModelWeaponOpen(char *pModel, int nType, int nIdx)
     MenuModelDrawTypeSet(pActor, nType);
 }
 
-/* --- Background task plumbing --- */
-extern unsigned char MenuBgRgba;   /* r; g/b bytes follow at +1/+2 */
-extern int MenuBgTask;
-extern void endBackTexDraw(unsigned char *);
-
-/* Fade the background tint toward black, then run the background task and z-clear */
-void MenuBgTaskMain(void)
-{
-    unsigned char *p;
-    unsigned char v;
-
-    p = (unsigned char *)(int)&MenuBgRgba;
-    v = *p;
-    if (v != 0) {
-        p[2] = v - 8;
-        MenuBgRgba = v - 8;
-        p[1] = v - 8;
-    }
-    endBackTexDraw(p);
-    xglTaskExecute(MenuBgTask);
-    MenuModelDirectSendZClear();
-}
+/* --- Background task plumbing ---
+   MenuBgTaskMain itself lives in tskMenuBg.c (matched there); Menu.c only
+   calls it from MenuBgTaskBreak. */
+extern void MenuBgTaskMain(void);
 
 /* Remap the three dual-wield right-hand weapon ids onto their left-hand pair */
 int MenuRWeaponCheck2(int nId)
@@ -1698,7 +1680,9 @@ typedef struct {
     unsigned char bEnd;        /* 0x11: 0xFF once the end-print is done */
     char pad12[0x22 - 0x12];
     signed char bHdd;          /* 0x22: HDD present flag */
-    char pad23[0x30 - 0x23];
+    char pad23[0x26 - 0x23];
+    short h26;                 /* 0x26: current AGWS weapon id */
+    char pad28[0x30 - 0x28];
     unsigned char b30;         /* 0x30 */
     signed char b31;           /* 0x31: read back with lb */
     signed char b32;           /* 0x32: read back with lb */
@@ -1710,6 +1694,12 @@ typedef struct {
     char pad41[2];
     signed char b43;           /* 0x43 */
     signed char bSel;          /* 0x44 */
+    char pad45[0x54 - 0x45];
+    signed char b54;           /* 0x54 */
+    signed char b55;           /* 0x55 */
+    signed char b56;           /* 0x56 */
+    char pad57[0x64 - 0x57];
+    short h64;                 /* 0x64 */
 } MENUTECWORK;
 extern MENUTECWORK MenuWork;
 extern int MenuTecNextTLevPointGet(int nId, int nLev);
@@ -3522,4 +3512,208 @@ void MenuShopListChange01(void)
     WindowSPSetSelect(MenuShopWinSP, &D_0036C200[nSort * 5]);
     MenuShopWinSP->b26 = 6;
     WindowSPSelect(MenuShopWinSP, 0);
+}
+
+/* --- AGWS equip list windows --- */
+extern char *AgwsList;
+extern int MenuAccessoryEquipCheck(int, int, int);
+
+/* TODO: near-miss (OPERANDS, 2) - the loop-entry `addiu s0,s0,8` (list+8)
+   and the &MenuWork lo-add are emitted in the opposite order; the retail
+   build splits the lui/addiu pair around the +8. Entry-statement and
+   store-order permutes, pointer vs direct-global forms all leave the same
+   2-insn swap. Same wall in MenuAgwsListMake_Acc. */
+/* Build the AGWS gun list: enable entries whose bullet fits the current weapon */
+void MenuAgwsListMake_Gun(void)
+{
+    int *pSort;
+    int *pS;
+    unsigned char *q;
+    SHOPWINSP *win;
+    int n;
+    int cnt;
+
+    pSort = MenuSortAddrGet(0);
+    q = (unsigned char *)MenuListGet(0);
+    win = (SHOPWINSP *)(AgwsList + 0x130);
+    MenuSortSet(0, 8, -2);
+    MenuListMake(0, 0);
+    n = MenuSortCheck(0);
+    if (n > 0) {
+        pS = pSort;
+        q += 8;
+        cnt = n;
+        do {
+            if (MenuBulletCheck(MenuWork.h26, *(short *)pS) != 0) {
+                *q = 0;
+            } else {
+                *q = 1;
+            }
+            pS++;
+            cnt--;
+            q += 12;
+        } while (cnt != 0);
+    }
+    win->b15 = 7;
+    win->h0C = 229;
+    win->h0E = 174;
+    win->b14 = 1;
+    win->b01 = 7;
+    win->p10 = 0;
+    win->p1C = MenuListGet(0);
+    WindowSPItemChange(win);
+    WindowSPSetSelect(win, &D_0036C200[30]);
+}
+
+/* TODO: near-miss (OPERANDS, 2) - same lui/addiu-split scheduling wall as
+   MenuAgwsListMake_Gun above. */
+/* Build the AGWS accessory list: enable entries the current AGWS can equip */
+void MenuAgwsListMake_Acc(void)
+{
+    int *pSort;
+    int *pS;
+    unsigned char *q;
+    SHOPWINSP *win;
+    int n;
+    int cnt;
+
+    pSort = MenuSortAddrGet(0);
+    q = (unsigned char *)MenuListGet(0);
+    win = (SHOPWINSP *)(AgwsList + 0x130);
+    MenuSortSet(0, 16, -2);
+    MenuListMake(0, 0);
+    n = MenuSortCheck(0);
+    if (n > 0) {
+        pS = pSort;
+        q += 8;
+        cnt = n;
+        do {
+            if (MenuAccessoryEquipCheck(MenuWork.h64, *(short *)pS, MenuWork.b55) != 0) {
+                *q = 0;
+            } else {
+                *q = 1;
+            }
+            pS++;
+            cnt--;
+            q += 12;
+        } while (cnt != 0);
+    }
+    win->h0C = 229;
+    win->h0E = 150;
+    win->b14 = 1;
+    win->b15 = 6;
+    win->b01 = 7;
+    win->p10 = 0;
+    win->p1C = MenuListGet(0);
+    WindowSPItemChange(win);
+    WindowSPSetSelect(win, &D_0036C200[35]);
+}
+
+extern char D_004C6F38[];
+extern int MenuWeaponEquipPosCheck(int, int, int, int);
+
+/* TODO: near-miss (REGISTER ~30) - pS/win callee-saved swap (s2<->s3) on top
+   of the family's shared lui/addiu-split entry wall. Loop body and both
+   b8/b9 classify chains are exact. */
+/* Build the AGWS pilot list: gray taken/empty pilots, flag the current one */
+void MenuAgwsListMake_Pilot(void)
+{
+    int *pSort;
+    int *pS;
+    unsigned char *q;
+    SHOPWINSP *win;
+    MENUTECWORK *w;
+    PILOTREC *rec;
+    int n;
+    int cnt;
+
+    q = (unsigned char *)MenuListGet(0);
+    pSort = MenuSortAddrGet(0);
+    win = (SHOPWINSP *)(AgwsList + 0x130);
+    MenuSortSet(0, 32, 1);
+    MenuListMake(0, 0);
+    n = MenuSortCheck(0);
+    if (n > 0) {
+        pS = pSort;
+        q += 9;
+        w = &MenuWork;
+        cnt = n;
+        do {
+            rec = func_A191C0_2(*(short *)pS);
+            pS++;
+            if (rec->hPilotId == w->h64) {
+                q[-1] = 0;
+            } else if (rec->hPilotId == 0) {
+                q[-1] = 0;
+            } else {
+                q[-1] = 1;
+            }
+            if (rec->hPilotId != w->h64) {
+                q[0] = 0;
+            } else {
+                q[0] = 1;
+            }
+            cnt--;
+            q += 12;
+        } while (cnt != 0);
+    }
+    win->h0E = 144;
+    win->b14 = 1;
+    win->b15 = 5;
+    win->b01 = 3;
+    win->h0C = 208;
+    win->p10 = D_004C6F38;
+    win->p1C = MenuListGet(0);
+    WindowSPItemChange(win);
+    WindowSPSetSelect(win, &D_0036C200[40]);
+}
+
+/* TODO: near-miss (LENGTH ~60) - the retail build runs the repurposed-ptr
+   pattern (&MenuWork phase 1 in $s0 via a kept $s6 lui half, list walker
+   phase 2, tail rematerialized from $s6); ours reproduces the s6 half but
+   the allocator hands ptr $s3 instead of $s0 and shifts every copy. */
+/* Build the AGWS weapon list for the selected mount: enable by equip-pos check */
+void MenuAgwsListMake_Wpn(void)
+{
+    int *pSort;
+    void *ptr;
+    MENUTECWORK *w2;
+    SHOPWINSP *win;
+    int n;
+    int cnt;
+
+    ptr = &MenuWork;
+    pSort = MenuSortAddrGet(0);
+    n = (int)MenuListGet(0);
+    win = (SHOPWINSP *)(AgwsList + 0x130);
+    MenuSortSet(0, 4,
+        *((signed char *)ptr + ((MENUTECWORK *)ptr)->b56 + 0x10) | 0x2000);
+    MenuListMake(0, 0);
+    cnt = MenuSortCheck(0);
+    if (cnt > 0) {
+        w2 = (MENUTECWORK *)ptr;
+        ptr = (unsigned char *)n + 8;
+        do {
+            if (MenuWeaponEquipPosCheck(w2->h64, *(short *)pSort,
+                    *((signed char *)w2 + w2->b56 + 0x10),
+                    w2->b54) != 0) {
+                *(unsigned char *)ptr = 0;
+            } else {
+                *(unsigned char *)ptr = 1;
+            }
+            pSort++;
+            cnt--;
+            ptr = (unsigned char *)ptr + 12;
+        } while (cnt != 0);
+    }
+    win->h0E = 174;
+    win->b14 = 1;
+    win->b01 = 7;
+    win->b15 = 7;
+    win->h0C = 229;
+    win->p10 = 0;
+    win->p1C = MenuListGet(0);
+    WindowSPItemChange(win);
+    WindowSPSetSelect(win,
+        &D_0036C200[*((signed char *)&MenuWork + MenuWork.b56 + 0x10) * 5 - 5]);
 }
