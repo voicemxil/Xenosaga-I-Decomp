@@ -1894,3 +1894,7 @@ srsSetViewPath = 0x002E84D0, 0x20; // srsGet.c
 srsFileLoad = 0x002E9780, 0x14; // srsGet.c
 sefHitEffect = 0x002E7BF8, 0xC; // sef.c
 set_circle_shadow_ratio = 0x00230FA0, 0x84; // nmlModel.c
+xglSoundStreamOpenPcm = 0x00226878, 0x98; // xglSound.c
+xglSoundStreamOpenVagStereoParam = 0x00226910, 0xB8; // xglSound.c
+xglSoundStreamOpenVagMultiParam = 0x002269E8, 0xF8; // xglSound.c
+MenuShopListChange01 = 0x002A4080, 0xE0; // Menu

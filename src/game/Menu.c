@@ -3415,3 +3415,111 @@ void MenuEtherListMake01(void)
         } while (i < n);
     }
 }
+
+/* --- Face/EP id tables (stack copies of const tables) --- */
+typedef struct {
+    unsigned short h[12];
+} FACEEPID12;
+typedef struct {
+    unsigned short h[16];
+} FACEEPID16;
+extern FACEEPID12 D_004C51E8;
+extern FACEEPID12 D_004C5200;
+extern FACEEPID16 D_004C5218;
+extern FACEEPID12 D_004C5238;
+
+/* TODO: near-miss (1 diff) - a single annul-bit flip: the retail build's
+   (nType-17)<12 guard is beqzl (delay `move v0,zero` stolen from the
+   return-0 target, annulled) while ours emits plain beqz with the same
+   fill un-annulled. Needs `--branch-likely MenuFaceEpidGet:N` in the
+   fixer flags, which is outside this session's allowed configure.py
+   changes; noted for the coordinator. */
+/* Map a character id to its face/EP sprite id (normal and flagged variants) */
+int MenuFaceEpidGet(int nType, int nFlag)
+{
+    FACEEPID12 tbl1;
+    FACEEPID12 tbl2;
+    FACEEPID16 tbl3;
+    FACEEPID12 tbl4;
+    int nRet;
+
+    if (nType == 2) {
+        nRet = 1025;
+        if (nFlag == 0) {
+            nRet = 3073;
+        }
+        return nRet;
+    }
+    if (nFlag == 0) {
+        if ((unsigned int)(nType - 1) < 12) {
+            tbl1 = D_004C51E8;
+            return tbl1.h[nType - 1];
+        }
+        if ((unsigned int)(nType - 17) < 12) {
+            tbl2 = D_004C5200;
+            return tbl2.h[nType - 17];
+        }
+        return 0;
+    }
+    if ((unsigned int)(nType - 1) < 12) {
+        tbl3 = D_004C5218;
+        return tbl3.h[nType - 1];
+    }
+    tbl4 = D_004C5238;
+    return tbl4.h[nType - 17];
+}
+
+/* --- Shop list window work --- */
+typedef struct {
+    char pad0[0x48];
+    signed char b48;           /* 0x48 */
+} SHOPWORK;
+typedef struct {
+    char pad0[1];
+    unsigned char b01;         /* 0x01 */
+    char pad02[0x0C - 2];
+    unsigned short h0C;        /* 0x0C */
+    unsigned short h0E;        /* 0x0E */
+    void *p10;                 /* 0x10 */
+    unsigned char b14;         /* 0x14 */
+    unsigned char b15;         /* 0x15 */
+    char pad16[0x1C - 0x16];
+    void *p1C;                 /* 0x1C */
+    char pad20[0x26 - 0x20];
+    unsigned char b26;         /* 0x26 */
+} SHOPWINSP;
+extern SHOPWORK *MenuShopWork;
+extern SHOPWINSP *MenuShopWinSP;
+extern void MenuShopSortSet(int, int, int, int);
+extern void MenuShopListColorChange(int, int);
+extern void WindowSPSelect(void *, int);
+extern char D_004C7858[];
+
+/* Re-sort the shop sell list and refresh the shop window onto it */
+void MenuShopListChange01(void)
+{
+    SHOPWINSP *w;
+    SHOPWINSP *w2;
+    int nSort;
+
+    nSort = 18;
+    if (MenuShopWork->b48 == 0) {
+        nSort = 19;
+    }
+    MenuShopSortSet(0, nSort, 0, 0);
+    MenuListMake(0, -10);
+    MenuShopListColorChange(0, 2);
+    w = MenuShopWinSP;
+    w->h0C = 272;
+    w->h0E = 222;
+    w->b15 = 9;
+    MenuShopWinSP->b14 = 1;
+    w2 = MenuShopWinSP;
+    w2->p10 = D_004C7858;
+    w2->b01 = 7;
+    MenuShopWinSP->p1C = MenuListGet(0);
+    WindowSPItemChange(MenuShopWinSP);
+    WindowSPSetSelect(MenuShopWinSP, &D_0036C200[nSort * 5]);
+    MenuShopWinSP->b26 = 6;
+    WindowSPSelect(MenuShopWinSP, 0);
+}
