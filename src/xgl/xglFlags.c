@@ -87,3 +87,27 @@ void xglFlagsInitial(void)
         *pFlag++ = 0;
     } while (nCount != 0);
 }
+
+/* Read an nSize-bit field starting at bit nFlag out of the packed flag
+ * array (mirror image of xglFlagsSet's staging loop) */
+/* TODO: near-miss (~5 words). Indexed copies (both sides spelled with
+ * [i] so the source pointer strength-reduces AFTER the guard and the
+ * stack side stays sp-relative, no pByte local) match the original's
+ * loop; the residue is the original staging the count through $a2 with
+ * a `move t0,a2` copy (ours lands in $8 directly, leaving a scheduler
+ * nop where the move sat). Pinning the count to $6 and an explicit
+ * if-guard both regressed. */
+int xglFlagsGet(int nFlag, int nSize)
+{
+    long long nChunk;
+    int nShift;
+    int nBytes;
+    int i;
+
+    nShift = nFlag & 7;
+    nBytes = (nSize + nShift + 7) >> 3;
+    for (i = 0; i < nBytes; i++) {
+        ((unsigned char *)&nChunk)[i] = D_00491824[(nFlag >> 3) + i];
+    }
+    return (int)(nChunk >> nShift) & ((1 << nSize) - 1);
+}

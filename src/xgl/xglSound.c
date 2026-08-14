@@ -51,6 +51,7 @@ int SsdPlayEffectNormal(int, int);
 int SsdPlayEffectParam(int, int, int, int);
 int SsdStopEffect(int, int);
 int SsdCheckPlayEffectAll(void);
+int SsdSendFuncPacket(void *, int);
 int SsdCheckPlayEffect(int);
 int SsdInitPcmStream(int, int);
 int SsdPlayPcmStream(int, int);
@@ -575,4 +576,12 @@ void xglSoundInitial(void)
         SoundWork.aSe[i].nData = -1;
     }
     xglSoundReset();
+}
+
+/* Send the accumulated SE command packet to the SSD driver and clear it */
+void xglSendSePacket(void)
+{
+    SsdSendFuncPacket(SoundWork.stream.aRing, SoundWork.stream.nCount);
+    SoundWork.stream.nCount = 0;
+    memset(SoundWork.stream.aRing, 0, 0x800);
 }

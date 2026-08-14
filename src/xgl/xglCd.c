@@ -6,10 +6,25 @@ typedef unsigned char u_char;
 typedef struct {
     u_char aPad00[0x30];
     char nStatus;
-    u_char aPad31[0xD];
+    u_char aPad31[3];
+    char nPowerOff;      /* 0x34 */
+    u_char aPad35[0x9];
     char nUnk3E;
     char nUnk3F;
 } XGLCDWORK;
+
+/* CD stream work area (prefix of the sound XGL_STREAM) */
+typedef struct {
+    int nUnk00;          /* 0x00 */
+    short nSectors;      /* 0x04 */
+    short nRingSects;    /* 0x06 */
+    char nUnk08;         /* 0x08 */
+    char pad09[3];
+    int nUnk0C;          /* 0x0C */
+    int nFd;             /* 0x10 */
+    char pad14[0xC];
+    int nUnk20;          /* 0x20 */
+} XGLCDSTREAM;
 
 typedef struct {
     u_char aPad00[0x24];
@@ -140,4 +155,54 @@ int xglCdArcCheck(void)
     nRet = xglCdArcInit();
     WorkEnd = nSave;
     return nRet;
+}
+
+/* IOP power-off callback: just raise the flag for the control thread */
+void xglCdPowerOffCB(void)
+{
+    LW.nPowerOff = 1;
+}
+
+/* Reset a CD stream descriptor to its default geometry */
+void xglCdStreamParamInit(XGLCDSTREAM *pStream)
+{
+    pStream->nSectors = 64;
+    pStream->nRingSects = 16;
+    pStream->nFd = -1;
+    pStream->nUnk00 = 0;
+    pStream->nUnk08 = 0;
+    pStream->nUnk0C = 0;
+    pStream->nUnk20 = 0;
+}
+
+/* Skip over an archive TOC entry chain and return the 64-byte-aligned
+ * address just past it, zero-terminating the next entry */
+char *xglCdArcInitSub2(char *pArc)
+{
+    register unsigned char *p __asm__("$3") = (unsigned char *)pArc + 1;
+    register unsigned int c __asm__("$5");
+
+    c = *p;
+
+    if (c != 0) {
+        do {
+            unsigned int t80 = c & 0x80;
+            unsigned int t40 = c & 0x40;
+            c &= 0x3F;
+            if (t80 == 0) {
+                unsigned char *r;
+                p += 7;
+                r = p + 3;
+                if (t40 != 0) {
+                    p = r;
+                }
+            }
+            p += c;
+            c = *p;
+        } while (c != 0);
+    }
+    p = (unsigned char *)(((unsigned int)p + 64) & ~63);
+    p[1] = 0;
+    p[0] = 0;
+    return (char *)p;
 }
