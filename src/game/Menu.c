@@ -1702,8 +1702,12 @@ typedef struct {
     signed char b54;           /* 0x54 */
     signed char b55;           /* 0x55 */
     signed char b56;           /* 0x56 */
-    char pad57[0x64 - 0x57];
+    char pad57[0x60 - 0x57];
+    short h60;                 /* 0x60 */
+    char pad62[2];
     short h64;                 /* 0x64 */
+    char pad66[0x7A - 0x66];
+    signed char b7A;           /* 0x7A: equip-calc stat type */
 } MENUTECWORK;
 extern MENUTECWORK MenuWork;
 extern int MenuTecNextTLevPointGet(int nId, int nLev);
@@ -2095,11 +2099,9 @@ typedef struct {
 } MENUTECLISTENT;
 extern MWLIST *MenuListMake(int nIdx, int nType);
 
-/* TODO: near-miss (REGISTER, 8 renames) - a clean $s0<->$s1 swap (p vs n).
-   The K&R MenuTecEquipCheck definition fixed the old LENGTH mismatch (callers
-   now pass lb/lh raw). The remaining swap survives declaration reorder and a
-   temp-copy of n; same irreducible allocator class as MenuTecWaitUp. */
-/* Build the technique list: per entry, count how often it is equipped */
+/* Build the technique list: per entry, count how often it is equipped.
+   (The old $s0<->$s1 allocator swap is fixed by the register-pin idiom on
+   the list walker; see the wave-4 notes in this file's history.) */
 void MenuTecListMake00(void)
 {
     int n;
@@ -2219,10 +2221,9 @@ void MenuGameDataPush(void)
     GameStateSave();
 }
 
-/* TODO: near-miss (REGISTER, 14 renames) - a 3-register allocation cycle
-   (v1->a2, a1->a0, a0->v1) in the store tail; logic and instruction order
-   already match. Parked. */
-/* Mark a technique's wait-up slot used: bump its level and deduct the cost */
+/* Mark a technique's wait-up slot used: bump its level and deduct the cost.
+   The q/v/t register pins (dpmul idiom) resolve the old 14-rename cycle;
+   the `+r` asm on t forces the fC subtraction through $a1. */
 void MenuTecWaitUp(int nId, int nWait)
 {
     unsigned char *pSave;
@@ -2777,7 +2778,10 @@ int MenuParaNextPointGet(int nBase, int nType, int nNum)
 }
 
 /* Mark a technique's level-up slot used: bump its level, refresh the derived
-   attack halfword and deduct the point cost */
+   attack halfword and deduct the point cost.
+   TODO: near-miss (6 diffs, was 13) - q/pPt/v pins + a pinned mm=$3 temp fix
+   most of the cycle; m still coalesces into $a0 instead of $a3 (its pin is
+   ignored) and the final sh/subu order flips. Barrier variants regress. */
 void MenuTecTLevUp(int nId, int nLev)
 {
     int idx;
@@ -3281,10 +3285,11 @@ void MenuEtherListMake00(void)
     }
 }
 
-/* TODO: near-miss (REGISTER, 16 renames) - a clean $s1<->$s3 swap between the
-   repurposed walker pointer and the pSort/enable-constant variable; the
-   repurposed-variable dance (nM1/nOn/ptr) reproduces every copy and reuse the
-   retail build shows except this final allocation tie. Parked. */
+/* TODO: near-miss (SCHEDULING, 4) - nOn/n pins fixed the old 16-rename swap
+   and the >= arm-swap fixed the branch-likely polarity; what remains is the
+   f4-store/arg-load/increment order around the MenuEtherWhoCheck jal (ours
+   hoists the arg lh above the sw and the filler steals the sw). Barriers
+   regress it; parked. */
 /* Build one ether sub-list: points per entry, enable by owner/ep checks */
 void MenuEtherListMake02(int nIdx)
 {
@@ -3533,8 +3538,9 @@ extern int MenuAccessoryEquipCheck(int, int, int);
 /* TODO: near-miss (OPERANDS, 2) - the loop-entry `addiu s0,s0,8` (list+8)
    and the &MenuWork lo-add are emitted in the opposite order; the retail
    build splits the lui/addiu pair around the +8. Entry-statement and
-   store-order permutes, pointer vs direct-global forms all leave the same
-   2-insn swap. Same wall in MenuAgwsListMake_Acc. */
+   store-order permutes, pointer vs direct-global forms, and a named-w2
+   variant all leave the same 2-insn swap (shared preheader wall with
+   _Acc/_Pilot). */
 /* Build the AGWS gun list: enable entries whose bullet fits the current weapon */
 void MenuAgwsListMake_Gun(void)
 {
@@ -3626,9 +3632,11 @@ void MenuAgwsListMake_Acc(void)
 extern char D_004C6F38[];
 extern int MenuWeaponEquipPosCheck(int, int, int, int);
 
-/* TODO: near-miss (REGISTER ~30) - pS/win callee-saved swap (s2<->s3) on top
-   of the family's shared lui/addiu-split entry wall. Loop body and both
-   b8/b9 classify chains are exact. */
+/* TODO: near-miss (OPERANDS, 2) - wave-4 fixes: pS/q pins + a pSort `+r`
+   barrier after MenuListMake resolve the callee-saved swap, and the
+   branch-likely arm-swaps + window-tail store rotation fixed the LOGIC
+   diffs; only the family's shared preheader lui/addiu-split wall remains
+   (same 2 words as _Gun/_Acc). */
 /* Build the AGWS pilot list: gray taken/empty pilots, flag the current one */
 void MenuAgwsListMake_Pilot(void)
 {
@@ -3737,6 +3745,15 @@ void MenuAgwsListMake_Wpn(void)
 
 extern char *xglStudioGetCamera2_2(int) __asm__("xglStudioGetCamera2");
 extern void xglCameraInit(char *);
+
+/* --- Shop shared work (sell-mode flag / pending model break) --- */
+typedef struct {
+    char pad0[0x10];
+    unsigned char b10;         /* 0x10: sell-mode flag */
+    char pad11[0x2C - 0x11];
+    int f2C;                   /* 0x2C: pending model-break flag */
+} SHOPCOLWORK;
+extern SHOPCOLWORK *D_004DC5F8;
 
 /* TODO: near-miss (LENGTH, 90 orig vs 87-88 built) - the retail build keeps
    pList/pSort/w in s6/s5/s3 with real loop-entry copies into s0/s1/s4; gcc
@@ -3931,6 +3948,199 @@ void MenuModelSubWindowSet(SUBWIN *p, int nId, int nType)
     xglStudioChange(0);
 }
 
+/* --- Shop model window --- */
+typedef struct {
+    char pad0[0x10];
+    signed char b10;           /* 0x10 */
+    unsigned char b11;         /* 0x11 */
+    char pad12;
+    unsigned char b13;         /* 0x13: model display state */
+    char pad14[0x20 - 0x14];
+    char *pUnit;               /* 0x20 */
+} SHOPMODELWORK;
+extern void MenuModelUnitBreak_v() __asm__("MenuModelUnitBreak");
+extern float D_004D7E60;
+
+/* TODO: near-miss (2 diffs) - the delay-slot filler steals the case-0 lwc1
+   into the switch-dispatch beqz slot where the retail build keeps the shared
+   `move a0,s0` there; statement-order variants tried. Parked. */
+/* Drive the shop screen's model display state (open, fade wait, idle) */
+void MenuShopModelDisp(SHOPMODELWORK *w)
+{
+    char *pUnit;
+    char *p2;
+
+    pUnit = w->pUnit;
+    if (pUnit == 0) {
+        if (D_004DC5F8->f2C != 0) {
+            MenuModelUnitBreak_v();
+            D_004DC5F8->f2C = 0;
+        }
+    }
+    if (w->b11 == 0) {
+        return;
+    }
+    p2 = pUnit + 192;
+    if (D_004DC5F8->f2C != 0) {
+        w->b13 = 30;
+        D_004DC5F8->f2C = 0;
+    }
+    switch (w->b13) {
+    case 10:
+        break;
+    case 0:
+        *(float *)(p2 + 20) = D_004D7E60;
+        MenuModelUnitOpen((char *)w, 2);
+        w->b13 = 10;
+        break;
+    case 30:
+        MenuModelUnitOpen((char *)w, 1);
+        w->b13 = 31;
+        /* fall through */
+    case 31:
+        if (*(float *)(p2 + 96) == 0.0f) {
+            w->b10 = -1;
+        }
+        break;
+    }
+}
+
+/* --- Model pad-driven control --- */
+typedef struct {
+    char pad0[0x60];
+    float f60;                 /* 0x60 */
+    char pad64[0xD0 - 0x64];
+    float pos[2];              /* 0xD0 */
+    char padD8[0xE0 - 0xD8];
+    float zoom[3];             /* 0xE0 */
+    char padEC[0xF0 - 0xEC];
+    int fF0;                   /* 0xF0 */
+} MODELCTRLUNIT;
+typedef struct {
+    char pad0[0x20];
+    MODELCTRLUNIT *pUnit;      /* 0x20 */
+} MODELCTRLWORK;
+typedef struct {
+    char pad0[0x30];
+    unsigned short h30;        /* 0x30: pad level bits */
+} MODELCTRLPAD;
+extern MODELCTRLPAD D_00490D90;
+extern float D_004D7DA8;
+extern float D_004D7DAC;
+extern float D_004D7DB0;
+extern float D_004D7DB4;
+extern float D_004D7DB8;
+extern float D_004D7DBC;
+extern float D_004D7DC0;
+
+/* TODO: near-miss (LENGTH, 66 orig vs 65 built) - the retail build
+   rematerializes &D_00490D90 (addiu off the kept lui half) separately in the
+   nBtn branch slot AND at the block end where ours cross-jumps them into one
+   shared addiu; a reload-into-variable form gets further away. Parked. */
+/* Move/zoom a menu model from the held pad bits, clamping the zoom range */
+void MenuModelControl(MODELCTRLWORK *w)
+{
+    MODELCTRLUNIT *u;
+    float *pos;
+    float *zoom;
+    int nPad;
+    unsigned short nBtn;
+
+    u = w->pUnit;
+    pos = u->pos;
+    zoom = u->zoom;
+    if (u->fF0 == 0) {
+        return;
+    }
+    nPad = D_00490D90.h30;
+    if (nPad & 0x1000) {
+        pos[0] -= D_004D7DA8;
+    }
+    if (nPad & 0x4000) {
+        pos[0] += D_004D7DAC;
+    }
+    if (nPad & 0x8000) {
+        pos[1] -= D_004D7DB0;
+    }
+    if (nPad & 0x2000) {
+        pos[1] += D_004D7DB4;
+    }
+    nBtn = nPad & 1;
+    if (nBtn) {
+        zoom[0] -= D_004D7DB8;
+        if (u->f60 <= 0.25f) {
+            zoom[0] = 0.25f;
+        }
+    }
+    if (D_00490D90.h30 & 2) {
+        zoom[0] += D_004D7DBC;
+        if (D_004D7DC0 <= u->f60) {
+            zoom[0] = D_004D7DC0;
+        }
+    }
+    zoom[1] = zoom[0];
+    zoom[2] = zoom[0];
+}
+
+/* --- Equip-compare point delta --- */
+extern unsigned char D_0036D897[];
+
+/* Difference between the equip-preview stats and the current stats for the
+   stat type selected on the equip screen */
+int MenuCharEquipCalcPointGet(int nChr)
+{
+    int buf1[4];
+    int buf2[4];
+    char *p1;
+    char *p2;
+    register int nRet __asm__("$16");
+
+    nRet = 0;
+    if (nChr == 0) {
+        return nRet;
+    }
+    p1 = (char *)func_A191C0_2(nChr);
+    p2 = (char *)func_A11108(nChr, buf1, buf2);
+    switch (MenuWork.b7A) {
+    case 0:
+        nRet = *(short *)(p2 + 0);
+        nRet -= *(short *)(p1 + 0);
+        break;
+    case 1:
+        nRet = *(short *)(p2 + 2);
+        nRet -= *(short *)(p1 + 2);
+        break;
+    case 2:
+        nRet = *(short *)(p2 + 4);
+        nRet -= *(short *)(p1 + 4);
+        nRet += buf1[D_0036D897[MenuWork.h60]];
+        break;
+    case 3:
+        nRet = *(short *)(p2 + 6);
+        nRet -= *(short *)(p1 + 6);
+        nRet += buf2[0];
+        break;
+    case 4:
+        nRet = *(short *)(p2 + 8);
+        nRet -= *(short *)(p1 + 8);
+        break;
+    case 5:
+        nRet = *(short *)(p2 + 10);
+        nRet -= *(short *)(p1 + 10);
+        nRet += buf2[1];
+        break;
+    case 6:
+        nRet = *(signed char *)(p2 + 12);
+        nRet -= *(signed char *)(p1 + 12);
+        break;
+    case 7:
+        nRet = *(signed char *)(p2 + 13);
+        nRet -= *(signed char *)(p1 + 13);
+        break;
+    }
+    return nRet;
+}
+
 /* --- Item list 1 (per-category sorted views) --- */
 extern signed char D_0036C1B3[];
 extern char D_0036C20A[];
@@ -4030,11 +4240,6 @@ void MenuAgwsParaSet(int nId, int nType)
 }
 
 /* --- Shop list color refresh --- */
-typedef struct {
-    char pad0[0x10];
-    unsigned char b10;         /* 0x10: sell-mode flag */
-} SHOPCOLWORK;
-extern SHOPCOLWORK *D_004DC5F8;
 extern int MenuBoxMoneyGet(int, int);
 extern int dataMoneyBoxChk();
 extern int subMenuShopEquipCheck(int, int);
