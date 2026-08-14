@@ -1692,3 +1692,12 @@ __malloc_unlock = 0x0032EFC0, 0x4C; // malloc_lock
 malloc_extend_top = 0x0032E2B8, 0x258; // newlib_mallocr
 _raise_r = 0x0032F2A8, 0xD8; // newlib_signal
 __sigtramp_r = 0x0032F380, 0x98; // newlib_signal
+
+decode_uleb128 = 0x0032C5E0, 0x44; // gcc_frame
+decode_sleb128 = 0x0032C628, 0x58; // gcc_frame
+fde_merge = 0x0032C680, 0xF8; // gcc_frame
+__register_frame = 0x0032CD58, 0x30; // gcc_frame
+__register_frame_table = 0x0032CDF0, 0x30; // gcc_frame
+__deregister_frame = 0x0032CEE0, 0x20; // gcc_frame
+count_fdes = 0x0032CF00, 0x40; // gcc_frame
+extract_cie_info = 0x0032D338, 0x110; // gcc_frame
