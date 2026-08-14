@@ -1686,7 +1686,20 @@ char *MenuMapExTextLoad(int nMemory, int nFlag)
 
 /* --- Menu work block (current tec character/selection bytes) --- */
 typedef struct {
-    char pad0[0x40];
+    char pad0[3];
+    unsigned char state;       /* 0x03: menu-system state */
+    char pad04[0x11 - 4];
+    unsigned char bEnd;        /* 0x11: 0xFF once the end-print is done */
+    char pad12[0x22 - 0x12];
+    signed char bHdd;          /* 0x22: HDD present flag */
+    char pad23[0x30 - 0x23];
+    unsigned char b30;         /* 0x30 */
+    unsigned char b31;         /* 0x31 */
+    unsigned char b32;         /* 0x32 */
+    unsigned char b33;         /* 0x33: radar display option */
+    char pad34;
+    unsigned char b35;         /* 0x35: HDD activate result */
+    char pad36[0x40 - 0x36];
     signed char bChr;          /* 0x40 */
     char pad41[3];
     signed char bSel;          /* 0x44 */
@@ -2018,4 +2031,581 @@ void MenuSkillEquip(short nChr, short nId, int nSlot)
             return;
         }
     }
+}
+
+/* Decode an ether id's use-type (1 heal, 2 cure, 3 revive) */
+int MenuEtherUseCheck(int nId)
+{
+    int id;
+
+    id = nId & 0xFFFF;
+    switch (id) {
+    case 1:
+    case 8:
+    case 37:
+        return 1;
+    case 4:
+    case 28:
+        return 2;
+    case 74:
+        return 3;
+    }
+    return 0;
+}
+
+/* Queue the menu-motion resource matching the current model memory state */
+void MenuModelMenuMotionLoad(void)
+{
+    char *pData;
+    unsigned short nId;
+
+    pData = (char *)D_0036D5C8;
+    nId = 0;
+    if ((MenuModelFlag & 2) != 0) {
+        return;
+    }
+    switch (((MODELMEM *)MenuModelMemoryState)->f0) {
+    case 10:
+        nId = 0x8001;
+        break;
+    case 11:
+        nId = 0xA100;
+        break;
+    case 12:
+        nId = 0x8001;
+        break;
+    case 20:
+        nId = 0xA100;
+        break;
+    }
+    if (nId == 0) {
+        return;
+    }
+    MenuModelResourceRequest(pData, nId, 0);
+}
+
+/* --- Tec list construction --- */
+typedef struct {
+    int f0;                    /* 0x00 */
+    int f4;                    /* 0x04: equip count */
+    unsigned char b8;          /* 0x08 */
+    char pad9[3];
+} MENUTECLISTENT;
+extern void MenuListMake(int, int);
+
+/* TODO: near-miss (LENGTH, 38 orig vs 42 built) - the original calls
+   MenuTecEquipCheck without caller-side argument narrowing (lb/lh passed
+   raw), which needs an unprototyped (K&R) call; with the ANSI definition
+   in this TU the caller masks both args. Parked. */
+/* Build the technique list: per entry, count how often it is equipped */
+void MenuTecListMake00(void)
+{
+    MENUTECLISTENT *p;
+    int *pSort;
+    MENUTECWORK *w;
+    int n;
+    short nTec;
+    int v;
+
+    p = (MENUTECLISTENT *)MenuListGet(0);
+    pSort = MenuSortAddrGet(0);
+    n = MenuSortCheck(0);
+    MenuListMake(0, 0);
+    if (n > 0) {
+        w = &MenuWork;
+        do {
+            nTec = *(short *)pSort;
+            pSort++;
+            v = MenuTecEquipCheck(w->bChr, nTec);
+            n--;
+            p->b8 = 0;
+            p->f4 = v;
+            p++;
+        } while (n != 0);
+    }
+}
+
+/* TODO: near-miss (LOGIC, 5 diffs) - cases 4/5 in the original load lbu and
+   sign-extend via sll/sra 24 with a cross-jumped andi tail; every C form
+   tried (signed-char cast, u8/int temps, explicit shifts) is combined by
+   gcc into a single lb. Parked. */
+/* Fetch a character's current value for one stat type */
+int MenuParaPtNowGet(int nId, int nType)
+{
+    char *p;
+    int t;
+
+    p = (char *)func_A191C0_2(nId);
+    if ((unsigned int)nType < 8) {
+        switch (nType) {
+        case 0:
+            return *(unsigned short *)(p + 4);
+        case 1:
+            return *(unsigned short *)(p + 6);
+        case 2:
+            return *(unsigned short *)(p + 8);
+        case 3:
+            return *(unsigned short *)(p + 10);
+        case 4:
+            t = *(unsigned char *)(p + 12);
+            return ((t << 24) >> 24) & 0xFFFF;
+        case 5:
+            t = *(unsigned char *)(p + 13);
+            return ((t << 24) >> 24) & 0xFFFF;
+        case 6:
+            return *(unsigned short *)(p + 0);
+        case 7:
+            return *(unsigned short *)(p + 2);
+        }
+    }
+    return 0;
+}
+
+/* TODO: near-miss (LENGTH) - the original's inner while (i < 12) loop is
+   not exit-test-duplicated (single top test, backward branch), while every
+   variant tried (for, while, goto, i++-in-condition) gets the test
+   duplicated at entry. Parked. */
+/* Recompute every character's total set-ether capacity byte */
+void MenuEtherCapSet(void)
+{
+    unsigned char *p;
+    short *q;
+    char *e;
+    int i;
+    int nChr;
+    short v;
+
+    i = 0;
+    for (nChr = 1; nChr < 8; nChr++) {
+        p = (unsigned char *)func_A191C0_2(nChr);
+        p[23] = 0;
+        q = (short *)(p + 142);
+        while (i++ < 12) {
+            v = *q;
+            q++;
+            if (v == 0) {
+                break;
+            }
+            e = (char *)func_A1A488(v);
+            p[23] = p[23] + *(unsigned char *)(e + 4);
+        }
+    }
+}
+
+/* --- Game-state push (actor snapshot) --- */
+typedef struct {
+    long long d[0x14E];        /* 0xA70 bytes */
+} MENUGAMEDATA;
+typedef struct {
+    char pad0[0x10];
+    long long f10;             /* 0x10 */
+    char pad18[0x250 - 0x18];
+    MENUGAMEDATA aKeep[64];    /* 0x250 */
+} GAMELOOPSTATE;
+extern GAMELOOPSTATE GameLoopState;
+extern MENUGAMEDATA actor[];
+extern void GameStateSave(void);
+
+/* Snapshot all 64 actor slots into the game-loop keep area, then save state */
+void MenuGameDataPush(void)
+{
+    short i;
+
+    for (i = 0; i < 64; i++) {
+        GameLoopState.aKeep[i] = actor[i];
+    }
+    GameStateSave();
+}
+
+/* TODO: near-miss (REGISTER, 14 renames) - a 3-register allocation cycle
+   (v1->a2, a1->a0, a0->v1) in the store tail; logic and instruction order
+   already match. Parked. */
+/* Mark a technique's wait-up slot used: bump its level and deduct the cost */
+void MenuTecWaitUp(int nId, int nWait)
+{
+    unsigned char *pSave;
+    PARAOBJ *p;
+    int nMask;
+    int nOfs;
+    int nextPoint;
+    unsigned char *q;
+    int v;
+
+    nMask = nId & 0xFFFF;
+    pSave = (unsigned char *)MenuTecSaveDataGet(nId);
+    p = func_A19210(nMask);
+    if (nWait < 0) {
+        return;
+    }
+    nextPoint = MenuTecNextWaitPointGet(nId, nWait);
+    nOfs = nWait + 16;
+    q = pSave + nOfs;
+    v = *q + 255;
+    *q = v;
+    *(unsigned short *)(nWait * 12 + (int)p + 78) = v & 0xFF;
+    p->fC = p->fC - nextPoint;
+}
+
+extern int dataItmBoxDec(int);
+extern int dataEvtBoxDec(int);
+extern int dataWpnBoxDec(int);
+extern int dataBltBoxDec(int);
+extern int dataAccBoxDec(int);
+extern int dataItmBoxInc(int);
+extern int dataEvtBoxInc(int);
+extern int dataWpnBoxInc(int);
+extern int dataBltBoxInc(int);
+extern int dataAccBoxInc(int);
+extern void PartyTakeAgwsOn(void);
+
+/* Decrement a box entry's count, dispatching on the type in the high word */
+int MenuBoxDec(int nId)
+{
+    unsigned int nType;
+    int nRes;
+
+    nType = (unsigned int)nId >> 16;
+    nId = nId & 0xFFFF;
+    nRes = 0;
+    switch (nType - 1) {
+    case 0:
+        dataItmBoxDec(nId);
+        break;
+    case 1:
+        dataEvtBoxDec(nId);
+        break;
+    case 2:
+        dataWpnBoxDec(nId);
+        break;
+    case 3:
+        dataBltBoxDec(nId);
+        break;
+    case 4:
+        dataAccBoxDec(nId);
+        break;
+    case 5:
+        nRes = -1;
+        break;
+    }
+    return nRes;
+}
+
+/* Increment a box entry's count, dispatching on the type in the high word */
+int MenuBoxInc(int nId)
+{
+    unsigned int nType;
+    int nRes;
+
+    nType = (unsigned int)nId >> 16;
+    nId = nId & 0xFFFF;
+    nRes = 0;
+    switch (nType - 1) {
+    case 0:
+        dataItmBoxInc(nId);
+        break;
+    case 1:
+        dataEvtBoxInc(nId);
+        break;
+    case 2:
+        dataWpnBoxInc(nId);
+        break;
+    case 3:
+        dataBltBoxInc(nId);
+        break;
+    case 4:
+        dataAccBoxInc(nId);
+        break;
+    case 5:
+        nRes = -1;
+        break;
+    case 6:
+        PartyTakeAgwsOn();
+        break;
+    }
+    return nRes;
+}
+
+extern void ChangeTopLevel(int);
+
+/* TODO: near-miss (LENGTH, 42 orig vs 43 built) - the original keeps both
+   ChangeTopLevel calls as jal (no sibcall) and rematerializes &MenuWork
+   after subMenuSystemMain; ours converts the tail call to j. Parked. */
+/* Drive the sub-menu system state machine (init, main tick, teardown handoff) */
+int MenuSystem(void)
+{
+    MENUTECWORK *w;
+    MENUTECWORK *w2;
+
+    w = &MenuWork;
+    switch (w->state) {
+    case 0:
+        subMenuSystemInit(MainMenuWorkEnd);
+    case 2:
+        w->state = 2;
+        subMenuSystemMain();
+        w2 = &MenuWork;
+        if (w2->bEnd == 0xFF) {
+            w2->state = 4;
+            ChangeTopLevel(0);
+        }
+        break;
+    case 4:
+        ChangeTopLevel(0);
+        break;
+    }
+}
+
+/* --- Save-data / pad work blocks --- */
+typedef struct {
+    char pad0[0x28];
+    unsigned char b28;         /* 0x28 */
+    char pad29[0x3C - 0x29];
+    unsigned char b3C;         /* 0x3C */
+    char pad3D[0x40 - 0x3D];
+    unsigned char b40;         /* 0x40 */
+    char pad41[0x44 - 0x41];
+    unsigned char b44;         /* 0x44 */
+} MENUSAVEWORK;
+typedef struct {
+    char pad0[0x34];
+    unsigned short trig;       /* 0x34 */
+    char pad36[0x56 - 0x36];
+    unsigned char b56;         /* 0x56 */
+    char pad57[0xBE - 0x57];
+    unsigned char bBE;         /* 0xBE */
+} MENUPADWORK;
+extern MENUSAVEWORK SaveData;
+extern MENUPADWORK PadData;
+extern void SsdSetOutputMode(int);
+extern void PartyRadarDispSet(int);
+extern int PartyDataGet(void);
+extern void tyaDisplaySetting(int);
+extern void xglHddActivate(int);
+
+/* TODO: near-miss (LOGIC/order) - the eight status-byte stores interleave
+   across three base registers in an order the scheduler will not reproduce
+   from any source order tried. Parked. */
+/* Reset the menu-system status bytes and mirror the save/pad display options */
+void MenuSystemInitSet(void)
+{
+    MENUTECWORK *w;
+    MENUSAVEWORK *sv;
+    unsigned char *pData;
+
+    SsdSetOutputMode(1);
+    w = &MenuWork;
+    sv = &SaveData;
+    PadData.bBE = 0;
+    sv->b28 = 1;
+    w->b30 = 0;
+    sv->b44 = 0;
+    w->b31 = 0;
+    sv->b3C = 0;
+    PadData.b56 = 0;
+    w->b32 = 0;
+    PartyRadarDispSet(1);
+    pData = (unsigned char *)PartyDataGet();
+    w->b33 = pData[46] ^ 1;
+    tyaDisplaySetting(1);
+    if (w->bHdd != 0) {
+        sv->b40 = 0;
+        xglHddActivate(1);
+        w->b35 = sv->b40;
+    }
+}
+
+extern void *func_A1A4E8(int);
+extern void *func_A1A548(int);
+
+/* Ask whether a shop entry is flagged no-sale, dispatching on the type word */
+int MenuShopNoSaleCheck(int nId)
+{
+    int id;
+    int nType;
+    unsigned short flags;
+    int t;
+
+    id = nId & 0xFFFF;
+    nType = (unsigned int)nId >> 16;
+    flags = 0;
+    if (id == 0) {
+        return 0;
+    }
+    switch (nType) {
+    case 1:
+        flags = *(unsigned short *)((char *)func_A1A4E8(id) + 4);
+        break;
+    case 3:
+        flags = *(unsigned short *)((char *)func_A1A3D8(id) + 6);
+        break;
+    case 4:
+        flags = *(unsigned short *)((char *)func_A1A428(id) + 10);
+        break;
+    case 5:
+        flags = *(unsigned short *)((char *)func_A1A548(id) + 4);
+        break;
+    }
+    t = flags & 0x1000;
+    return t != 0;
+}
+
+/* TODO: near-miss (LOGIC) - the original's three movz/movn conditional
+   assignments keep the result in $a1 with one final move v0,a1; ours
+   if-converts with inverted polarity into $v0. Parked. */
+/* Classify how an item can be used from the menu (0 no, 1/2 use-type, 10 event) */
+int MenuItemUseCheck(short nId)
+{
+    char *p;
+    int nRet;
+    unsigned short v;
+
+    if (nId == 0) {
+        return 0;
+    }
+    p = (char *)func_A1A4E8(nId);
+    if ((*(unsigned short *)(p + 4) & 0x8000) == 0) {
+        return 0;
+    }
+    if (nId == 36) {
+        nRet = 2;
+        if ((GameLoopState.f10 & 0x20400000) == 0) {
+            nRet = -1;
+        }
+    } else {
+        v = *(unsigned short *)(p + 12);
+        if ((v & 0x1E43) != 0) {
+            nRet = 2;
+            if ((*(unsigned char *)(p + 8) & 0x10) == 0) {
+                nRet = 1;
+            }
+        } else {
+            nRet = 0;
+            if ((v & 0x2000) != 0) {
+                nRet = 10;
+            }
+        }
+    }
+    return nRet;
+}
+
+extern void xglSoundEffectNormalID(int, int);
+
+/* TODO: unfixable from C - the original's no-move exit branches INTO the
+   jal delay slot (the second clamp movn), executing it on the skip path;
+   that is gcc's delay-slot filler retargeting a branch to a stolen
+   instruction. Needs the fixer flags / configure.py, outside this scope. */
+/* Move a selection index by the 2D pad direction, wrapping at the list bounds */
+int MenuSelectMove2(int nSel, int nMax)
+{
+    int nMove;
+
+    nMove = 0;
+    if (nMax < 2) {
+        return nSel;
+    }
+    switch (PadData.trig) {
+    case 0x1000:
+        nMove = -2;
+        break;
+    case 0x2000:
+        nMove = 1;
+        break;
+    case 0x4000:
+        nMove = 2;
+        break;
+    case 0x8000:
+        nMove = -1;
+        break;
+    }
+    if (nMove == 0) {
+        return nSel;
+    }
+    nSel = nSel + nMove;
+    if (nSel < 0) {
+        nSel = nMax - 1;
+    }
+    if (nMax - 1 < nSel) {
+        nSel = 0;
+    }
+    xglSoundEffectNormalID(3, 0);
+    return nSel;
+}
+
+extern int PartyFriendCheck(int);
+
+/* TODO: near-miss (LENGTH) - the nType==1 branch if-converts to movz in
+   ours; the original keeps a separate branchy andi block. Parked. */
+/* Find the highest current value of one stat across the party, rounded per type */
+int MenuParaUpMaxGet(int nType)
+{
+    int i;
+    unsigned int nMax;
+    unsigned int v;
+
+    nMax = 0;
+    for (i = 1; i < 8; i++) {
+        if (PartyFriendCheck(i) != 0) {
+            v = MenuParaPtNowGet(i, nType);
+            if (nMax < v) {
+                nMax = v;
+            }
+        }
+    }
+    if (nType == 0) {
+        return (unsigned short)((unsigned short)(nMax / 10) * 10);
+    }
+    if (nType == 1) {
+        return nMax & 0xFFFE;
+    }
+    return nMax;
+}
+
+typedef struct {
+    char pad0[2];
+    short h2;                  /* 0x02 */
+    char pad4[0x36 - 4];
+    short h36;                 /* 0x36 */
+} MENUEPOBJ;
+extern MENUEPOBJ *func_A11108(int, int *, int *);
+extern int PartyAllPartyGet(int *, int);
+
+/* TODO: near-miss (LENGTH) - the party loop in the original is not
+   exit-test-duplicated (same class as MenuEtherCapSet). Parked. */
+/* Ask whether a character's (or the whole party's) EP is already full */
+int MenuCharEpCheck(int nChr)
+{
+    int buf1[4];
+    int buf2[4];
+    int list[16];
+    MENUEPOBJ *p;
+    int *q;
+    int n;
+    int i;
+
+    if (nChr == 0) {
+        return 0;
+    }
+    if (nChr < 0) {
+        n = PartyAllPartyGet(list, 0);
+        i = 0;
+        q = list;
+loop:
+        if (i < n) {
+            p = func_A11108(*q, buf1, buf2);
+            q++;
+            if (p->h36 == p->h2) {
+                i++;
+                goto loop;
+            }
+        }
+        if (i != n) {
+            return 0;
+        }
+        return 1;
+    }
+    p = func_A11108(nChr, buf1, buf2);
+    if (p->h36 == p->h2) {
+        return 1;
+    }
+    return 0;
 }
