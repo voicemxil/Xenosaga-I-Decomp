@@ -1645,3 +1645,6 @@ _read_r = 0x00337EF8, 0x60; // newlib_readr
 _write_r = 0x00337CC8, 0x60; // newlib_writer
 _lseek_r = 0x00337E98, 0x60; // newlib_lseekr
 _fstat_r = 0x00337E38, 0x5C; // newlib_fstatr
+vprintf = 0x00333C80, 0x28; // newlib_vprintf
+vsprintf = 0x00333CA8, 0x54; // newlib_vsprintf
+vsprintf_r = 0x00333D00, 0x54; // newlib_vsprintf
