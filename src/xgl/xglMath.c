@@ -120,3 +120,23 @@ float xglAtan2(float y, float x)
     }
     return r;
 }
+
+/* TODO: near-miss (7d) - the original bit-copies f through a GPR
+ * (mfc1/mtc1 round-trip) before trunc.w.s; every pun shape tried either
+ * collapses to a plain trunc or spills to the stack. */
+int F2I(float f)
+{
+    int bits;
+    float x;
+
+    bits = *(int *) &f;
+    x = *(float *) &bits;
+    return (int) x;
+}
+
+/* LCG step over the shared 64-bit seed; 15-bit result */
+unsigned short xglSRand(void)
+{
+    iRandSeed = iRandSeed * 0x41c64e6dULL + 0x3039;
+    return (unsigned long long) iRandSeed >> 0x10 & 0x7FFF;
+}
