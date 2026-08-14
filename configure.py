@@ -99,6 +99,8 @@ FILE_CFLAGS_OVERRIDE = {
     "_floatdidf.c": "-O2 -G8 -mlong32",
     "gcc_frame.c": ("-O2 -G0 -mlong32 -Inewlib/gccsrc -Inewlib/libc/include "
                 "-I/usr/local/ps2dev/ee-gcc/lib/gcc-lib/ee/2.9-ee-991111/include"),
+    "_main.c": ("-O2 -G0 -mlong32 -Inewlib/gccsrc -Inewlib/libc/include "
+                "-I/usr/local/ps2dev/ee-gcc/lib/gcc-lib/ee/2.9-ee-991111/include"),
     "_fixdfdi.c": "-O2 -G8 -mlong32",
     "_divdi3.c": "-O2 -G8 -mlong32",
     "_moddi3.c": "-O2 -G8 -mlong32",
@@ -204,6 +206,7 @@ FILE_FIX_FLAGS = {
     "_fixunssfdi.c": "--barrier-return-store --barrier-branch-move",
     "_floatdidf.c": "--barrier-return-store --barrier-branch-move",
     "gcc_frame.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "_main.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     # fabs: SET_HIGH_WORD's final `return x` computes the masked result
     # into a4/a1-family regs and needs an explicit copy into $2; gas's
     # reorder pass steals that copy into the jr $31 delay slot, but the
