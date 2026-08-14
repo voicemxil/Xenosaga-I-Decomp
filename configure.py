@@ -331,7 +331,7 @@ def generate_ninja(asm_files, src_files, asset_files):
         # assembler reproduces the original ee-as encodings (move->daddu,
         # .set mips1 wraps for la/mem-macros/FP conversions, conditional
         # li.s hazard nop).
-        f.write(f"  command = $cc $cflags -S -o $out.s $in && python3 tools/fix_cc_asm.py $out.s $fixflags && {AS} {CC_ASFLAGS} $asflags -o $out $out.s\n")
+        f.write(f"  command = $cc $cflags -Iinclude -S -o $out.s $in && python3 tools/fix_cc_asm.py $out.s $fixflags && {AS} {CC_ASFLAGS} $asflags -o $out $out.s\n")
         f.write(f"  description = CC $in\n\n")
 
         f.write(f"rule ld\n")
