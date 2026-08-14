@@ -12,13 +12,42 @@ typedef struct JCLASS
     int  f0;
     int  f4;
     int  nMethods;    /* 0x08 */
-    PRIM aMethod[1];  /* 0x0C */
+    PRIM aMethod[8];  /* 0x0C - sizeof(JCLASS)=108, per JS_init's alloc stride */
 } JCLASS;
 
 int numPrimitive;
 PRIM *primitive;
+int numClass;
+JCLASS *classes;
+
+extern void *RSRC_alloc(int hRsrc, int nSize, int nFlags);
 
 extern int D_004DA5A8[4];
+
+/* Reset the pools and allocate them from the resource arena */
+void JS_init(int hRsrc, int nPrimitives, int nClasses)
+{
+    numClass = 0;
+    numPrimitive = 0;
+    primitive = RSRC_alloc(hRsrc, nPrimitives * sizeof(PRIM), 0);
+    classes = RSRC_alloc(hRsrc, nClasses * sizeof(JCLASS), 0);
+}
+
+/* Register a class: one class slot plus a type-7 primitive referencing it */
+JCLASS *JS_loadClass(int nName)
+{
+    JCLASS *pClass;
+    PRIM *pPrim;
+
+    pClass = &classes[numClass++];
+    pPrim = &primitive[numPrimitive++];
+
+    pClass->f0 = nName;
+    pPrim->nType = 7;
+    pPrim->f4 = nName;
+    pPrim->f8 = (int) pClass;
+    return pClass;
+}
 
 /* Append an integer constant to the primitive pool */
 int JS_loadConstInteger(int nValue, int nExtra)

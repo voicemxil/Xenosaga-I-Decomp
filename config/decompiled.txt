@@ -1724,3 +1724,4 @@ eMessageCpy = 0x0027BDC8, 0x1C; // eMessage
 xglCreateSignal = 0x002188A0, 0x2C; // xglThread
 xglThreadRotate = 0x002188D0, 0x64; // xglThread
 xglSleep = 0x00218938, 0x2C; // xglThread
+JS_init = 0x0026B130, 0x70; // JS
