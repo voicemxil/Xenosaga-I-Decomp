@@ -191,8 +191,14 @@ FILE_FIX_FLAGS = {
     # jr with a genuine nop in the slot (found by the Menu subagent).
     # MenuFaceEpidGet: one branch-likely annul bit at site 3 (flagged by
     # the wave-3 Menu subagent, site index found by sweep).
+    # MenuAgwsListMake_Gun/_Acc/_Pilot: the original's sched2 emits the
+    # loop-preheader `addiu s0,s0,8/9` increment BEFORE the MenuWork
+    # %lo() addiu; ours orders them the other way. Instruction 30 is the
+    # %lo addiu in all three (same preheader shape).
     "Menu.c": ("--barrier-return-store MenuRWeaponCheck2 "
-               "--branch-likely MenuFaceEpidGet:3"),
+               "--branch-likely MenuFaceEpidGet:3 "
+               "--swap-adjacent MenuAgwsListMake_Gun:30,"
+               "MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30"),
     # TMENU_addItem: the original orders the li $7,-1 / li $5,1024
     # MSG_convert argument pair the other way (instruction 4 is the
     # li $5,1024).
