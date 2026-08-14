@@ -518,6 +518,168 @@ def war_restore_swap(flat, scope):
     return res
 
 
+RE_INSN = re.compile(r'^\t[a-z]')
+RE_ANY_JUMP_OR_BRANCH = re.compile(
+    r'^\t(b|beq|bne|beqz|bnez|blez|bgtz|bltz|bgez'
+    r'|beql|bnel|beqzl|bnezl|blezl|bgtzl|bltzl|bgezl'
+    r'|bc1t|bc1f|bc1tl|bc1fl|j|jr|jal|jalr)[ \t]')
+RE_MEMOP = re.compile(
+    r'^\t(lw|lh|lb|lbu|lhu|lwu|ld|lq|lwc1|l\.s|ldc1'
+    r'|sw|sh|sb|sd|sq|swc1|s\.s|sdc1)[ \t]')
+
+
+def insn_regs(line):
+    """(writes, reads) register sets for a simple instruction line.
+
+    Conservative classifier used by the swap passes' independence check:
+    stores and branches read every register operand; otherwise the first
+    operand is the destination and the rest are sources. Register names
+    are taken literally ($2 vs $v0 never mix within one gcc emission)."""
+    m = re.match(r'^\t([a-z0-9.]+)\t(.*)$', line)
+    if not m:
+        return set(), set()
+    mnem, rest = m.group(1), m.group(2)
+    ops = [o.strip() for o in rest.split(',')]
+    regs_of = lambda s: set(re.findall(r'\$\w+', s))
+    if RE_STORE.match(line) or mnem in ('sq', 'sdc1') or mnem.startswith(('b', 'j')) or mnem.startswith('c.'):
+        return set(), regs_of(rest)
+    writes = regs_of(ops[0]) if ops else set()
+    reads = regs_of(','.join(ops[1:]))
+    # a load/store's base register inside (...) of operand 0 is a read
+    mem = re.search(r'\(([^)]*)\)', ops[0]) if ops else None
+    if mem:
+        writes -= regs_of(mem.group(0))
+        reads |= regs_of(mem.group(0))
+    return writes, reads
+
+
+def swap_ok(a, b):
+    """True if adjacent instructions a/b may exchange positions.
+
+    Conservative: both must be plain non-branch instructions, at most one
+    may touch memory, and neither may write a register the other reads or
+    writes (nor read one the other writes)."""
+    if not (RE_INSN.match(a) and RE_INSN.match(b)):
+        return False
+    if RE_ANY_JUMP_OR_BRANCH.match(a) or RE_ANY_JUMP_OR_BRANCH.match(b):
+        return False
+    if RE_MEMOP.match(a) and RE_MEMOP.match(b):
+        return False
+    wa, ra = insn_regs(a)
+    wb, rb = insn_regs(b)
+    return not (wa & (rb | wb)) and not (wb & ra)
+
+
+def swap_adjacent_insns(flat, sites):
+    """Swap the two instructions of an explicitly named adjacent pair.
+
+    Site-keyed like flip_branch_likely/pin_slot_nops: FUNC:N names the
+    pair whose FIRST instruction is the Nth instruction of FUNC (0-based,
+    counting every instruction line in emission order -- directives,
+    labels and #-comments are not counted). The two instruction lines
+    must be literally adjacent (no label or directive between them) and
+    pass swap_ok's independence check, otherwise the site is left
+    untouched. The original build's second scheduler simply ordered the
+    pair the other way (e.g. TMENU_addItem's li $7,-1 / li $5,1024
+    argument setup); the swapped bytes are verified against the original
+    binary, so semantics are the original's by definition."""
+    res = []
+    cur = None
+    idx = 0
+    i = 0
+    while i < len(flat):
+        line = flat[i]
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            idx = 0
+        if RE_INSN.match(line):
+            if (f"{cur}:{idx}" in sites and i + 1 < len(flat)
+                    and swap_ok(line, flat[i + 1])):
+                res.append(flat[i + 1])
+                res.append(line)
+                idx += 2
+                i += 2
+                continue
+            idx += 1
+        res.append(line)
+        i += 1
+    return res
+
+
+def swap_into_slot(flat, sites):
+    """Exchange a jal's filled delay-slot insn with the insn before it.
+
+    FUNC:N names the Nth `jal` of FUNC (0-based, counting every jal line
+    in emission order). The site must be a gcc-filled slot:
+
+        <A>                      <B>
+        .set noreorder           .set noreorder
+        .set nomacro     -->     .set nomacro
+        jal target               jal target
+        <B>                      <A>
+        .set macro               .set macro
+        .set reorder             .set reorder
+
+    Both orders execute A and B before the callee runs; only their
+    mutual order swaps, so A/B must pass swap_ok and neither may touch
+    $31. The original build filled the slot with the OTHER of the two
+    argument-setup copies (PauseMenu's move $5,$16 / move $6,$2 around
+    jal GameSnapShotSaveFile). Ineligible sites are left untouched."""
+    res = []
+    cur = None
+    idx = 0
+    i = 0
+    while i < len(flat):
+        line = flat[i]
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            idx = 0
+        if line.startswith("\tjal\t"):
+            if (f"{cur}:{idx}" in sites and i >= 3 and i + 1 < len(flat)):
+                a, s1, s2, slot = flat[i - 3], flat[i - 2], flat[i - 1], flat[i + 1]
+                sets = [x.strip().replace("\t", " ") for x in (s1, s2)]
+                if (sets == [".set noreorder", ".set nomacro"]
+                        and swap_ok(a, slot)
+                        and "$31" not in a + slot and "$ra" not in a + slot):
+                    res[-3:] = [slot, s1, s2]
+                    res.append(line)
+                    res.append(a)
+                    idx += 1
+                    i += 2
+                    continue
+            idx += 1
+        res.append(line)
+        i += 1
+    return res
+
+
+def mtc1_hazard_nops(flat, sites):
+    """Pin a literal nop after an explicitly named mtc1.
+
+    The original ee-as padded some COP1-move stalls that no register/
+    distance heuristic reproduces (see the chain-tracking NOTE in main);
+    gcc sometimes marks the slot with a `#nop` comment modern gas
+    ignores (nmlPacketAddTransMicrocodeInit), sometimes not at all
+    (nmlModelFogPara's mtc1 $0,$f1 before a sub.s that reads neither).
+    FUNC:N names the Nth mtc1 of FUNC (0-based, counting every mtc1
+    line of the post-processed asm in emission order, so mtc1s
+    synthesized from li.s expansions count too); a literal nop is
+    appended after it. Bytes are verified against the original binary."""
+    res = []
+    cur = None
+    idx = 0
+    for line in flat:
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            idx = 0
+        res.append(line)
+        if re.match(r'^\tmtc1[ \t]', line):
+            if f"{cur}:{idx}" in sites:
+                res.append("\tnop")
+            idx += 1
+    return res
+
+
 RE_FLIP_COND_BRANCH = re.compile(
     r"^\t(beql?|bnel?|beqzl?|bnezl?|blezl?|bgtzl?|bltzl?|bgezl?"
     r"|bc1tl?|bc1fl?)([ \t])")
@@ -565,7 +727,8 @@ def main(path, omitted_hazards, barrier_return_store=None,
          no_fill_delay=None, expand_sym_loads=False,
          unfill_slots=None, barrier_lo_load=None,
          branch_likely=None, branch_unlikely=None,
-         war_restore=None, pin_slot=None, lis_hazard_nop=None):
+         war_restore=None, pin_slot=None, lis_hazard_nop=None,
+         swap_adjacent=None, swap_slot=None, mtc1_nop=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -844,6 +1007,18 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = pin_slot_nops(flat, pin_slot)
 
+    if swap_adjacent:
+        flat = "\n".join(out).split("\n")
+        out = swap_adjacent_insns(flat, swap_adjacent)
+
+    if swap_slot:
+        flat = "\n".join(out).split("\n")
+        out = swap_into_slot(flat, swap_slot)
+
+    if mtc1_nop:
+        flat = "\n".join(out).split("\n")
+        out = mtc1_hazard_nops(flat, mtc1_nop)
+
     if barrier_branch_move is not None:
         # Post-pass so it also covers lines synthesized by earlier passes
         # (e.g. the li.d expansion's trailing dsll32): keep a simple ALU
@@ -927,6 +1102,26 @@ if __name__ == "__main__":
     parser.add_argument("--branch-unlikely", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites flipped from the "
                              "branch-likely form back to the plain form")
+    parser.add_argument("--swap-adjacent", default=None, metavar="SITES",
+                        help="comma-separated FUNC:N sites: swap the adjacent "
+                             "independent instruction pair whose FIRST insn is "
+                             "the Nth instruction of FUNC (0-based, counting "
+                             "every instruction line in emission order; "
+                             "directives/labels/#-comments not counted). "
+                             "Ineligible sites (branches, mutual register "
+                             "dependence, two memory ops, non-adjacent lines) "
+                             "are left untouched")
+    parser.add_argument("--swap-into-slot", default=None, metavar="SITES",
+                        help="comma-separated FUNC:N sites: at the Nth jal of "
+                             "FUNC (0-based, emission order), exchange the "
+                             "gcc-filled delay-slot insn with the insn "
+                             "immediately before the jal's noreorder block")
+    parser.add_argument("--mtc1-nop", default=None, metavar="SITES",
+                        help="comma-separated FUNC:N sites: append a literal "
+                             "nop after the Nth mtc1 of FUNC (0-based, "
+                             "emission order in the post-processed asm) -- "
+                             "the ee-as COP1-move stall pad no heuristic "
+                             "reproduces")
     parser.add_argument("--expand-sym-loads", action="store_true",
                         help="also manually expand integer loads with "
                              "symbol(+off)(reg) addresses (see "
@@ -958,4 +1153,5 @@ if __name__ == "__main__":
          scope(args.unfill_gcc_slots), scope(args.barrier_lo_load),
          scope(args.branch_likely), scope(args.branch_unlikely),
          scope(args.war_restore_swap), scope(args.pin_slot_nop),
-         scope(args.lis_hazard_nop))
+         scope(args.lis_hazard_nop), scope(args.swap_adjacent),
+         scope(args.swap_into_slot), scope(args.mtc1_nop))
