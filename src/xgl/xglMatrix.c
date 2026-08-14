@@ -96,7 +96,8 @@ void xglMatrixMul(void *pDst, void *pLeft, void *pRight)
         ".set reorder" : : "r"(pDst), "r"(pLeft), "r"(pRight));
 }
 
-/* TODO: near-match - the inner copy loop swaps $v0/$v1/$a2 and the addu operand order */
+/* Matched: writing the loop pointers as (index << 2) + base (scaled term first)
+ * fixes both the addu operand order and the $v0/$v1/$a2 assignment. */
 /* Transpose a 4x4 matrix into the destination */
 void xglMatrixReverse(float *pDst, float *pSrc)
 {
@@ -109,8 +110,8 @@ void xglMatrixReverse(float *pDst, float *pSrc)
     int n;
 
     for (i = 0, n = 0; i < 4; i++, n += 4) {
-        pd = &aTmp[n];
-        ps = &pSrc[i];
+        pd = (float *)((n << 2) + (int)aTmp);
+        ps = (float *)((i << 2) + (int)pSrc);
         for (j = 3; j >= 0; j--) {
             *pd = *ps;
             ps += 4;
@@ -555,4 +556,146 @@ void xglMatrixRotZ(XGL_MATRIX *pDst, XGL_MATRIX *pSrc, float fAngle)
         "sqc2 $vf29, 0x0(%0)\n"
         "sqc2 $vf30, 0x10(%0)\n"
         ".set reorder" : : "r"(pDst), "r"(pSrc), "r"(pSC) : "$2", "memory");
+}
+extern void xglVectorScaleXYZ(float *pDest, const float *pSource, float fScale);
+
+/* TODO: near-miss (61/113 REGISTER-class diffs; needs the li.s fixer
+ * extension for the $f20 fOne anyway). Frame, structure, VU0 blocks and
+ * all schedules match; remaining is a float-reg permutation in the mix
+ * groups (fCos f12-vs-f9, fBy f9-vs-f10, fAy f2-vs-f4). The reinterpret
+ * `fCos = *(float *)&nCosN` must stay IMMEDIATELY after its asm block or
+ * gcc spills it through a stack slot (+16 frame bytes) instead of mtc1.
+ * Scalar temps (fAx..fVz) are load-bearing: they keep values in regs
+ * across the volatile VU0 blocks, reproducing the original cross-group
+ * register reuse. */
+/* Rodrigues rotation about an arbitrary axis: A = (1-cos)*v and B = sin*v
+ * are built with xglVectorScaleXYZ, the 3x3 mix is assembled on the stack
+ * from scalar temps (cos re-fetched from VU0 per diagonal cell) and
+ * multiplied onto pSrc */
+void xglMatrixRotV(XGL_MATRIX *pDst, XGL_MATRIX *pSrc, XGL_VECTOR *pVec, float fAngle)
+{
+    int nCos0;
+    int nSin;
+    int nCos1;
+    int nCos2;
+    int nCos3;
+    float aA[4];
+    float aB[4];
+    float aMtx[16];
+    float fOne;
+    float fCos;
+    float fAx, fAy, fAz;
+    float fBx, fBy, fBz;
+    float fVx, fVy, fVz;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nCos0)
+        : "r"((unsigned int)Vu0CallCos >> 3), "r"(fAngle));
+    fCos = *(float *)&nCos0;
+    fOne = 1.0f;
+    xglVectorScaleXYZ(aA, &pVec->x, fOne - fCos);
+
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nSin)
+        : "r"((unsigned int)Vu0CallSin >> 3), "r"(fAngle));
+    fCos = *(float *)&nSin;
+    xglVectorScaleXYZ(aB, &pVec->x, fCos);
+
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nCos1)
+        : "r"((unsigned int)Vu0CallCos >> 3), "r"(fAngle));
+    fCos = *(float *)&nCos1;
+    fVx = pVec->x;
+    fVy = pVec->y;
+    fAx = aA[0];
+    fAy = aA[1];
+    fAz = aA[2];
+    fBz = aB[2];
+    fBy = aB[1];
+    aMtx[0] = fAx * fVx + fCos;
+    aMtx[1] = fAy * fVx + fBz;
+    aMtx[2] = fAz * fVx - fBy;
+    aMtx[3] = 0.0f;
+    aMtx[4] = fAx * fVy - fBz;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nCos2)
+        : "r"((unsigned int)Vu0CallCos >> 3), "r"(fAngle));
+    fCos = *(float *)&nCos2;
+    fVz = pVec->z;
+    fBx = aB[0];
+    aMtx[5] = fAy * fVy + fCos;
+    aMtx[6] = fAz * fVy + fBx;
+    aMtx[7] = 0.0f;
+    aMtx[8] = fAx * fVz + fBy;
+    aMtx[9] = fAy * fVz - fBx;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nCos3)
+        : "r"((unsigned int)Vu0CallCos >> 3), "r"(fAngle));
+    fCos = *(float *)&nCos3;
+    aMtx[10] = fAz * fVz + fCos;
+    aMtx[11] = 0.0f;
+    aMtx[12] = 0.0f;
+    aMtx[13] = 0.0f;
+    aMtx[14] = 0.0f;
+    aMtx[15] = fOne;
+    xglMatrixMul(pDst, pSrc, aMtx);
+}
+
+/* Build a perspective frustum matrix on the stack and multiply it onto
+ * pSrc (gas synthesizes the inline -1.0f li.s as lui $at/mtc1 natively) */
+void xglMatrixFrustum(XGL_MATRIX *pDst, XGL_MATRIX *pSrc,
+                      float fLeft, float fRight, float fBottom, float fTop,
+                      float fNear, float fFar)
+{
+    float aMtx[16];
+
+    aMtx[0] = 2.0f * fNear / (fRight - fLeft);
+    aMtx[1] = 0.0f;
+    aMtx[2] = 0.0f;
+    aMtx[3] = 0.0f;
+    aMtx[4] = 0.0f;
+    aMtx[5] = 2.0f * fNear / (fTop - fBottom);
+    aMtx[6] = 0.0f;
+    aMtx[7] = 0.0f;
+    aMtx[8] = (fRight + fLeft) / (fRight - fLeft);
+    aMtx[9] = (fTop + fBottom) / (fTop - fBottom);
+    aMtx[10] = -(fFar + fNear) / (fFar - fNear);
+    aMtx[11] = -1.0f;
+    aMtx[12] = 0.0f;
+    aMtx[13] = 0.0f;
+    aMtx[14] = -(2.0f * fFar * fNear) / (fFar - fNear);
+    aMtx[15] = 0.0f;
+    xglMatrixMul(pDst, pSrc, aMtx);
 }

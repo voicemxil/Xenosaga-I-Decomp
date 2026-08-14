@@ -1613,8 +1613,12 @@ void MenuModelUnitOpen(char *pUnit, int nType)
     }
 }
 
-/* Search a character's three skill slots for the given skill, returning slot+1 */
-int MenuSkillEquipCheck(short nChr, short nId)
+/* Search a character's three skill slots for the given skill, returning slot+1.
+   K&R definition on purpose (same lever as MenuTecEquipCheck): retail callers
+   pass the char byte and skill word raw; the callee narrows. */
+int MenuSkillEquipCheck(nChr, nId)
+short nChr;
+short nId;
 {
     short *p;
     short v;
@@ -3716,4 +3720,60 @@ void MenuAgwsListMake_Wpn(void)
     WindowSPItemChange(win);
     WindowSPSetSelect(win,
         &D_0036C200[*((signed char *)&MenuWork + MenuWork.b56 + 0x10) * 5 - 5]);
+}
+
+/* --- Skill list window --- */
+extern char *MenuSkillList;
+extern int SkillSetLvGet(int);
+extern char D_004DB640[];
+
+/* TODO: near-miss (REGISTER ~40) - body, K&R MenuSkillEquipCheck call and
+   window tail are exact; the four callee-saved assignments (walker ptr,
+   list/pS ptr2, pSort, win) come out rotated (s0/s1/s2/s3 -> s3/s0/s4/s2).
+   Same allocator-priority tie class as MenuEtherListMake02. */
+/* Rebuild the skill list for the current character and refresh its window */
+void MenuSkillListChange01(void)
+{
+    void *ptr;
+    void *ptr2;
+    int *pSort;
+    MENUTECWORK *w2;
+    SHOPWINSP *win;
+    int n;
+    int cnt;
+
+    pSort = MenuSortAddrGet(0);
+    ptr2 = MenuListGet(0);
+    ptr = &MenuWork;
+    win = (SHOPWINSP *)(MenuSkillList + 12);
+    MenuSortSet(0, 64, ((MENUTECWORK *)ptr)->bChr);
+    MenuListMake(0, 0);
+    n = MenuSortCheck(0);
+    if (n > 0) {
+        w2 = (MENUTECWORK *)ptr;
+        ptr = ptr2;
+        ptr2 = pSort;
+        cnt = n;
+        do {
+            ((MENUTECLISTENT *)ptr)->f4 = SkillSetLvGet(*(int *)ptr2);
+            if (MenuSkillEquipCheck(w2->bChr, *(int *)ptr2) == 0) {
+                ((MENUTECLISTENT *)ptr)->b9 = 0;
+            } else {
+                ((MENUTECLISTENT *)ptr)->b9 = 1;
+            }
+            ptr2 = (int *)ptr2 + 1;
+            cnt--;
+            ptr = (MENUTECLISTENT *)ptr + 1;
+        } while (cnt != 0);
+    }
+    win->b01 = 3;
+    win->b15 = 8;
+    win->h0C = 256;
+    win->h0E = 198;
+    win->b14 = 1;
+    win->p10 = D_004DB640;
+    win->p1C = MenuListGet(0);
+    WindowSPItemChange(win);
+    WindowSPSetSelect(win, &D_0036C200[20]);
+    WindowSPSelect(win, 0);
 }

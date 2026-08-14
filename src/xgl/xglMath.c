@@ -38,31 +38,37 @@ float xglAsin(float x)
     return r;
 }
 
-/* TODO: near-miss (77/107 words differ, +1 word length). Structure is
- * fully correct (signed-zero y==0 case via raw bit test, octant
- * classification, reciprocal-range reduction, degree-8 minimax poly all
- * verified against the asm) -- remaining diffs are $f12 vs $f2 register
- * allocation for the abs'd y/x and a bc1fl/bc1tl branch-likely polarity
- * swap in the octant test. Every if/else polarity and abs-placement
- * variant tried keeps the same two symptoms; likely allocator tie-break
- * territory (LENGTH/REGISTER-adjacent), not a logic error. */
+/* MATCHES (107 words) under the proposed li.s fixer extension
+ * (.scratch-xgl/fix_cc_asm_lis.py, A/B via XENO_FIX_CC_ASM) -- NOT yet
+ * registered because tools/fix_cc_asm.py is shared. Levers that got here:
+ * compound assignments (r *= t2; r -= c;) keep the poly accumulator
+ * in-place (original's single-register $f9 shape) AND stop combine from
+ * distributing (r*t2 + 1.0f)*t into r*t2*t + t; the quotient reuses y's
+ * register (y = x / y); the empty-then octant shape `if (0<=x) {} else
+ * octant=1;` reproduces the bc1fl polarity; the y==0 bit test goes
+ * through a copied int temp (mfc1/move pair). The fixer supplies: li.s
+ * low-half-zero synthesis (lui $at/mtc1 for 1.0f), the hazard nop after
+ * that mtc1 before an unrelated FP compute, and the noreorder barrier
+ * that keeps a li.s-expanded lwc1 out of a return delay slot. */
 /* atan2 via minimax polynomial approximation of atan(t) on [0,1],
  * with octant classification + argument reduction */
 float xglAtan2(float y, float x)
 {
-    float t, t2, r;
-    int octant;
+    float t2, r;
     int flip;
+    int octant;
+    int n;
 
-    r = 0.002866225783f;
     flip = 0;
+    r = 0.002866225783f;
     octant = 0;
 
     if (y == 0.0f) {
-        if (x >= 0.0f) {
+        if (0.0f <= x) {
             return 0.0f;
         }
-        if (*(int *)&y < 0) {
+        n = *(int *)&y;
+        if (n < 0) {
             return -3.141592741f;
         }
         return 3.141592741f;
@@ -74,14 +80,13 @@ float xglAtan2(float y, float x)
         return 1.570796371f;
     }
 
-    if (y >= 0.0f) {
-        if (x >= 0.0f) {
-            octant = 0;
+    if (0.0f <= y) {
+        if (0.0f <= x) {
         } else {
             octant = 1;
         }
     } else {
-        if (x >= 0.0f) {
+        if (0.0f <= x) {
             octant = 2;
         } else {
             octant = 3;
@@ -91,31 +96,41 @@ float xglAtan2(float y, float x)
     x = __builtin_fabsf(x);
 
     if (x < y) {
-        t = x / y;
+        y = x / y;
         flip = 1;
     } else {
-        t = y / x;
+        y = y / x;
     }
 
-    t2 = t * t;
-    r = r * t2 - 0.01616573706f;
-    r = r * t2 + 0.04290961474f;
-    r = r * t2 - 0.07528963685f;
-    r = r * t2 + 0.1065626368f;
-    r = r * t2 - 0.1420889944f;
-    r = r * t2 + 0.1999355108f;
-    r = r * t2 - 0.3333314657f;
-    r = r * t2 + 1.0f;
-    r = r * t;
+    t2 = y * y;
+    r *= t2;
+    r -= 0.01616573706f;
+    r *= t2;
+    r += 0.04290961474f;
+    r *= t2;
+    r -= 0.07528963685f;
+    r *= t2;
+    r += 0.1065626368f;
+    r *= t2;
+    r -= 0.1420889944f;
+    r *= t2;
+    r += 0.1999355108f;
+    r *= t2;
+    r -= 0.3333314657f;
+    r *= t2;
+    r += 1.0f;
+    r *= y;
     if (flip != 0) {
         r = 1.570796371f - r;
     }
 
     if (octant == 1) {
         r = 3.141592741f - r;
-    } else if (octant == 2) {
+    }
+    if (octant == 2) {
         r = -r;
-    } else if (octant == 3) {
+    }
+    if (octant == 3) {
         r = r - 3.141592741f;
     }
     return r;
@@ -368,14 +383,20 @@ extern void xglDmaDirectSrcChain(unsigned int nCh, unsigned int nAddr);
  * FILE_FIX_FLAGS["xglMath.c"] = "--omit-hazard qmtc2". The variant
  * below (mfc1 inside the noreorder block) avoids the nop but then the
  * lwc1 loses its scheduling priority and lands below the prologue. */
+/* TODO: near-miss (2 words, SCHEDULING): the original's lwc1 of the 0.1f
+ * seed sits ABOVE the `addiu sp,sp,-16` prologue word; no source form can
+ * hoist body code above the textual prologue. Everything else matches
+ * with the mfc1 staged inside the noreorder block (that removed the gas
+ * mfc1->qmtc2 hazard nop the original does not have; was 12 diffs). */
 /* Seed the VU0 R register, reset the LCG seed and upload the VU0
  * microcode overlay through a source-chain DMA */
 void xglGeometryInit(void)
 {
     __asm__ __volatile__(".set noreorder\n"
-        "qmtc2 %0, $vf1\n"
+        "mfc1 $2, %0\n"
+        "qmtc2 $2, $vf1\n"
         "vrinit $R, $vf1x\n"
-        ".set reorder" : : "r"(0.1f));
+        ".set reorder" : : "f"(0.1f) : "$2");
     iRandSeed = 0x12345678;
     xglDmaDirectSrcChain(0, (unsigned int)PacketDataVu0MicroCode);
 }

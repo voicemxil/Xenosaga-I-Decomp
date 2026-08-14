@@ -20,21 +20,16 @@ void *xglTaskWaitRemove(XGL_TASK *node)
 
 /* Carve `count` fixed-size (0x80-byte) task nodes out of the space right
  * after the queue header and chain them onto the queue's free list */
-/* TODO: near-miss (34/37 words match; LENGTH class). The original zeros
- * v0 at function entry (implying a real, unused return value -- tried
- * `int` return with an implicit top-level `return 0`, which reproduces
- * that) and computes one dead `node + 0x80` right after the loop (an
- * unused address one past the last carved node) that every natural
- * source form here gets dead-code-eliminated. Everything else -- the
- * resetFlag call, the do-while chaining loop with its `bnez` back-edge,
- * the trailing field stores -- matches exactly. */
-void xglTaskInitial(XGL_TASK *queue, int count, int resetFlag)
+/* Returns the address one past the last carved node (the entry `move
+ * v0,zero` and the post-loop `node + 0x80` are that return value, not
+ * dead code -- solving the old 34/37 near-miss). */
+XGL_TASK *xglTaskInitial(XGL_TASK *queue, int count, int resetFlag)
 {
     XGL_TASK *node = (XGL_TASK *)((char *)queue + 0x10);
     int i;
 
     if (count == 0) {
-        return;
+        return 0;
     }
     if (resetFlag != 0) {
         sceGsResetGraph(1, 0, 0, 0);
@@ -52,6 +47,7 @@ void xglTaskInitial(XGL_TASK *queue, int count, int resetFlag)
     node->field4 = 0;
     queue->field4 = 0;
     queue->field8 = 0;
+    return (XGL_TASK *)((char *)node + 0x80);
 }
 
 /* Allocate a node off queue's free list and splice it into the active

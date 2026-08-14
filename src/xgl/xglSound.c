@@ -396,15 +396,9 @@ int xglSoundEffectCheckID(int nCode)
     return nResult;
 }
 
-/* TODO: near-match (2/N words) - pinning pName to $3 (register pN) fixed
- * the original 3-diff issue (the file-name copy landing in $v0 and
- * blocking the pre-branch %hi load of SoundWork). One diff remains: the
- * lui computing SoundWork's %hi and the beqz(pN) branch test are
- * independent (no data dependency) and land in the opposite order from
- * the original (ours: beqz then lui; original: lui then beqz) -- a pure
- * list-scheduler tie-break. Tried: hoisting `pStream = &SoundWork.stream`
- * above the if (regresses badly, 37 diffs -- the compiler restructures
- * the whole function around the now-unconditional store). Leave as-is. */
+/* Matched by splitting the entry condition: `if (nChannel==0) {
+ * pStream = &SoundWork.stream; if (pN && open()>=0)` puts the %hi(SoundWork)
+ * lui between the two condition branches, exactly as the original. */
 /* Open a PCM stream file and start it playing on channel 0 */
 void xglSoundStreamOpenPcm(int nChannel, char *pName)
 {
@@ -413,9 +407,9 @@ void xglSoundStreamOpenPcm(int nChannel, char *pName)
     int nResult;
 
     pN = pName;
-    if (nChannel == 0 && pN != 0) {
+    if (nChannel == 0) {
         pStream = &SoundWork.stream;
-        if (xglCdStreamOpen(pStream, pN) >= 0) {
+        if (pN != 0 && xglCdStreamOpen(pStream, pN) >= 0) {
             pStream->nRingSize = 0x1000;
             xglCdStreamReadRing(pStream, 0x2000);
             pStream->nSent = 0;
@@ -433,15 +427,9 @@ void xglSoundStreamOpenPcm(int nChannel, char *pName)
     }
 }
 
-/* TODO: near-match (2/N words) - pinning pName to $3 (register pN) fixed
- * the original 3-diff issue (the file-name copy landing in $v0 and
- * blocking the pre-branch %hi load of SoundWork). One diff remains: the
- * lui computing SoundWork's %hi and the beqz(pN) branch test are
- * independent (no data dependency) and land in the opposite order from
- * the original (ours: beqz then lui; original: lui then beqz) -- a pure
- * list-scheduler tie-break. Tried: hoisting `pStream = &SoundWork.stream`
- * above the if (regresses badly, 37 diffs -- the compiler restructures
- * the whole function around the now-unconditional store). Leave as-is. */
+/* Matched by splitting the entry condition: `if (nChannel==0) {
+ * pStream = &SoundWork.stream; if (pN && open()>=0)` puts the %hi(SoundWork)
+ * lui between the two condition branches, exactly as the original. */
 /* Open a stereo VAG stream file and start it at the given volume */
 void xglSoundStreamOpenVagStereoParam(int nChannel, char *pName, int nPan, int nVol)
 {
@@ -451,9 +439,9 @@ void xglSoundStreamOpenVagStereoParam(int nChannel, char *pName, int nPan, int n
     int nMax;
 
     pN = pName;
-    if (nChannel == 0 && pN != 0) {
+    if (nChannel == 0) {
         pStream = &SoundWork.stream;
-        if (xglCdStreamOpen(pStream, pN) >= 0) {
+        if (pN != 0 && xglCdStreamOpen(pStream, pN) >= 0) {
             pStream->nRingSize = 0x1000;
             xglCdStreamReadRing(pStream, 0x2000);
             pStream->nSent = 0;
@@ -478,15 +466,9 @@ void xglSoundStreamOpenVagStereo(int nChannel, char *pName)
     xglSoundStreamOpenVagStereoParam(nChannel, pName, 0x1000, 0x7F);
 }
 
-/* TODO: near-match (2/N words) - pinning pName to $3 (register pN) fixed
- * the original 3-diff issue (the file-name copy landing in $v0 and
- * blocking the pre-branch %hi load of SoundWork). One diff remains: the
- * lui computing SoundWork's %hi and the beqz(pN) branch test are
- * independent (no data dependency) and land in the opposite order from
- * the original (ours: beqz then lui; original: lui then beqz) -- a pure
- * list-scheduler tie-break. Tried: hoisting `pStream = &SoundWork.stream`
- * above the if (regresses badly, 37 diffs -- the compiler restructures
- * the whole function around the now-unconditional store). Leave as-is. */
+/* Matched by splitting the entry condition: `if (nChannel==0) {
+ * pStream = &SoundWork.stream; if (pN && open()>=0)` puts the %hi(SoundWork)
+ * lui between the two condition branches, exactly as the original. */
 /* Open a mono VAG stream on one channel with panpot, volume and pitch */
 void xglSoundStreamOpenVagMultiParam(int nChannel, char *pName, int nPan, int nVol, int nPanpot)
 {
@@ -496,9 +478,9 @@ void xglSoundStreamOpenVagMultiParam(int nChannel, char *pName, int nPan, int nV
     int nMax;
 
     pN = pName;
-    if (nChannel == 0 && pN != 0) {
+    if (nChannel == 0) {
         pStream = &SoundWork.stream;
-        if (xglCdStreamOpen(pStream, pN) >= 0) {
+        if (pN != 0 && xglCdStreamOpen(pStream, pN) >= 0) {
             pStream->nRingSize = 0x1000;
             xglCdStreamReadRing(pStream, 0x2000);
             pStream->nSent = 0;
