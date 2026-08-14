@@ -1741,3 +1741,5 @@ floor = 0x00329720, 0x214; // libm
 __kernel_sin = 0x00328200, 0x238; // libm
 __kernel_cos = 0x003273D8, 0x2D4; // libm
 atan = 0x00329220, 0x4C8; // libm
+eNumberNumberChange = 0x00276C40, 0x8; // eNumber
+alignXYAxis = 0x00260D78, 0x8; // alignAxis
