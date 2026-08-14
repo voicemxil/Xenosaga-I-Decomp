@@ -48,7 +48,7 @@ def main():
     passed = failed = 0
     fail_names = []
     for e in entries:
-        r = repo.compare(e.name, e.addr, e.size)
+        r = repo.compare(e.name, e.addr, e.size, e.source)
         if r["status"] == "SKIP":
             if not args.fail_names:
                 print(f"  SKIP {e.name} - {r['reason']}")

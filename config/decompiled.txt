@@ -1650,3 +1650,12 @@ vsprintf = 0x00333CA8, 0x54; // newlib_vsprintf
 vsprintf_r = 0x00333D00, 0x54; // newlib_vsprintf
 
 // _vfprintf_r = 0x003315F0, 0x1660; // newlib_vfprintf -- TODO: in-tree trial compile of newlib 1.8.2 vfprintf.c (ee-gcc 2.96 -O2 -G8, -I newlib/libc/stdio -I newlib/libc/include -I 2.9's gcc include dir for stddef/stdarg) already yields EXACT matches for __sprint, __sbprintf and exponent, and 5720/5728 bytes for _vfprintf_r itself. Two known deltas: (1) the original has NO CHECK_INIT(fp) in the _vfprintf_r prologue (goes straight from localeconv() to cantwrite()); (2) va_arg codegen differs -- original loads the arg at 0(ap) THEN advances, trial build advances then loads at -8(ap). 2.96 cc1 predefines __mips_eabi AND __mips_single_float AND __mips64 (probed), so va-mips.h picks the eabi/single-float STDARG branch; the remaining diff is inside __va_next_addr expansion or a Sony-modified stdarg. cvt is 78d/448B (same TU). vfprintf wrapper is 116B orig vs 40B stock -- Sony's has extra logic (likely a fp->_data null fill-in). Trial artifacts: /tmp/vfp_src.c, /tmp/checkvfp.py in the container.
+
+_realloc_r = 0x00337F58, 0x5A0; // newlib_reallocr
+_calloc_r = 0x00337D28, 0xB4; // newlib_callocr
+__submore = 0x00337A58, 0xE8; // newlib_ungetc
+_mbtowc_r = 0x00336318, 0x34; // newlib_mbtowc
+strlwr = 0x0032FE08, 0x4C; // newlib_strlwr
+__sccl = 0x00333B80, 0x100; // newlib_vfscanf
+_pow5mult = 0x00336AC8, 0xFC; // newlib_mprec
+quorem = 0x00333E88, 0x22C; // newlib_quorem

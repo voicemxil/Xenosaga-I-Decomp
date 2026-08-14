@@ -103,6 +103,18 @@ FILE_CFLAGS_OVERRIDE = {
     "_umoddi3.c": "-O2 -G8 -mlong32",
 }
 
+# Vendored newlib 1.8.2 TUs (newlib/ dir): compiled against the vendored
+# header tree plus the toolchain's own stddef/stdarg. The gcc include dir
+# lives in the dev container.
+NEWLIB_CFLAGS = ("-O2 -G8 -Inewlib/libc/stdlib -Inewlib/libc/stdio -Inewlib/libc/string "
+                 "-Inewlib/libc/include "
+                 "-I/usr/local/ps2dev/ee-gcc/lib/gcc-lib/ee/2.9-ee-991111/include")
+for _f in ("newlib_reallocr.c", "newlib_callocr.c", "newlib_ungetc.c",
+           "newlib_mbtowc.c", "newlib_strlwr.c", "newlib_vfscanf.c",
+           "newlib_mprec.c", "newlib_quorem.c"):
+    FILE_CFLAGS_OVERRIDE[_f] = NEWLIB_CFLAGS
+
+
 
 def cflags_for(name):
     if is_sdk(name):

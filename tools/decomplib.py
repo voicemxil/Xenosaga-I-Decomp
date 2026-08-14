@@ -147,14 +147,30 @@ class Repo:
                     self._orig_funcs.setdefault(name, (value, size))
         return self._orig_funcs
 
-    def compare(self, name, addr, size):
+    def compare(self, name, addr, size, source=None):
         """Compare one function. Returns a dict:
 
         status: 'OK' | 'FAIL' | 'SKIP'
         reason: set when SKIP
         obj, offset, orig, built (raw word lists), diffs (indices)
+
+        `source` is the decompiled.txt source-file base name; when given
+        and that object defines the symbol, it takes precedence over the
+        global first-object-wins symbol map (two TUs may define the same
+        function, e.g. libc.c's WIP _dtoa_r helpers vs the vendored
+        newlib copies).
         """
-        loc = self.symbol_map.get(name)
+        loc = None
+        if source:
+            path = f"{self.built_dir}/{source}.o"
+            try:
+                off = self.obj(path).func_symbols().get(name)
+            except (ValueError, IndexError, OSError):
+                off = None
+            if off is not None:
+                loc = (path, off)
+        if loc is None:
+            loc = self.symbol_map.get(name)
         if loc is None:
             return {"status": "SKIP", "reason": "no object file found",
                     "name": name}
