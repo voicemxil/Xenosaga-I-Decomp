@@ -508,3 +508,18 @@ void nmlPacketAddScreen(void *pModel)
     sceVif1PkAddUpkData128(s_pPacket, *(TI *)((char *)pModel + 0x80));
     sceVif1PkCloseUpkCode(s_pPacket);
 }
+
+/* Queue a raw 64-bit (data, register) pair from a scratchpad entry */
+void packet_gs_entry64(u_int nReg, u_long *pData)
+{
+    int *pn;
+    u_long *q;
+    int n;
+
+    pn = &g_nGsEntry;
+    n = *pn;
+    q = &g_aGsTag.l[n * 2];
+    q[2] = pData[0];
+    q[3] = nReg;
+    *pn = n + 1;
+}
