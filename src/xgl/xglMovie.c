@@ -53,6 +53,12 @@ void xglMovieInfoInit(XGLMOVIEINFO *pInfo)
     pInfo->nUnkCB = 0;
 }
 
+/* TODO: near-miss (~2 words) blocked on a fixer flag: our gas steals the
+ * volatile `sw $0,0($v1)` (IPU_CMD reset) into the second sceIpuSync
+ * jal's delay slot; the original keeps store-then-jal with a genuine
+ * nop. Needs FILE_FIX_FLAGS["xglMovie.c"] = "--barrier-branch-move
+ * xglMovieClose". Everything else (branch layout, movz tail with nRet
+ * assigned AFTER the call) already lines up. */
 /* Stop the IPU and its DMA channel, waiting for the decoder to idle */
 int xglMovieClose(XGLMOVIEINFO *pInfo)
 {

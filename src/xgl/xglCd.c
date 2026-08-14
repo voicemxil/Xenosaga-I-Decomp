@@ -46,6 +46,8 @@ typedef struct {
 } XGLCDARC;
 
 void xglCdArcInitSub0(XGLCDFILEPOS *pPos, char *pBuf, int nBlock);
+int sceCdDiskReady(int nMode);
+int sceCdRead(int nLsn, int nSectors, void *pBuf, void *pMode);
 
 extern XGLCDWORK LW;
 extern int D_0093DC44[4];
@@ -230,14 +232,14 @@ int xglCdStreamRewind(XGLCDSTREAM *pStream)
     pStream->nUnk08 = 0;
     pStream->nUnk18 = pStream->nUnk14;
     nType = pStream->nType;
-    if (nType != 0) {
-        if (nType >= 0) {
-            if (nType < 3) {
-                sceLseek(pStream->nFd, 0, 0);
-            }
-        }
-    } else {
+    switch (nType) {
+    case 0:
         sceCdStSeek(pStream->nFd);
+        break;
+    case 1:
+    case 2:
+        sceLseek(pStream->nFd, 0, 0);
+        break;
     }
     return 0;
 }
@@ -260,4 +262,26 @@ int xglCdArcInitSub1(XGLCDARC *pArc, char *pName, char *pBuf)
         }
     }
     return nCount + 1;
+}
+
+/* Read one archive TOC block (or nCount sectors past it) synchronously */
+void xglCdArcInitSub0(XGLCDFILEPOS *pPos, char *pBuf, int nCount)
+{
+    char aMode[4];
+    int nLsn;
+
+    sceCdSync(0);
+    sceCdDiskReady(0);
+    if (nCount == 0) {
+        nLsn = pPos->nUnk00;
+        nCount = 1;
+    } else {
+        nLsn = pPos->nUnk00 + 1;
+    }
+    aMode[1] = 1;
+    aMode[0] = 0;
+    aMode[2] = 0;
+    sceCdRead(nLsn, nCount, pBuf, aMode);
+    while (sceCdSync(1) > 0) {
+    }
 }

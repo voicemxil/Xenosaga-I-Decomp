@@ -1871,3 +1871,5 @@ xglMatrixRotZ = 0x0022A238, 0x9C; // xglMatrix.c
 nmlModelAskNonLinearCamera = 0x0022F1F0, 0xCC; // nmlModel.c
 nmlModelDirectSend = 0x002307A8, 0xFC; // nmlModel.c
 nmlModelDirectXtxSub = 0x002308A8, 0xF0; // nmlModel.c
+xglCdStreamRewind = 0x0021EAD8, 0x64; // xglCd.c
+xglCdArcInitSub0 = 0x0021F698, 0x94; // xglCd.c
