@@ -1497,3 +1497,525 @@ int MenuTecEquipCheck(unsigned short nChr, unsigned short nTec)
     }
     return nCount;
 }
+
+/* Swap two sort keys if the first box-value is smaller (descending value sort) */
+void MenuSortSubType02(int *a, int *b)
+{
+    int v1, v2;
+    int t1, t2;
+
+    v1 = MenuBoxChk(*a);
+    v2 = MenuBoxChk(*b);
+    if (v1 < v2) {
+        t1 = *a;
+        t2 = *b;
+        *a = t2;
+        *b = t1;
+    }
+}
+
+/* Swap two sort keys if the second box-value is smaller (ascending value sort) */
+void MenuSortSubType03(int *a, int *b)
+{
+    int v1, v2;
+    int t1, t2;
+
+    v1 = MenuBoxChk(*a);
+    v2 = MenuBoxChk(*b);
+    if (v2 < v1) {
+        t1 = *a;
+        t2 = *b;
+        *a = t2;
+        *b = t1;
+    }
+}
+
+/* Cancel an in-flight model resource load and clear the pending slot */
+void MenuModelResourceCancel(void *pRes)
+{
+    MODELRES *w;
+    int *p;
+
+    if (MenuLoadSync() != 0) {
+        MenuLoadCancel();
+        w = &MenuModelResourceState;
+        if (w->f4 != 0) {
+            *(unsigned char *)w->f4 = 0;
+        }
+        p = (int *)w->ent[0].pData;
+        w->f4 = 0;
+        if (p != 0) {
+            *p = -1;
+        }
+        w->ent[0].pData = 0;
+        w->ent[0].id = 0;
+        w->ent[0].pArg = 0;
+    }
+}
+
+/* Search a character's twelve set-ether slots for the given ether id */
+int MenuEtherSetCheck(unsigned short nChr, unsigned short nId)
+{
+    short *p;
+    int i;
+
+    p = (short *)((char *)func_A191C0_2(nChr) + 0x8E);
+    for (i = 0; i < 12; i++) {
+        if (*p == nId) {
+            return 1;
+        }
+        p++;
+    }
+    return 0;
+}
+
+extern void eMessageCpy(char *buf, const char *str);
+extern void eMessageCat(const char *str);
+extern int xglFontGetStringWidth(const char *s);
+typedef struct {
+    char b0, b1, b2;
+} PASTAGVAL;
+typedef struct {
+    PASTAGVAL tag;
+    char pad[9];
+} PASTAG;
+extern PASTAG D_004DAD18;
+
+/* Measure the pixel width of a message prefixed with the shared pas tag bytes */
+int MenuPasLengthGet(char *pMsg)
+{
+    char buf[64];
+    PASTAGVAL tag;
+
+    tag = D_004DAD18.tag;
+    eMessageCpy(buf, (char *)&tag);
+    eMessageCat(pMsg);
+    return xglFontGetStringWidth(buf);
+}
+
+/* Remap the three left-hand weapon ids onto their dual-wield right-hand pair */
+int MenuRWeaponCheck(int nId, int nType)
+{
+    if (nType < 36) {
+        if (nType >= 32) {
+            switch (nId) {
+            case 0x5B:
+                nId = 0x70;
+                break;
+            case 0x5C:
+                nId = 0x71;
+                break;
+            case 0x5E:
+                nId = 0x72;
+                break;
+            }
+        }
+    }
+    return nId;
+}
+
+/* Apply a draw type to a model unit's main actor and all three weapon slots */
+void MenuModelUnitOpen(char *pUnit, int nType)
+{
+    int i;
+
+    MenuModelDrawTypeSet(*(void **)(pUnit + 0x20), nType);
+    for (i = 0; i < 3; i++) {
+        MenuModelWeaponOpen(pUnit, nType, i);
+    }
+}
+
+/* Search a character's three skill slots for the given skill, returning slot+1 */
+int MenuSkillEquipCheck(short nChr, short nId)
+{
+    short *p;
+    short v;
+    int i;
+
+    p = (short *)((char *)func_A191C0_2(nChr) + 0xA6);
+    i = 0;
+    while (i < 3) {
+        v = *p;
+        p++;
+        if (v == nId) {
+            return i + 1;
+        }
+        i++;
+    }
+    return 0;
+}
+
+extern int save_map_text __asm__("save_map_text");
+extern int map_ex_text __asm__("map_ex_text");
+extern char f_name_1[] __asm__("f_name.1");
+extern char f_name_0[] __asm__("f_name.0_0036D6C8");
+
+/* Load the save-map-name text blob into the aligned scratch area */
+char *MenuSaveMapTextLoad(int nMemory, int nFlag)
+{
+    char *pText;
+    int aligned;
+
+    aligned = (nMemory + 15) & ~15;
+    pText = (char *)(aligned + 0x1000);
+    save_map_text = aligned;
+    if (nFlag == 0) {
+        xglCdReadFile(f_name_1, (void *)aligned, 0, (void *)1);
+    } else {
+        MenuLoadFile(f_name_1, (void *)aligned);
+    }
+    return pText;
+}
+
+/* Load the map extra-text blob into the aligned scratch area */
+char *MenuMapExTextLoad(int nMemory, int nFlag)
+{
+    char *pText;
+    int aligned;
+
+    aligned = (nMemory + 15) & ~15;
+    pText = (char *)(aligned + 0x2000);
+    map_ex_text = aligned;
+    if (nFlag == 0) {
+        xglCdReadFile(f_name_0, (void *)aligned, 0, (void *)1);
+    } else {
+        MenuLoadFile(f_name_0, (void *)aligned);
+    }
+    return pText;
+}
+
+/* --- Menu work block (current tec character/selection bytes) --- */
+typedef struct {
+    char pad0[0x40];
+    signed char bChr;          /* 0x40 */
+    char pad41[3];
+    signed char bSel;          /* 0x44 */
+} MENUTECWORK;
+extern MENUTECWORK MenuWork;
+extern int MenuTecNextTLevPointGet(int nId, int nLev);
+
+/* Ask whether the current character can raise the selected technique's level */
+int MenuTecCharTLevUpCheck(void)
+{
+    MENUTECWORK *w;
+    PARAOBJ *p;
+    int nextPoint;
+
+    w = &MenuWork;
+    if (MenuTecTLevLimitCheck(w->bChr, w->bSel) != 0) {
+        p = func_A19210(w->bChr);
+        nextPoint = MenuTecNextTLevPointGet(w->bChr, w->bSel);
+        if (p->fC >= nextPoint) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Ask whether the current character can raise the selected technique's speed */
+int MenuTecCharSpeedUpCheck(void)
+{
+    MENUTECWORK *w;
+    PARAOBJ *p;
+    int nextPoint;
+
+    w = &MenuWork;
+    if (MenuTecSpeedLimitCheck(w->bChr, w->bSel) != 0) {
+        p = func_A19210(w->bChr);
+        nextPoint = MenuTecNextSpeedPointGet(w->bChr, w->bSel);
+        if (p->fC >= nextPoint) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Ask whether the current character can raise the selected technique's wait */
+int MenuTecCharWaitUpCheck(void)
+{
+    MENUTECWORK *w;
+    PARAOBJ *p;
+    int nextPoint;
+
+    w = &MenuWork;
+    if (MenuTecWaitLimitCheck(w->bChr, w->bSel) != 0) {
+        p = func_A19210(w->bChr);
+        nextPoint = MenuTecNextWaitPointGet(w->bChr, w->bSel);
+        if (p->fC >= nextPoint) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Fetch the point cost of a technique's next level-up step */
+int MenuTecNextTLevPointGet(int nId, int nLev)
+{
+    char *pData;
+    unsigned char *pSave;
+
+    pData = (char *)MenuTecDataGet(nId);
+    pSave = (unsigned char *)MenuTecSaveDataGet(nId);
+    if (nLev < 0) {
+        return 0;
+    }
+    return *(unsigned short *)((nLev << 1) + (int)pData + 0x10)
+        + *(unsigned char *)(pData + nLev + 8) * (pSave[nLev] + 1);
+}
+
+/* --- Model draw-type callbacks --- */
+typedef struct {
+    char pad0[0x60];
+    float alpha;               /* 0x60 */
+    void (*func)(void *);      /* 0x64 */
+} DRAWTYPE;
+extern void ModelDrawTypeOpen01(void *);
+extern void ModelDrawTypeClose01(void *);
+extern void ModelDrawTypeClose02(void *);
+
+/* Select a model's draw-type: reset/zero its alpha or install a fade callback */
+void MenuModelDrawTypeSet(void *pModel, int nType)
+{
+    DRAWTYPE *q;
+
+    if (pModel == 0) {
+        return;
+    }
+    q = (DRAWTYPE *)((char *)pModel + 0xC0);
+    switch (nType) {
+    case 0:
+        q->alpha = 1.0f;
+        break;
+    case 1:
+        *(int *)&q->alpha = 0;
+        break;
+    case 2:
+        q->func = ModelDrawTypeOpen01;
+        break;
+    case 3:
+        q->func = ModelDrawTypeClose01;
+        break;
+    case 4:
+        q->func = ModelDrawTypeClose02;
+        break;
+    }
+}
+
+/* --- Background camera keep/restore plumbing --- */
+typedef struct {
+    long long d[0xBE];         /* 0x5F0 bytes */
+} MENUBGCAMERA;
+typedef struct {
+    char pad0[0x828];
+    int f828;
+} MENUBGPARAM;
+extern MENUBGPARAM *MenuBgParam;
+extern int MenuBgKeepCamera;
+extern MENUBGCAMERA *MenuBgCameraId;
+extern MENUBGCAMERA *xglStudioGetCamera2(int);
+
+/* Mark the background param dead, run one last tick and restore the kept camera */
+void MenuBgTaskBreak(void)
+{
+    MENUBGCAMERA *pCam;
+
+    MenuBgParam->f828 = -1;
+    MenuBgTaskMain();
+    pCam = xglStudioGetCamera2(MenuBgKeepCamera);
+    *pCam = *MenuBgCameraId;
+}
+
+/* Remap a weapon mount index through the fixed mount-id table */
+int MenuWpnMountIdChange(int nArg, int nIdx)
+{
+    int tbl[8] = { 0x20, 0x18, 0x22, 0x1A, 0x23, 0x1B, 0x21, 0x19 };
+
+    if (nIdx < 2) {
+        return tbl[nIdx + 5];
+    }
+    return tbl[nIdx - 1];
+}
+
+/* Decode which character family an ether id belongs to */
+int MenuEtherWhoCheck(int nId)
+{
+    unsigned int id;
+
+    id = nId & 0xFFFF;
+    if (id - 1 < 16) {
+        return 3;
+    }
+    if (id - 17 < 10) {
+        return 2;
+    }
+    if (id - 27 < 10) {
+        return 1;
+    }
+    if (id - 37 < 12) {
+        return 6;
+    }
+    if (id - 49 < 10) {
+        return 7;
+    }
+    if (id - 59 < 13) {
+        return 4;
+    }
+    if (id - 72 < 8) {
+        return 5;
+    }
+    return 0;
+}
+
+extern void *func_A1A3D8(int);
+extern void *func_A1A428(int);
+extern int func_A197E8(int, int);
+
+/* Ask whether a bullet id fits the given bullet-using weapon */
+int MenuBulletCheck(int nId, int nBlt)
+{
+    void *p;
+    void *q;
+
+    if (nId == 0) {
+        return 0;
+    }
+    p = func_A1A3D8(nId);
+    if ((*(unsigned short *)((char *)p + 6) & 0x100) == 0) {
+        return 0;
+    }
+    if (nBlt < 0) {
+        return 1;
+    }
+    if (nBlt == 0) {
+        return 0;
+    }
+    q = func_A1A428(nBlt);
+    if (*(short *)((char *)q + 12) == nId) {
+        return nBlt;
+    }
+    return 0;
+}
+
+/* Bullet check with menu-mode dispatch (shop/status variants) */
+int MenuBulletCheck2(int nId, int nType)
+{
+    switch (nType) {
+    case 1:
+    case 6:
+        return 0;
+    case 3:
+        return func_A197E8(3, 62) != 0;
+    default:
+        return MenuBulletCheck(nId, -1);
+    }
+}
+
+extern void *MenuTextGet(int);
+
+/* Swap two sort keys if the first name-string sorts higher (descending) */
+void MenuSortSubType04(int *a, int *b)
+{
+    unsigned char *p1;
+    unsigned char *p2;
+    unsigned char c1, c2;
+    int t1, t2;
+
+    p1 = *(unsigned char **)((char *)MenuTextGet(*a) + 8);
+    p2 = *(unsigned char **)((char *)MenuTextGet(*b) + 8);
+    do {
+        c2 = *p2;
+        p2++;
+        c1 = *p1;
+        p1++;
+        if (c2 < c1) {
+            t1 = *a;
+            t2 = *b;
+            *a = t2;
+            *b = t1;
+            return;
+        }
+        if (c1 != c2) {
+            return;
+        }
+    } while (c1 != 0);
+}
+
+/* Swap two sort keys if the first name-string sorts lower (ascending) */
+void MenuSortSubType05(int *a, int *b)
+{
+    unsigned char *p1;
+    unsigned char *p2;
+    unsigned char c1, c2;
+    int t1, t2;
+
+    p1 = *(unsigned char **)((char *)MenuTextGet(*a) + 8);
+    p2 = *(unsigned char **)((char *)MenuTextGet(*b) + 8);
+    do {
+        c2 = *p2;
+        p2++;
+        c1 = *p1;
+        p1++;
+        if (c1 < c2) {
+            t1 = *a;
+            t2 = *b;
+            *a = t2;
+            *b = t1;
+            return;
+        }
+        if (c1 != c2) {
+            return;
+        }
+    } while (c1 != 0);
+}
+
+extern int wpnInfoGet(int);
+
+/* Ask whether a weapon can be equipped by the character (type and slot masks) */
+int MenuWeaponEquipCheck(int nChr, int nWpn)
+{
+    int nEquip;
+    int nInfo;
+    char *p;
+
+    if (nChr == 0) {
+        return 0;
+    }
+    nEquip = (int)chrEquipGet(nChr);
+    nInfo = wpnInfoGet(nChr);
+    if (nWpn == 0) {
+        return 0;
+    }
+    p = (char *)func_A1A3D8(nWpn);
+    if ((*(short *)(p + 12) & nInfo) == 0) {
+        return 0;
+    }
+    return (*(unsigned short *)(p + 8) & nEquip) != 0;
+}
+
+/* TODO: near-miss (LENGTH, 35 orig vs 37-39 built) - the free-slot search loop
+   in the original recomputes (i << 1) + pChr + 0xA6 per iteration (no strength
+   reduction), while every source variant tried (pointer walk, indexed, ofs
+   temp, search-then-store while) gets its address giv reduced to a walking
+   pointer. Same unreduced-giv shape as the MenuModelMemoryGet original, but
+   there the constant symbol base made the unreduced form reachable; with the
+   base in a register it appears unreachable from C. Parked. */
+/* Equip a skill into the given slot, or the first free slot when nSlot < 0 */
+void MenuSkillEquip(short nChr, short nId, int nSlot)
+{
+    char *pChr;
+    short *q;
+    int i;
+
+    pChr = (char *)func_A191C0_2(nChr);
+    if (nSlot >= 0) {
+        *(short *)((nSlot << 1) + (int)pChr + 0xA6) = nId;
+        return;
+    }
+    for (i = 0; i < 3; i++) {
+        q = (short *)((i << 1) + (int)pChr + 0xA6);
+        if (*q == 0) {
+            *q = nId;
+            return;
+        }
+    }
+}
