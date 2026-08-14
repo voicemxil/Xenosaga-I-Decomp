@@ -653,6 +653,61 @@ def swap_into_slot(flat, sites):
     return res
 
 
+def swap_slot_target(flat, sites):
+    """Exchange a filled branch delay slot with its target block's head.
+
+    gcc's delayed-branch pass may fill a conditional branch's slot with
+    an instruction hoisted from the branch TARGET block; the original
+    build sometimes hoisted a DIFFERENT instruction from the same block
+    (MenuShopModelDisp's beqz: gcc steals the lwc1 %gp_rel load, the
+    original steals the move $4,$16 that follows it). FUNC:N names the
+    Nth gcc-filled branch of FUNC (0-based, emission order, counting
+    only branches inside .set noreorder/.set nomacro fill blocks -- the
+    same shape unfill_gcc_slots recognizes). The slot instruction is
+    exchanged with the first instruction after the branch's target
+    label, guarded by swap_ok; on the taken path the two simply swap
+    order, and the resulting bytes are verified against the original
+    binary, so the swapped-in instruction's deadness on the fallthrough
+    path is established by the byte match rather than analysis.
+    Ineligible or unresolvable sites are left untouched."""
+    # index labels per function
+    res = list(flat)
+    cur = None
+    idx = 0
+    for i, line in enumerate(res):
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            idx = 0
+        if line.startswith("\t.ent\t"):
+            fn_start = i
+        if (RE_PIN_BRANCH.match(line) and i >= 2 and i + 1 < len(res)
+                and res[i - 2].strip().replace("\t", " ") == ".set noreorder"
+                and res[i - 1].strip().replace("\t", " ") == ".set nomacro"
+                and RE_INSN.match(res[i + 1])):
+            if f"{cur}:{idx}" in sites:
+                target = line.strip().split(",")[-1].strip()
+                # find the target label within the same function
+                lab = None
+                for j in range(fn_start, len(res)):
+                    if res[j] == target + ":":
+                        lab = j
+                        break
+                    if res[j].startswith("\t.end\t"):
+                        break
+                if lab is not None:
+                    k = lab + 1
+                    while k < len(res) and not RE_INSN.match(res[k]):
+                        if (res[k].rstrip().endswith(":")
+                                or res[k].startswith("\t.end\t")):
+                            k = None
+                            break
+                        k += 1
+                    if k is not None and k < len(res) and swap_ok(res[i + 1], res[k]):
+                        res[i + 1], res[k] = res[k], res[i + 1]
+            idx += 1
+    return res
+
+
 def mtc1_hazard_nops(flat, sites):
     """Pin a literal nop after an explicitly named mtc1.
 
@@ -728,7 +783,8 @@ def main(path, omitted_hazards, barrier_return_store=None,
          unfill_slots=None, barrier_lo_load=None,
          branch_likely=None, branch_unlikely=None,
          war_restore=None, pin_slot=None, lis_hazard_nop=None,
-         swap_adjacent=None, swap_slot=None, mtc1_nop=None):
+         swap_adjacent=None, swap_slot=None, mtc1_nop=None,
+         swap_slot_tgt=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -1015,6 +1071,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = swap_into_slot(flat, swap_slot)
 
+    if swap_slot_tgt:
+        flat = "\n".join(out).split("\n")
+        out = swap_slot_target(flat, swap_slot_tgt)
+
     if mtc1_nop:
         flat = "\n".join(out).split("\n")
         out = mtc1_hazard_nops(flat, mtc1_nop)
@@ -1116,6 +1176,14 @@ if __name__ == "__main__":
                              "FUNC (0-based, emission order), exchange the "
                              "gcc-filled delay-slot insn with the insn "
                              "immediately before the jal's noreorder block")
+    parser.add_argument("--swap-slot-target", default=None, metavar="SITES",
+                        help="comma-separated FUNC:N sites: at the Nth "
+                             "gcc-filled branch of FUNC (0-based, emission "
+                             "order, counting only noreorder/nomacro fill "
+                             "blocks), exchange the delay-slot insn with the "
+                             "first insn after the branch's target label "
+                             "(the original chose a different target-block "
+                             "insn to hoist)")
     parser.add_argument("--mtc1-nop", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites: append a literal "
                              "nop after the Nth mtc1 of FUNC (0-based, "
@@ -1154,4 +1222,5 @@ if __name__ == "__main__":
          scope(args.branch_likely), scope(args.branch_unlikely),
          scope(args.war_restore_swap), scope(args.pin_slot_nop),
          scope(args.lis_hazard_nop), scope(args.swap_adjacent),
-         scope(args.swap_into_slot), scope(args.mtc1_nop))
+         scope(args.swap_into_slot), scope(args.mtc1_nop),
+         scope(args.swap_slot_target))
