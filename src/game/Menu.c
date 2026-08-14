@@ -1130,7 +1130,7 @@ int MenuFrameEquipCheck(int nId, int nMask)
 }
 
 extern void *D_0036D760[];
-extern void *D_0036D7D8;
+extern void *D_0036D7D8[];
 extern int MenuScenarioNoGet(void);
 
 /* Return a character's display-name pointer, special-cased for Shion pre-scenario-108 */
@@ -1141,13 +1141,18 @@ extern int MenuScenarioNoGet(void);
 void *MenuCharNameGet(int nId)
 {
     void *p;
+    register int sc __asm__("$2");
 
     p = D_0036D760[nId];
-    if (nId == 5) {
-        if (MenuScenarioNoGet() < 108) {
-            p = D_0036D7D8;
-        }
+    if (nId != 5) {
+        return p;
     }
+    sc = MenuScenarioNoGet();
+    if (sc >= 108) {
+        return p;
+    }
+    p = D_0036D7D8[0];
+    __asm__ volatile("" : "+r"(p));
     return p;
 }
 
@@ -2456,9 +2461,11 @@ int MenuShopNoSaleCheck(int nId)
     return t != 0;
 }
 
-/* TODO: near-miss (LOGIC) - the original's three movz/movn conditional
-   assignments keep the result in $a1 with one final move v0,a1; ours
-   if-converts with inverted polarity into $v0. Parked. */
+/* TODO: near-miss (REGISTER 8, was LOGIC 28) - the ternary forms reproduce
+   the original's movz/movn shapes; what remains is an a1/a2 + v1/a1 rename
+   pair (the `v` flags word lands in $v1 instead of $v0, cascading into the
+   ternary temps). Pins on nRet ($5) change length, pins on v ($2) are
+   ignored. Parked. */
 /* Classify how an item can be used from the menu (0 no, 1/2 use-type, 10 event) */
 int MenuItemUseCheck(short nId)
 {
@@ -2474,17 +2481,11 @@ int MenuItemUseCheck(short nId)
         return 0;
     }
     if (nId == 36) {
-        nRet = 2;
-        if ((GameLoopState.f10 & 0x20400000) == 0) {
-            nRet = -1;
-        }
+        nRet = (GameLoopState.f10 & 0x20400000) ? 2 : -1;
     } else {
         v = *(unsigned short *)(p + 12);
         if ((v & 0x1E43) != 0) {
-            nRet = 2;
-            if ((*(unsigned char *)(p + 8) & 0x10) == 0) {
-                nRet = 1;
-            }
+            nRet = (*(unsigned char *)(p + 8) & 0x10) ? 2 : 1;
         } else {
             nRet = 0;
             if ((v & 0x2000) != 0) {
@@ -2514,34 +2515,32 @@ int MenuSelectMove2(int nSel, int nMax)
     case 0x1000:
         nMove = -2;
         break;
-    case 0x2000:
-        nMove = 1;
-        break;
     case 0x4000:
         nMove = 2;
+        break;
+    case 0x2000:
+        nMove = 1;
         break;
     case 0x8000:
         nMove = -1;
         break;
     }
-    if (nMove == 0) {
-        return nSel;
+    if (nMove != 0) {
+        nSel = nSel + nMove;
+        nSel = (nSel < 0) ? nMax - 1 : nSel;
+        nSel = (nMax - 1 < nSel) ? 0 : nSel;
+        xglSoundEffectNormalID(3, 0);
     }
-    nSel = nSel + nMove;
-    if (nSel < 0) {
-        nSel = nMax - 1;
-    }
-    if (nMax - 1 < nSel) {
-        nSel = 0;
-    }
-    xglSoundEffectNormalID(3, 0);
     return nSel;
 }
 
 extern int PartyFriendCheck(int);
 
-/* TODO: near-miss (LENGTH) - the nType==1 branch if-converts to movz in
-   ours; the original keeps a separate branchy andi block. Parked. */
+/* TODO: near-miss (LENGTH, 48 orig vs 43 built) - the tail nType dispatch:
+   the retail build keeps out-of-line case blocks (beqz/beq to distant
+   bodies, default return in the middle) while ours threads/if-converts the
+   chain (xori+inline case 0) whichever if/else-if/return shape is used; the
+   party-max loop itself (movn clamp) matches. Parked. */
 /* Find the highest current value of one stat across the party, rounded per type */
 int MenuParaUpMaxGet(int nType)
 {
@@ -2559,10 +2558,9 @@ int MenuParaUpMaxGet(int nType)
         }
     }
     if (nType == 0) {
-        return (unsigned short)((unsigned short)(nMax / 10) * 10);
-    }
-    if (nType == 1) {
-        return nMax & 0xFFFE;
+        nMax = (unsigned short)((unsigned short)(nMax / 10) * 10);
+    } else if (nType == 1) {
+        nMax = nMax & 0xFFFE;
     }
     return nMax;
 }
