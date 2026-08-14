@@ -1634,3 +1634,5 @@ __sfp = 0x00335510, 0xF8; // newlib_findfp
 _cleanup_r = 0x00335608, 0x1C; // newlib_findfp
 _cleanup = 0x00335628, 0x1C; // newlib_findfp
 __sinit = 0x00335648, 0x8C; // newlib_findfp
+__swsetup = 0x00333D58, 0x10C; // newlib_wsetup
+__sfvwrite = 0x00335C60, 0x3E0; // newlib_fvwrite
