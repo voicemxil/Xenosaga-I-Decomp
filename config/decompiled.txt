@@ -1620,3 +1620,8 @@ __divdi3 = 0x00329FB0, 0x694; // _divdi3
 __moddi3 = 0x0032A648, 0x690; // _moddi3
 __udivdi3 = 0x0032ACD8, 0x57C; // _udivdi3
 __umoddi3 = 0x0032B258, 0x568; // _umoddi3
+
+__sread = 0x00337688, 0x64; // newlib_stdio
+__swrite = 0x003376F0, 0x80; // newlib_stdio
+__sseek = 0x00337770, 0x64; // newlib_stdio
+__sclose = 0x003377D8, 0x1C; // newlib_stdio
