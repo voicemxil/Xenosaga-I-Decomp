@@ -115,7 +115,7 @@ NEWLIB_CFLAGS = ("-O2 -G0 -Inewlib/gccinc -Inewlib/libc/stdlib "
 for _f in ("newlib_reallocr.c", "newlib_callocr.c", "newlib_ungetc.c",
            "newlib_strtod.c", "newlib_strtoul.c", "newlib_vfprintf.c",
            "newlib_mbtowc.c", "newlib_strlwr.c", "newlib_vfscanf.c",
-           "newlib_mprec.c", "newlib_quorem.c"):
+           "newlib_mprec.c", "newlib_dtoa2.c", "newlib_freer.c"):
     FILE_CFLAGS_OVERRIDE[_f] = NEWLIB_CFLAGS
 
 
@@ -178,6 +178,8 @@ FILE_FIX_FLAGS = {
     "newlib_vfprintf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_reallocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_callocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_freer.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_dtoa2.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     # The libgcc float<->DI conversion TUs never let gas fill a delay
     # slot with a preceding copy/ALU op -- barrier both classes
     # (whole-file; each TU is one function).
