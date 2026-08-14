@@ -183,7 +183,16 @@ FILE_FIX_FLAGS = {
     # keeps it before the branch with a plain nop in the slot. Whole-file
     # --hoist-return-store regresses other nmlModel.c functions (see
     # XENOSAGA_RESUME_PROMPT.md), so scope to just this one.
-    "nmlModel.c": "--barrier-return-store nmlModelSetFadeInInterrupt",
+    # nmlModelSetFadeIn / nmlModelFogPara: ee-as padded COP1-move stalls
+    # after mtc1s whose next FP consumer reads a DIFFERENT register --
+    # gas only pads the same-register mtc1->swc1 case, and no
+    # register/distance heuristic reproduces the rest (see the
+    # chain-tracking NOTE in fix_cc_asm.py's main). Site-indexed nops:
+    # FadeIn's mtc1 $1,$f1 (site 1), FogPara's mtc1 $0,$f1 (2) and
+    # mtc1 $1,$f3 (3).
+    "nmlModel.c": ("--barrier-return-store nmlModelSetFadeInInterrupt "
+                   "--mtc1-nop nmlModelSetFadeIn:1,nmlModelFogPara:2,"
+                   "nmlModelFogPara:3"),
     # ungetc's CHECK_INIT tail and the mprec leaf returns keep their
     # copies out of the delay slots, same class as fabs in libm.c.
     "newlib_ungetc.c": "--barrier-return-store ungetc",

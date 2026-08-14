@@ -1942,3 +1942,6 @@ MenuAgwsListMake_Gun = 0x0029AFE0, 0x11C; // Menu.c
 MenuAgwsListMake_Acc = 0x0029B100, 0x124; // Menu.c
 MenuAgwsListMake_Pilot = 0x0029B228, 0x14C; // Menu.c
 PauseMenu = 0x002461C8, 0x140; // tskMenuPause.c
+nmlModelSetFadeIn = 0x0022EE78, 0x84; // nmlModel.c
+nmlModelFogPara = 0x00230040, 0xC8; // nmlModel.c
+nmlPacketAddTransMicrocodeInit = 0x00236B98, 0x118; // nmlPacket.c

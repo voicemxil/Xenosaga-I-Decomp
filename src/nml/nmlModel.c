@@ -1040,8 +1040,10 @@ void nmlModelSetFadeIn(int time, int n20)
              time, 1, n20, 0);
     fZero = 0.0f;
     f30 = 30.0f;
-    D_00338680.afOutColor[0].f = fZero;
-    D_00338680.afOutColor[3].f = f30;
+    /* Statement order is load-bearing: sched2 hoists trailing stores
+     * forward, and only this rotation of the store list reproduces the
+     * original's emission order (rotation sweep 2026-08-14), together
+     * with --mtc1-nop nmlModelSetFadeIn:1 for the ee-as COP1 stall pad. */
     D_00338680.nOutTime = 0;
     D_00338680.afInColor[2].f = fZero;
     D_00338680.afInColor[1].f = fZero;
@@ -1050,6 +1052,8 @@ void nmlModelSetFadeIn(int time, int n20)
     D_00338680.nInTime = 0;
     D_00338680.afOutColor[2].f = fZero;
     D_00338680.afOutColor[1].f = fZero;
+    D_00338680.afOutColor[0].f = fZero;
+    D_00338680.afOutColor[3].f = f30;
 }
 
 /* --- Global point lights --- */

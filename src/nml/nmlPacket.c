@@ -593,8 +593,12 @@ void nmlPacketAddTransMicrocodeInit(void)
         "sq $0, 0x20(%0)\n sq $0, 0x30(%0)"
         : : "r"(p) : "memory");
     fOne = 1.0f;
-    p[3].f[0] = fOne;
+    /* Statement order is load-bearing: sched2 hoists the LAST of these
+     * stores to the front, and the original binary stores 48,60,56,52
+     * -- only this f[3],f[2],f[1],f[0] source order reproduces it
+     * (permutation sweep 2026-08-14). */
     p[3].f[3] = fOne;
     p[3].f[2] = fOne;
     p[3].f[1] = fOne;
+    p[3].f[0] = fOne;
 }
