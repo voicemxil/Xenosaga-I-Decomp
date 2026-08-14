@@ -184,6 +184,9 @@ FILE_FIX_FLAGS = {
     # ungetc's CHECK_INIT tail and the mprec leaf returns keep their
     # copies out of the delay slots, same class as fabs in libm.c.
     "newlib_ungetc.c": "--barrier-return-store ungetc",
+    # MenuRWeaponCheck2: the original keeps its trailing store above the
+    # jr with a genuine nop in the slot (found by the Menu subagent).
+    "Menu.c": "--barrier-return-store MenuRWeaponCheck2",
     "newlib_mprec.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtod.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtoul.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",

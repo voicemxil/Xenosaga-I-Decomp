@@ -1789,3 +1789,4 @@ MenuShopNoSaleCheck = 0x002A3BF0, 0xB0; // Menu
 MenuBoxDec = 0x0028F350, 0xA8; // Menu
 MenuBoxInc = 0x0028F298, 0xB4; // Menu
 MenuGameDataPush = 0x00242EF0, 0xA0; // Menu
+MenuRWeaponCheck2 = 0x0028F8A0, 0x48; // Menu
