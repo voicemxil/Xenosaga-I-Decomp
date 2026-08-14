@@ -47,7 +47,13 @@ typedef struct {
 } PIXEL_ALPHA;
 
 typedef struct {
-    char pad0[0x1C0];
+    VEC4 aLightP[4];        /* 0x000 */
+    VEC4 aLightC[4];        /* 0x040 */
+    VEC4 inPlace[4];        /* 0x080 */
+    VEC4 inPlaceInv[4];     /* 0x0C0 */
+    VEC4 aPointP[4];        /* 0x100 */
+    VEC4 aPointC[4];        /* 0x140 */
+    char pad180[0x40];
     VEC4 uFogCol1;           /* 0x1C0 */
     float aFogDist[20];     /* 0x1D0 */
     float fTransparency2;   /* 0x220 */
@@ -64,7 +70,14 @@ typedef struct {
     int nTexfunc;           /* 0x244 */
     long nAlpha;            /* 0x248 */
     int nStatus;            /* 0x250 */
-    char pad254[0x28];
+    char pad254[0x14];
+    union {
+        int n;
+        long l;
+    } uTexMap;              /* 0x268 */
+    int nTexMapAlpha;       /* 0x270 */
+    float fTexMapZ;         /* 0x274 */
+    char pad278[0x4];
     int nWindow;            /* 0x27C */
     char pad280[0x28];
     int nShadowHeightOn;    /* 0x2A8 */
@@ -951,4 +964,451 @@ void nmlModelSetFilter(int flag, float a, float b)
             }
         }
     }
+}
+
+/* --- Fade set/write helpers --- */
+
+typedef struct {
+    char pad00[0x58];
+    int nOutTime;           /* 0x58 */
+    int nInTime;            /* 0x5C */
+    char pad60[0x30];
+    float afOutColor[4];    /* 0x90 */
+    float afInColor[4];     /* 0xA0 */
+} FADE_PRESET;
+
+extern FADE_PRESET D_00338680;
+extern int D_004A9124[];
+void fade_render(void *pPk, FADE_CONTROL *pFade);
+void nmlFadePacketWrite(void *pPk);
+
+/* Prime a fade controller: time, color (x255 scale) and control words,
+ * then point the fade packet writer at nmlFadePacketWrite */
+static void fade_set(FADE_CONTROL *pFade, float *pfCol, int nUnk18, int nTime,
+                     int nUnk1C, int nUnk20, int nUnk2C)
+{
+    pFade->nTime = nTime;
+    pFade->nTimeMax = nTime;
+    pFade->nR = (int)(pfCol[0] * 255.0f);
+    pFade->nG = (int)(pfCol[1] * 255.0f);
+    pFade->nB = (int)(pfCol[2] * 255.0f);
+    pFade->nUnk18 = nUnk18;
+    pFade->nUnk1C = nUnk1C;
+    pFade->nUnk20 = nUnk20;
+    pFade->nUnk2C = nUnk2C;
+    pFade->nUnkC = 0;
+    pFade->nDispose = 0;
+    if (nTime < 0) {
+        pFade->nTime = -1;
+    }
+    D_004A9124[0] = (int)nmlFadePacketWrite;
+}
+
+/* Render all four fade controllers into the packet and clear the
+ * fade-doit request */
+void nmlFadePacketWrite(void *pPk)
+{
+    fade_render(pPk, &s_inActiveFadeIn);
+    fade_render(pPk, &s_inActiveFadeOut);
+    fade_render(pPk, &s_inFadeIn);
+    fade_render(pPk, &s_inFadeOut);
+    s_nFadeDoit = 0;
+}
+
+/* Start a fade-out over time+2 frames using the preset fade-out color */
+void nmlModelSetFadeOut(int time, int n20)
+{
+    fade_set(&s_inFadeOut, D_00338680.afOutColor, D_00338680.nOutTime,
+             time + 2, 0, n20, 0);
+}
+
+/* Start a fade-in using the preset fade-in color, then reset the presets */
+void nmlModelSetFadeIn(int time, int n20)
+{
+    fade_set(&s_inFadeIn, D_00338680.afInColor, D_00338680.nInTime,
+             time, 1, n20, 0);
+    D_00338680.afOutColor[0] = 0.0f;
+    D_00338680.afOutColor[3] = 30.0f;
+    D_00338680.nOutTime = 0;
+    D_00338680.afInColor[2] = 0.0f;
+    D_00338680.afInColor[1] = 0.0f;
+    D_00338680.afInColor[0] = 0.0f;
+    D_00338680.afInColor[3] = 30.0f;
+    D_00338680.nInTime = 0;
+    D_00338680.afOutColor[2] = 0.0f;
+    D_00338680.afOutColor[1] = 0.0f;
+}
+
+/* --- Global point lights --- */
+
+void xglVectorScaleXYZ(void *pDst, void *pSrc, float fScale);
+
+/* Clear the global point-light flag and colors */
+void nmlModelSetGlobalPointLightReset(void)
+{
+    s_inLayout.nStatus &= ~0x2000000;
+    s_inGblPointC[0].q = 0;
+    s_inGblPointC[1].q = 0;
+    s_inGblPointC[2].q = 0;
+    s_inGblPointC[3].q = 0;
+}
+
+/* Set one global point-light position */
+void nmlModelSetGlobalPointLightPos(int no, void *pPos)
+{
+    if ((unsigned int)no < 3U) {
+        s_inGblPointP[no].q = ((VEC4 *)pPos)->q;
+        s_inLayout.nStatus |= 0x2000000;
+    }
+}
+
+/* Set one global point-light color (x255 scale) */
+void nmlModelSetGlobalPointLightCol(int no, void *pCol)
+{
+    if ((unsigned int)no < 3U) {
+        xglVectorScaleXYZ(&s_inGblPointC[no], pCol, 255.0f);
+        s_inLayout.nStatus |= 0x2000000;
+    }
+}
+
+/* Set one global point-light position and color in one call */
+void nmlModelSetGlobalPointLight(int no, void *pPos, void *pCol)
+{
+    if ((unsigned int)no < 3U) {
+        s_inGblPointP[no].q = ((VEC4 *)pPos)->q;
+        xglVectorScaleXYZ(&s_inGblPointC[no], pCol, 255.0f);
+        s_inLayout.nStatus |= 0x2000000;
+    }
+}
+
+/* Set one per-model point light (position and color, x255 scale) */
+void nmlModelSetPointLight(int no, void *pPos, void *pCol)
+{
+    if ((unsigned int)no < 3U) {
+        s_inLayout.aPointP[no].q = ((VEC4 *)pPos)->q;
+        xglVectorScaleXYZ(&s_inLayout.aPointC[no], pCol, 255.0f);
+        s_inLayout.nStatus |= 0x1000;
+    }
+}
+
+/* Copy the parallel-light direction and color blocks into the layout */
+void nmlModelSetLight(void *pDir, void *pCol)
+{
+    TI *d;
+
+    d = (TI *)s_inLayout.aLightP;
+    d[0] = ((TI *)pDir)[0];
+    d[1] = ((TI *)pDir)[1];
+    d[2] = ((TI *)pDir)[2];
+    d[3] = ((TI *)pDir)[3];
+    d = (TI *)s_inLayout.aLightC;
+    d[0] = ((TI *)pCol)[0];
+    d[1] = ((TI *)pCol)[1];
+    d[2] = ((TI *)pCol)[2];
+    d[3] = ((TI *)pCol)[3];
+    s_inLayout.nStatus |= 0x10;
+}
+
+/* --- Place / scale / offsets --- */
+
+void xglMatrixInverse(void *pDst, void *pSrc);
+
+char s_aTexName[32];
+char s_aMatName[32];
+float s_afTexOffset[2];
+VEC4 s_inMatOffset;
+VEC4 s_inScale;
+extern float D_004A940C[];
+
+/* Set the model place matrix and cache its inverse */
+void nmlModelSetPlace(void *pMtx)
+{
+    TI *d;
+
+    d = (TI *)s_inLayout.inPlace;
+    d[0] = ((TI *)pMtx)[0];
+    d[1] = ((TI *)pMtx)[1];
+    d[2] = ((TI *)pMtx)[2];
+    d[3] = ((TI *)pMtx)[3];
+    xglMatrixInverse(s_inLayout.inPlaceInv, pMtx);
+    s_inLayout.nStatus |= 0x1;
+}
+
+/* Set the model scale, promoting the X slot to the largest component
+ * (min 1.0) and recording that maximum */
+void nmlModelSetScale(void *pScale)
+{
+    float fMax;
+    float f;
+
+    s_inScale.q = ((VEC4 *)pScale)->q;
+    fMax = s_inScale.f[0];
+    f = s_inScale.f[1];
+    if (fMax < f) {
+        s_inScale.f[0] = f;
+        fMax = f;
+    }
+    f = s_inScale.f[2];
+    if (fMax < f) {
+        s_inScale.f[0] = f;
+        fMax = f;
+    }
+    f = 1.0f;
+    if (fMax < f) {
+        s_inScale.f[0] = f;
+        fMax = f;
+    }
+    D_004A940C[0] = fMax;
+}
+
+void *memcpy(void *, const void *, unsigned int);
+
+/* Register a texture-offset target by name with a UV offset */
+void nmlModelSetTexOffset(void *pName, float u, float v)
+{
+    memcpy(s_aTexName, pName, 32);
+    s_aTexName[31] = 0;
+    s_afTexOffset[0] = u;
+    s_afTexOffset[1] = v;
+}
+
+/* Register a material-offset target by name with an offset vector */
+void nmlModelSetMatOffset(void *pName, void *pOffset)
+{
+    memcpy(s_aMatName, pName, 32);
+    s_aMatName[31] = 0;
+    s_inMatOffset.q = ((VEC4 *)pOffset)->q;
+}
+
+/* Set the texture-map mode flags, alpha (clamped to [0,128]) and Z */
+void nmlModelSetTexMap(int nFlag, int nAlpha, float fZ)
+{
+    s_inLayout.uTexMap.n = nFlag;
+    s_inLayout.fTexMapZ = fZ;
+    s_inLayout.nTexMapAlpha = nAlpha;
+    if (nAlpha < 0) {
+        s_inLayout.nTexMapAlpha = 0;
+    }
+    if (s_inLayout.nTexMapAlpha > 128) {
+        s_inLayout.nTexMapAlpha = 128;
+    }
+    if ((s_inLayout.uTexMap.l & 0x10001) == 0x10001) {
+        s_inLayout.nStatus |= 0x40000;
+    } else if ((s_inLayout.uTexMap.l & 0x20001) == 0x20001) {
+        s_inLayout.nStatus |= 0x200000;
+    } else if ((s_inLayout.uTexMap.l & 0x30000) == 0x30000) {
+        s_inLayout.nStatus |= 0x400000;
+    } else {
+        s_inLayout.nStatus |= 0x4000;
+    }
+}
+
+/* --- Init / parts visibility / direct send --- */
+
+void INIT_MODELSYSTEM(void);
+void INIT_ALPHA_GROUP(void);
+void INIT_PARENT_BUF(void);
+void INIT_MAP_HANDLE(void *pMapHandle);
+extern int D_0095BB44[];
+int nmlModelLexDataCheck(void *pData);
+void nmlModelDirectXtxSub(void *pTex, int no, int no2);
+
+/* Initialize every model subsystem and reset the model state */
+void nmlModelInit(void)
+{
+    INIT_MODELSYSTEM();
+    INIT_BACK_BUFFER();
+    INIT_ALPHA_GROUP();
+    INIT_PARENT_BUF();
+    INIT_MAP_HANDLE(&s_inMapHandle);
+    nmlModelClear();
+    D_004A9430[0] = 0;
+    D_0095BB44[0] = 30;
+}
+
+/* Show or hide every part of a lex model in one pass */
+void nmlModelInitPartsVisible(void *pData, int nVisible)
+{
+    int i;
+    int *pOfs;
+    char *q;
+
+    if (nmlModelLexDataCheck(pData) == 0) {
+        i = 0;
+        pOfs = (int *)((char *)pData + 0xB0);
+        while (i < *(int *)((char *)pData + 0x44)) {
+            q = (char *)pData + *pOfs++;
+            if (nVisible != 0) {
+                *(int *)(q + 32) &= ~8;
+            } else {
+                *(int *)(q + 32) |= 8;
+            }
+            i++;
+        }
+    }
+}
+
+/* Validate an XTX texture and send it directly (unless a packet change
+ * is pending) */
+void nmlModelDirectSendXtx(int no, void *pTex)
+{
+    char *p = (char *)pTex;
+
+    if (s_nPacketSignal == 0) {
+        if ((unsigned int)((int)pTex - 0x200000) <= 0x1DFFFFF && (((int)pTex & 0xF) == 0)) {
+            if (p[0] == 'X' && p[1] == 'T' && p[2] == p[0]) {
+                nmlModelDirectXtxSub(pTex, no, no + 1);
+            }
+        }
+    }
+}
+
+/* --- Fog parameter helpers --- */
+
+void _CurSetMatrix(void *pMtx);
+void _CurRotTransPersFog(void *pOut, void *pPos, float *pFog);
+
+/* Build the 4-float fog parameter block from near/far distances and
+ * min/max densities */
+void nmlModelFogPara(float *pPara, float fNear, float fFar, float fMin, float fMax)
+{
+    float fA;
+    float fB;
+
+    fA = (1.0f - fMax) * 255.0f;
+    fB = (1.0f - fMin) * 255.0f;
+    if (fA < 0.0f) {
+        fA = 0.0f;
+    }
+    if (255.0f < fA) {
+        fA = 255.0f;
+    }
+    if (fB < 0.0f) {
+        fB = 0.0f;
+    }
+    if (255.0f < fB) {
+        fB = 255.0f;
+    }
+    pPara[0] = fA;
+    pPara[1] = fB;
+    pPara[2] = ((fA - fB) * (fFar + fNear) / (fFar - fNear) + (fA + fB)) * 0.5f;
+    pPara[3] = fFar * fNear * (fB - fA) / (fFar - fNear);
+}
+
+/* Compute the fog coefficient of a point through the active window's
+ * camera; 255 when there is no camera */
+int nmlModelGetFogPara(void *pPos)
+{
+    VEC4 vTemp;
+    float *pFog;
+    void *pCamera;
+    unsigned int nFog;
+
+    nFog = 255;
+    pFog = s_inGblFogPara;
+    pFog = ((s_inLayout.nStatus & 0x2) != 0) ? s_inLayout.aFogDist : pFog;
+    pCamera = xglStudioSelectGetActiveCamera(s_inLayout.nWindow);
+    if (pCamera != 0) {
+        _CurSetMatrix((char *)pCamera + 0x470);
+        _CurRotTransPersFog(&vTemp, pPos, pFog);
+        nFog = (unsigned int)vTemp.f[3];
+    }
+    return nFog;
+}
+
+/* Compute the fog coefficient of a point through a specific studio's
+ * camera; 255 when there is no camera */
+int nmlModelGetFogParaStudio(void *pPos, int nStudio)
+{
+    VEC4 vTemp;
+    float *pFog;
+    void *pCamera;
+    unsigned int nFog;
+
+    nFog = 255;
+    pFog = s_inGblFogPara;
+    pFog = ((s_inLayout.nStatus & 0x2) != 0) ? s_inLayout.aFogDist : pFog;
+    pCamera = xglStudioSelectGetActiveCamera(nStudio);
+    if (pCamera != 0) {
+        _CurSetMatrix((char *)pCamera + 0x470);
+        _CurRotTransPersFog(&vTemp, pPos, pFog);
+        nFog = (unsigned int)vTemp.f[3];
+    }
+    return nFog;
+}
+
+/* --- Clip test entry points --- */
+
+/* Clip-test and cull-test a point against the active camera; 0 when
+ * there is no active camera */
+int nmlModelCalcClip(void *pPos)
+{
+    void *pCamera;
+    int n1, n2;
+
+    pCamera = xglStudioGetActiveCamera();
+    if (pCamera != 0) {
+        _ModelCalcClipInit((char *)pCamera + 0x4F0);
+        n1 = _ModelCalcClip(pPos);
+        n2 = xglCullingCheck(pCamera, pPos);
+        return n1 | n2;
+    }
+    return (int)pCamera;
+}
+
+/* Clip-test a point against an explicit camera */
+int nmlModelCalcClipCam(void *pPos, void *pCamera)
+{
+    _ModelCalcClipInit((char *)pCamera + 0x4F0);
+    return _ModelCalcClip(pPos);
+}
+
+/* Clip-test a point against the active camera without the culling-map
+ * check; 0 when there is no active camera */
+int nmlModelCalcClipNoCulling(void *pPos)
+{
+    void *pCamera;
+
+    pCamera = xglStudioGetActiveCamera();
+    if (pCamera != 0) {
+        _ModelCalcClipInit((char *)pCamera + 0x4F0);
+        return _ModelCalcClip(pPos);
+    }
+    return (int)pCamera;
+}
+
+int _ModelCalcClipMat1(void *pPos, void *pMatrix);
+int _ModelCalcClipMat2(void *pPos, void *pMatrix1, void *pMatrix2);
+
+/* Transform a point by one matrix and clip-test it against an explicit
+ * camera */
+int nmlModelCalcClipMat1Cam(void *pPos, void *pMatrix, void *pCamera)
+{
+    _ModelCalcClipInit((char *)pCamera + 0x4F0);
+    return _ModelCalcClipMat1(pPos, pMatrix);
+}
+
+/* Transform a point by two chained matrices and clip-test it against an
+ * explicit camera */
+int nmlModelCalcClipMat2Cam(void *pPos, void *pMatrix1, void *pMatrix2, void *pCamera)
+{
+    _ModelCalcClipInit((char *)pCamera + 0x4F0);
+    return _ModelCalcClipMat2(pPos, pMatrix1, pMatrix2);
+}
+
+/* Clip-test and cull-test a point against a specific studio's camera;
+ * 0 when that studio has no camera */
+int nmlModelCalcClipStudio(void *pPos, int nStudio)
+{
+    void *pCamera;
+    int nRet;
+
+    nRet = 0;
+    pCamera = xglStudioSelectGetActiveCamera(nStudio);
+    if (pCamera != 0) {
+        _ModelCalcClipInit((char *)pCamera + 0x4F0);
+        nRet = _ModelCalcClip(pPos);
+        nRet |= xglCullingCheck(pCamera, pPos);
+    }
+    return nRet;
 }
