@@ -193,6 +193,10 @@ FILE_FIX_FLAGS = {
     # the wave-3 Menu subagent, site index found by sweep).
     "Menu.c": ("--barrier-return-store MenuRWeaponCheck2 "
                "--branch-likely MenuFaceEpidGet:3"),
+    # TMENU_addItem: the original orders the li $7,-1 / li $5,1024
+    # MSG_convert argument pair the other way (instruction 4 is the
+    # li $5,1024).
+    "TMENU.c": "--swap-adjacent TMENU_addItem:4",
     # xgl delay-slot shapes found by the xgl subagent (all verified):
     "xglTimer.c": "--barrier-return-store xglTimer0Reset",
     "tskMenuPause.c": "--pin-slot-nop PauseMenu:0",

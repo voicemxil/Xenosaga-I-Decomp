@@ -1935,3 +1935,6 @@ PauseMenuPagePartyDebugTakeAgws = 0x00273228, 0x1D8; // tskMenuPartyDebug.c
 F2I = 0x0022AB98, 0x20; // xglMath.c
 MenuSelectMove2 = 0x00274ED0, 0xB0; // Menu
 xglSoundStreamMute = 0x00226C10, 0x94; // xglSound.c
+xglMakeSePacket = 0x00226F50, 0xAC; // xglSound.c
+BCD2INT = 0x0021D2C8, 0x20; // xglClock.c
+TMENU_addItem = 0x0025F2C8, 0x144; // TMENU.c
