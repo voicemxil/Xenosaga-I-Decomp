@@ -87,6 +87,9 @@ def cc_for(name):
 # this is a lone -G threshold difference, not a compiler-family swap.
 FILE_CFLAGS_OVERRIDE = {
     "libm.c": "-O2 -G0",
+    # Three camera functions need -fno-strict-aliasing; verified per-file
+    # only (the flag regresses xglTask.c's matches if applied globally).
+    "xglCamera.c": "-O2 -G8 -fno-strict-aliasing",
     "malloc_lock.c": "-O2 -G0",
     # libgcc2 64-bit division TUs: Sony built libgcc with -mlong32 (long is
     # 32-bit), which keeps __ll_B's `1L << 16` in SImode -- plain `sll`
@@ -187,6 +190,10 @@ FILE_FIX_FLAGS = {
     # MenuRWeaponCheck2: the original keeps its trailing store above the
     # jr with a genuine nop in the slot (found by the Menu subagent).
     "Menu.c": "--barrier-return-store MenuRWeaponCheck2",
+    # xgl delay-slot shapes found by the xgl subagent (all verified):
+    "xglTimer.c": "--barrier-return-store xglTimer0Reset",
+    "xglMovie.c": "--barrier-branch-move xglMovieClose",
+    "xglMath.c": "--omit-hazard qmtc2",
     "newlib_mprec.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtod.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtoul.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
