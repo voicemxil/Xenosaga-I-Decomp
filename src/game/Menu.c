@@ -767,18 +767,17 @@ void MenuModelSubWindowMainSub(SUBWIN *p)
     *(short *)(pActor + 0x676) = 0;
 }
 
-/* TODO: near-miss - the weapon-dispose countdown loop matches exactly; only the
-   trailing pair of ActorAndResourceDispose calls differs. The original routes
-   the second call's two pointer args through s0/s1 (reusing the just-freed loop
-   registers) before reloading them for the epilogue; every natural variant tried
-   (inline exprs, named p1/p2 locals, reusing pWeapon, goto-shaped loop) instead
-   allocates them straight into a0/a1 since nothing forces a callee-saved temp.
-   Logic and byte COUNT differ only in this tail (0x90 orig vs 0x88 here). */
+/* TODO: near-miss (SCHEDULING, 7) - was LENGTH 21. q1 hoisted above call 1
+   (lands in the jal slot as addiu s0), scoped q2 pin $17 + launder gives the
+   s1 staging and the tail j. Remaining pure sched: call-1's a1/a0 addiu pair
+   is swapped (adjacent, --swap-adjacent candidate at insn 15) and the
+   epilogue rotates ld s2 from position 22 to 26. */
 /* Dispose a model unit's three weapon slots, then tear down its two actor/resource pairs */
 void MenuModelUnitDispose(char *p)
 {
-    char **pWeapon;
-    int i;
+    register char **pWeapon __asm__("$16");
+    char *q1;
+    register int i __asm__("$17");
 
     if (p == 0) {
         return;
@@ -788,8 +787,22 @@ void MenuModelUnitDispose(char *p)
         MenuModelWeaponDispose(*pWeapon);
         pWeapon++;
     }
-    ActorAndResourceDispose(p + 0x24, p + 0x2C, 1);
-    ActorAndResourceDispose(p + 0x20, p + 0x28, 0);
+    q1 = p + 0x20;
+    {
+        char *a1v;
+        char *a0v;
+
+        a1v = p + 0x2C;
+        a0v = p + 0x24;
+        ActorAndResourceDispose(a0v, a1v, 1);
+    }
+    {
+        register char *q2 __asm__("$17");
+
+        q2 = p + 0x28;
+        __asm__("" : "+r"(q2));
+        ActorAndResourceDispose(q1, q2, 0);
+    }
 }
 
 /* --- Hardcoded z-clear DMA packet plumbing --- */
@@ -1271,11 +1284,29 @@ extern char sRender[];
 /* Pop the 8 saved "taiki" (waiting) slots back into the render work block */
 void MenuCfTaikiPop(void)
 {
-    int i;
+    char *base;
+    int *src;
+    int *dst;
+    register int i __asm__("$4");
+    register int v __asm__("$3");
+    int cont;
 
-    for (i = 0; i < 8; i++) {
-        *(int *)(sRender + 0x24 + i * 4) = MenuCfTaiki[i];
-    }
+    base = sRender_0;
+    __asm__("" : "+r"(base));
+    src = D_0036C278;
+    dst = (int *)(base + 0x24);
+    i = 0;
+    do {
+        v = *src;
+        __asm__("" : "+r"(v));
+        __asm__("" : "+r"(v));
+        src++;
+        i++;
+        cont = i < 8;
+        __asm__("" : "+r"(cont));
+        *dst = v;
+        dst++;
+    } while (cont != 0);
 }
 
 /* --- Model menu-motion resource pointer --- */
@@ -2044,8 +2075,9 @@ int MenuWeaponEquipCheck(int nChr, int nWpn)
 /* Equip a skill into the given slot, or the first free slot when nSlot < 0 */
 void MenuSkillEquip(short nChr, short nId, int nSlot)
 {
-    char *pChr;
+    register char *pChr __asm__("$6");
     short *q;
+    short v;
     int i;
 
     pChr = (char *)func_A191C0_2(nChr);
@@ -2053,13 +2085,23 @@ void MenuSkillEquip(short nChr, short nId, int nSlot)
         *(short *)((nSlot << 1) + (int)pChr + 0xA6) = nId;
         return;
     }
-    for (i = 0; i < 3; i++) {
-        q = (short *)((i << 1) + (int)pChr + 0xA6);
-        if (*q == 0) {
-            *q = nId;
-            return;
-        }
+    q = (short *)(pChr + 0xA6);
+    i = 0;
+    goto test;
+loop:
+    i++;
+    __asm__("" : "+r"(i));
+    if (i >= 3) {
+        return;
     }
+    q = (short *)((i << 1) + (int)pChr + 0xA6);
+test:
+    v = *q;
+    __asm__ volatile("nop");
+    if (v != 0) {
+        goto loop;
+    }
+    *q = nId;
 }
 
 /* Decode an ether id's use-type (1 heal, 2 cure, 3 revive) */
@@ -2422,18 +2464,20 @@ void MenuSystemInitSet(void)
 {
     MENUTECWORK *w;
     MENUSAVEWORK *sv;
+    volatile MENUPADWORK *pd;
     unsigned char *pData;
 
     SsdSetOutputMode(1);
     w = &MenuWork;
     sv = &SaveData;
-    PadData.bBE = 0;
+    pd = &PadData;
+    pd->bBE = 0;
     sv->b28 = 1;
     w->b30 = 0;
     sv->b44 = 0;
     w->b31 = 0;
     sv->b3C = 0;
-    PadData.b56 = 0;
+    pd->b56 = 0;
     w->b32 = 0;
     PartyRadarDispSet(1);
     pData = (unsigned char *)PartyDataGet();
@@ -3905,6 +3949,7 @@ char *MenuTairetuLoad(int nMemory)
 {
     TAIRETUNAME name;
     int aligned;
+    char *q;
 
     aligned = (nMemory + 127) & ~127;
     D_004DA640 = aligned;
@@ -3913,16 +3958,19 @@ char *MenuTairetuLoad(int nMemory)
     name.d[23] = 't';
     name.d[20] = '0';
     MenuLoadFile(name.d, (void *)aligned);
-    D_004DA648 = D_004DA640 + 0x3000;
+    q = (char *)(D_004DA640 + 0x3000);
     name.d[20] = '1';
-    MenuLoadFile(name.d, (void *)D_004DA648);
-    D_004DA64C = D_004DA648 + 0x800;
+    D_004DA648 = (int)q;
+    MenuLoadFile(name.d, q);
+    q = (char *)(D_004DA648 + 0x800);
     name.d[22] = 'l';
     name.d[23] = 'e';
-    MenuLoadFile(name.d, (void *)D_004DA64C);
-    D_004DA644 = D_004DA64C + 0x1000;
+    D_004DA64C = (int)q;
+    MenuLoadFile(name.d, q);
+    q = (char *)(D_004DA64C + 0x1000);
     name.d[20] = '0';
-    MenuLoadFile(name.d, (void *)D_004DA644);
+    D_004DA644 = (int)q;
+    MenuLoadFile(name.d, q);
     return (char *)(D_004DA644 + 0x800);
 }
 

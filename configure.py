@@ -200,6 +200,8 @@ FILE_FIX_FLAGS = {
     # jr with a genuine nop in the slot (found by the Menu subagent).
     # MenuFaceEpidGet: one branch-likely annul bit at site 3 (flagged by
     # the wave-3 Menu subagent, site index found by sweep).
+    # MenuSkillEquip: same single annul bit at site 2 (the free-slot
+    # search loop back-edge bnez -> bnezl; wave-5 Menu subagent).
     # MenuAgwsListMake_Gun/_Acc/_Pilot: the original's sched2 emits the
     # loop-preheader `addiu s0,s0,8/9` increment BEFORE the MenuWork
     # %lo() addiu; ours orders them the other way. Instruction 30 is the
@@ -208,7 +210,7 @@ FILE_FIX_FLAGS = {
     # hoists the target block's l.s gp-load into the slot, the original
     # hoisted the move $4,$16 that follows it.
     "Menu.c": ("--barrier-return-store MenuRWeaponCheck2 "
-               "--branch-likely MenuFaceEpidGet:3 "
+               "--branch-likely MenuFaceEpidGet:3,MenuSkillEquip:2 "
                "--swap-adjacent MenuAgwsListMake_Gun:30,"
                "MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30 "
                "--swap-slot-target MenuShopModelDisp:6"),

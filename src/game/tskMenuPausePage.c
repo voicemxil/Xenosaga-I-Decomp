@@ -22,15 +22,17 @@ extern void xglFontDebugPrintf(int x, int y, char *fmt, ...);
 
 /* Debug page 0: dump the resource list and print the work-end pointer
  * plus the first 16 actor ids while the trigger is held.
- * PARKED 8-word diff: retail allocates i=s0/p=s1 (and hoists the format
- * string lui before the pointer init); every loop/decl permutation tried
- * here allocates p=s0/i=s1. Same allocno-priority class of diff as
- * DrawCredit. */
+ * PARKED 5-word diff (was 8): i=$16/p=$17 pins + post-call volatile barrier
+ * + second volatile launder of base (conflicts base out of s1, keeps the
+ * 3-op addiu s1,v0,128) fix the allocation. Remaining pure scheduling:
+ * printf-arg lui-a2/lw-a3 swap, and the loop-invariant "loadene" lui s3
+ * hoists to preheader end (after p/i inits) where retail has it between
+ * the base addiu pair and the p init. Fixer-flag candidate (two swaps). */
 void PauseMenuPage0(void)
 {
-    PAUSEACT *p;
+    register PAUSEACT *p __asm__("$17");
     int y;
-    int i;
+    register int i __asm__("$16");
     char *base;
 
     if (PadData.hTrig & 0x40) {
@@ -38,10 +40,12 @@ void PauseMenuPage0(void)
     }
     xglFontDebugPrintf(136, 52, "WrkEnd:%8x", PauseWorkEnd);
     y = 64;
-    i = 15;
+    __asm__ volatile("");
     base = actor;
     __asm__("" : "+r"(base));
     p = (PAUSEACT *)(base + 0x80);
+    __asm__ volatile("" : "+r"(base));
+    i = 15;
     do {
         i--;
         xglFontDebugPrintf(8, y, "loadene", p->h06);
