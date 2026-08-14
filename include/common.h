@@ -18,7 +18,10 @@ typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
+typedef unsigned char u_char;
+typedef unsigned short u_short;
 typedef unsigned int u_int;
+typedef unsigned long u_long;
 
 typedef float f32;
 

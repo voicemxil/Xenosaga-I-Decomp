@@ -1721,3 +1721,6 @@ eMessageTextChange = 0x0027BCE8, 0x60; // eMessage
 eMessageNextPage = 0x0027BD48, 0x68; // eMessage
 eMessageDraw = 0x0027BDB0, 0x14; // eMessage
 eMessageCpy = 0x0027BDC8, 0x1C; // eMessage
+xglCreateSignal = 0x002188A0, 0x2C; // xglThread
+xglThreadRotate = 0x002188D0, 0x64; // xglThread
+xglSleep = 0x00218938, 0x2C; // xglThread
