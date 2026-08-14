@@ -1957,3 +1957,6 @@ MenuEtherJoutoCheck = 0x002A9F40, 0x40; // Menu.c
 MenuParaPtNowGet = 0x00291410, 0x9C; // Menu.c
 MenuTecTLevUp = 0x002AF640, 0xB0; // Menu.c
 xglCdInitial = 0x0021FA68, 0xF0; // xglCd.c
+xglHddMcCheck = 0x00227CD8, 0x98; // xglHdd.c
+xglCdStreamRead = 0x0021E578, 0x94; // xglCd.c
+xglHddMcGetFree = 0x00227D70, 0xF4; // xglHdd.c

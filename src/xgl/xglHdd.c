@@ -250,6 +250,71 @@ int xglHddDummyCB(void)
     return 0;
 }
 
+int xglHddMcCheckCore(int *pFree);
+int xglHddMcLoadMount(void);
+int xglHddMcCheckYourSaves(void *pBuf);
+
+/* Report the free space (in KB) available for saves on the HDD.
+ * Register shape: the zone-size quotient needs its own variable pinned
+ * to $16 fed by the zero-code tied passthrough, and the zero-clamped
+ * zone-free count is spelled as an inline ternary so the mult keeps
+ * $v0 as its first operand. */
+int xglHddMcGetFree(void)
+{
+    int nFree;
+    int nZoneFree;
+    int nRet;
+    int nBuf;
+    register int nQuot __asm__("$16");
+
+    nRet = xglHddMcLoadMount();
+    if (nRet < 0) {
+        return nRet;
+    }
+    nFree = xglHddMcCheckYourSaves((void *)-1);
+    if (nFree >= 0) {
+        if (sceDevctl(D_004DC368, 0x480A, 0, 0, (int)&nBuf, 4) == 0
+            && nBuf > 0x1FFFFF) {
+            nFree = 0x100000;
+        } else {
+            nFree = sceDevctl(D_004DC370, 20481, 0, 0, 0, 0);
+            nZoneFree = sceDevctl(D_004DC370, 20482, 0, 0, 0, 0);
+            __asm__("" : "=r"(nQuot) : "0"(nFree / 1024));
+            nFree = ((nZoneFree < 0) ? 0 : nZoneFree) * nQuot;
+        }
+    }
+    xglHddMcUmount();
+    return nFree;
+}
+
+
+
+/* NOTE: in a standalone TU the first bnez comes out annulled (bnezl,
+ * 1d; --branch-unlikely xglHddMcCheck:0 fixes it there) but in this
+ * full TU the dbr pass picks the original non-annulled form on its
+ * own. */
+/* Mount the common partition and probe the memory-card image, keeping
+ * the caller's free-space slot intact */
+int xglHddMcCheck(int *pFree)
+{
+    int nSave;
+    int nRet;
+
+    if (xglHddCheck2() != 0) {
+        return -1;
+    }
+    xglHddMcUmount();
+    if (sceMount(D_004DC370, commonname, 4, 0, 0) < 0) {
+        return -1;
+    }
+    nSave = *pFree;
+    *pFree = -1;
+    nRet = xglHddMcCheckCore(pFree);
+    *pFree = nSave;
+    xglHddMcUmount();
+    return nRet;
+}
+
 extern char yoursaves[];
 int sceDopen(char *pName, void *pBuf);
 int Judge_MakeNewFolder(int nFd);

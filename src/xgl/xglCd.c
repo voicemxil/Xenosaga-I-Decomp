@@ -25,7 +25,7 @@ typedef struct {
     int nFd;             /* 0x10 */
     int nUnk14;          /* 0x14 */
     int nUnk18;          /* 0x18 */
-    char pad1C[4];
+    int nUnk1C;          /* 0x1C */
     int nUnk20;          /* 0x20 */
 } XGLCDSTREAM;
 
@@ -149,6 +149,35 @@ int xglCdReadFile(char *pName, u_int nAddr, int nOfs, int nSize)
 int xglCdSync(void)
 {
     return LW.nStatus != 0;
+}
+
+int StreamReadRingCoreSub(XGLCDSTREAM *pStr, char *pBuf, int nSectors);
+
+/* Blocking stream read: pull whole sectors through the ring core, track
+ * the bytes remaining, and zero-pad the tail up to the ring granule */
+int xglCdStreamRead(XGLCDSTREAM *pStr, char *pBuf, int nBytes)
+{
+    int nRead;
+    int nRest;
+    int nPad;
+
+    nRead = StreamReadRingCoreSub(pStr, pBuf, nBytes >> 11);
+    nRest = pStr->nUnk18 - nRead;
+    if (nRest <= 0) {
+        pStr->nUnk08 = 1;
+        nRest = 0;
+    }
+    nPad = nRead & (pStr->nUnk1C - 1);
+    pStr->nUnk18 = nRest;
+    if (nPad > 0) {
+        pBuf += nRead;
+        nRead += nPad;
+        do {
+            nPad--;
+            *pBuf++ = 0;
+        } while (nPad > 0);
+    }
+    return nRead;
 }
 
 /* Read from a stream ring buffer using the appropriate backend */
