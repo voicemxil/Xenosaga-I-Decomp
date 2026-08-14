@@ -124,7 +124,7 @@ class Repo:
         """
         if self._symbol_map is None:
             self._symbol_map = {}
-            for path in sorted(glob.glob(f"{self.built_dir}/*.o")):
+            for path in sorted(glob.glob(f"{self.built_dir}/**/*.o", recursive=True)):
                 try:
                     funcs = self.obj(path).func_symbols()
                 except (ValueError, IndexError, OSError):
@@ -162,13 +162,15 @@ class Repo:
         """
         loc = None
         if source:
-            path = f"{self.built_dir}/{source}.o"
-            try:
-                off = self.obj(path).func_symbols().get(name)
-            except (ValueError, IndexError, OSError):
-                off = None
-            if off is not None:
-                loc = (path, off)
+            hits = glob.glob(f"{self.built_dir}/**/{source}.o", recursive=True)
+            for path in sorted(hits):
+                try:
+                    off = self.obj(path).func_symbols().get(name)
+                except (ValueError, IndexError, OSError):
+                    continue
+                if off is not None:
+                    loc = (path, off)
+                    break
         if loc is None:
             loc = self.symbol_map.get(name)
         if loc is None:

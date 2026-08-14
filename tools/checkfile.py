@@ -122,7 +122,10 @@ def main():
     for src in sources:
         base = os.path.basename(src)
         if args.built:
-            objpath = os.path.join("build/src", base.replace(".c", ".o"))
+            hits = glob.glob(os.path.join("build/src", "**", base.replace(".c", ".o")),
+                             recursive=True)
+            objpath = hits[0] if hits else os.path.join(
+                "build/src", base.replace(".c", ".o"))
             if not os.path.exists(objpath):
                 print(f"{src}: no {objpath} (run ninja, or drop --built)")
                 continue

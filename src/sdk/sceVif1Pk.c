@@ -44,14 +44,11 @@ unsigned int sceVif1PkSize(Vif1Packet *pkt)
 }
 
 /* Reserve space for a number of 32-bit values */
-void sceVif1PkReserve(Vif1Packet *pkt, unsigned int count)
+unsigned int *sceVif1PkReserve(Vif1Packet *pkt, unsigned int count)
 {
-    /* TODO: near-miss (register tie-break) - original emits `addu $a1,$v0,$a1`
-       (rd == rt), which GCC 2.9 never generates from C: it canonicalizes a
-       commutative add to rd == rs. This form matches every word except the
-       commutative operand order of that one addu. */
-    count = (count << 2) + (unsigned int)pkt->current;
-    pkt->current = (unsigned int *)count;
+    unsigned int *p = pkt->current;
+    pkt->current = p + count;
+    return p;
 }
 
 /* Append a 64-bit GS data value (written as two 32-bit words) */
@@ -122,6 +119,14 @@ void sceVif1PkAddDataN(Vif1Packet *pkt, unsigned int *src, unsigned int count)
 /* Append a 128-bit UNPACK data value (written as four 32-bit words) */
 void sceVif1PkAddUpkData128(Vif1Packet *pkt, u128 value)
 {
+    /* TODO: near-miss (14 words).  The sq/ld union spill, the dsll32+dsra32
+       sign-extractions and the dest++ / dest+3 pointer stepping all match; only
+       the order of the four extractions differs.  The original emits
+       hi>>32, (int)lo, (int)hi, [store], lo>>32; we emit them in source order.
+       Hoisting any of them into named temps before the stores flips the two
+       `ld`s (d[0] gets loaded first instead of d[1]) and costs 2 more words,
+       for every ordering tried - so the extraction order is a scheduler
+       artefact, not source order. */
     U128 u;
     unsigned int *dest = pkt->current;
     long lo, hi;
@@ -181,12 +186,8 @@ unsigned int sceVif1PkTerminate(Vif1Packet *pkt)
     /* Patch the size of an open DIRECT/HL code if one exists */
     if (open != 0)
     {
-        /* TODO: near-miss (register tie-break) - the final `addu`/`sw` land in
-           $v0 here, but the original accumulates into $v1 (open[0]'s register).
-           GCC 2.9 won't emit rd == rt for the commutative add, so the closest
-           form differs only by that one commutative-operand register choice. */
         int n = (((int)current - (int)open) >> 4) - 1;
-        *open = n + *open;
+        *open = *open + n;
     }
 
     /* Clear open pointer */
@@ -207,9 +208,13 @@ void sceVif1PkCnt(Vif1Packet *pkt, unsigned int flags)
     /* Terminate packet to align and close any open code; remember segment start */
     start = sceVif1PkTerminate(pkt);
 
-    /* TODO: near-miss (scheduling) - GCC 2.9 sinks the `sw` of the reserved
-       field between the `lui` and `or` that build the control word; the
-       original emits the `or` first.  Every other word matches. */
+    /* TODO: near-miss (SCHEDULING, 2 words) - gcc's post-reload scheduler sinks
+       the `sw` of the reserved field between the `lui` and the `or` that build
+       the control word; the original emits the `or` first.  EXHAUSTED: all
+       5040 orderings of the 7 statements below were compiled (tools/permute.py)
+       and none reaches 0 - best is this one at 2.  `0x10000000 | flags`,
+       `current[i]` instead of `*current`, and hoisting the reserved store all
+       reproduce the same 2-word swap, so the lever is not statement order. */
     current = pkt->current;
     flags |= 0x10000000;
     pkt->reserved = start;
@@ -229,8 +234,9 @@ void sceVif1PkEnd(Vif1Packet *pkt, unsigned int flags)
     /* Terminate packet to align and close any open code; remember segment start */
     start = sceVif1PkTerminate(pkt);
 
-    /* TODO: near-miss (scheduling) - see sceVif1PkCnt; identical shape with the
-       0x70000000 end-of-packet code instead of 0x10000000. */
+    /* TODO: near-miss (SCHEDULING, 2 words) - see sceVif1PkCnt; identical shape
+       with the 0x70000000 end-of-packet code instead of 0x10000000, and the
+       same permuter-exhausted `sw`/`or` swap. */
     current = pkt->current;
     flags |= 0x70000000;
     pkt->reserved = start;
@@ -244,10 +250,14 @@ void sceVif1PkEnd(Vif1Packet *pkt, unsigned int flags)
 /* Align the packet current pointer to a 16-byte (quadword) boundary */
 void sceVif1PkAlign(Vif1Packet *pkt, unsigned int padding, unsigned int boundary)
 {
-    /* TODO: near-miss - functionally correct, but GCC 2.9 rotates the fill loop
-       differently (the original peels the first iteration and keeps the "next"
-       pointer in a separate register) and swaps a couple of $v0/$v1 temporaries
-       in the mask setup.  Straight-line ops otherwise line up. */
+    /* TODO: near-miss (20 words).  ROOT CAUSE ISOLATED: gcc sinks the
+       `pkt->current = cur` store out of the fill loop (our `sw v1,0(a0)` lands
+       after the `bnez`), while the original keeps it inside and therefore peels
+       the first iteration (`b` into the middle of the rotated loop).  Rewriting
+       the body with a fresh `next` local, and `(target + 1) + mask` explicitly
+       parenthesised, changes nothing - the store still sinks.  The remaining
+       $v0/$v1 swap in the mask setup is downstream of that.  Next lever to try
+       is something that defeats the sink (e.g. re-reading pkt->current). */
     unsigned int p = (padding + 2) & 0x1F;
     unsigned int mask = 0xFFFFFFFF >> (32 - p);
     unsigned int *cur = pkt->current;
@@ -312,10 +322,16 @@ void sceVif1PkOpenDirectHLCode(Vif1Packet *pkt, unsigned int flags)
 /* Add N 128-bit DIRECT data units to the VIF1 packet */
 void sceVif1PkAddDirectDataN(Vif1Packet *pkt, const long *src, unsigned int count)
 {
-    /* TODO: near-miss - the 32-bit-word extraction (dsll32/dsra32) and the
-       down-counter loop are correct, but GCC 2.9 juggles the destination
-       pointer through an extra $v0 copy and moves the params into $t2/$a3
-       instead of the layout this straight form produces. */
+    /* TODO: near-miss (25 words).  ROOT CAUSE ISOLATED: the original loop body
+       is exactly sceVif1PkAddUpkData128's shape - `dest[0] = lo; dest++;
+       dest[0] = lo>>32; dest[1] = hi; dest[2] = hi>>32; dest += 3;` - which the
+       original compiles to `addiu a2,a2,4` + `move v0,a2` (a strength-reduced
+       giv) + offsets 0/4/8 off the copy.  In a loop gcc 2.9 instead FOLDS the
+       two increments into one `addiu ...,16` and rewrites the offsets, so the
+       `move` never appears.  Tried: fresh `next`/`p` locals for the advanced
+       pointer (folds anyway), and hoisting `src += 2` (gcc then hoists the
+       `+4` out of the loop entirely, 27 words).  Needs a lever that blocks the
+       induction-variable rewrite. */
     unsigned int i = count - 1;
 
     if (count != 0)
@@ -342,8 +358,9 @@ void sceVif1PkAddDirectDataN(Vif1Packet *pkt, const long *src, unsigned int coun
 /* Add multiple 128-bit UPK data units to the VIF1 packet */
 void sceVif1PkAddUpkData128N(Vif1Packet *pkt, const long *src, unsigned int count)
 {
-    /* TODO: near-miss - identical body to sceVif1PkAddDirectDataN (same original
-       instruction stream); same pointer-juggling / register-move differences. */
+    /* TODO: near-miss (29 words) - identical body to sceVif1PkAddDirectDataN
+       (same original instruction stream); same induction-variable folding
+       problem, see the analysis on that function. */
     unsigned int i = count - 1;
 
     if (count != 0)
@@ -370,19 +387,28 @@ void sceVif1PkAddUpkData128N(Vif1Packet *pkt, const long *src, unsigned int coun
 /* Initialize a VIF1 packet for an UNPACK code block */
 void sceVif1PkOpenUpkCode(Vif1Packet *pkt, unsigned int a1, unsigned int a2, unsigned int a3, unsigned int t0)
 {
-    /* TODO: near-miss - functionally correct (the two code words, the element
-       count via (0x20 >> VL) * (VN + 1), and the NLOOP min/shift are all here),
-       but GCC 2.9 picks different $t registers and the opposite branch sense
-       for the t3 < t4 test than the original build. */
+    /* TODO: near-miss (28 words, was 34).  Two causes were fixed here: the
+       original walks the pointer (`*cur = w0; cur++; *cur = w1;
+       pkt->current = cur + 1; pkt->openDirect = cur;`) rather than indexing
+       cur[0]/cur[1], and `a3 | 0x1000000` must be its own statement or gcc
+       reassociates it into `(t0 << 8 | 0x1000000) | a3`.  What is left is
+       scheduling: the original defers `sw` of the second word and of
+       pkt->current to the end of the block (after the mult/movn group) and
+       materialises the 256 constant early into its own register, copying it
+       twice (`move t4,t2` / `move t3,t2`) - we fold one copy away, so we are
+       one instruction short.  Inverting the `lo < hi` test does not help. */
     unsigned int *current = pkt->current;
-    unsigned int vl = a2 & 3;
-    unsigned int vn = (a2 >> 2) & 3;
-    unsigned int size, lo, hi, code;
+    unsigned int vl, vn;
+    unsigned int size, lo, hi, code, c0;
 
-    current[0] = (t0 << 8) | (a3 | 0x1000000);
-    current[1] = (a2 << 24) | (a1 & 0xFFFF);
-    pkt->current = current + 2;
-    pkt->openDirect = &current[1];
+    c0 = a3 | 0x1000000;
+    *current = (t0 << 8) | c0;
+    current++;
+    vn = (a2 >> 2) & 3;
+    vl = a2 & 3;
+    *current = (a2 << 24) | (a1 & 0xFFFF);
+    pkt->current = current + 1;
+    pkt->openDirect = current;
 
     size = (0x20 >> vl) * (vn + 1);
     lo = a3 ? a3 : 0x100;
@@ -400,16 +426,17 @@ void sceVif1PkOpenUpkCode(Vif1Packet *pkt, unsigned int a1, unsigned int a2, uns
 void sceVif1PkRef(Vif1Packet *pkt, unsigned int a1, unsigned int a2, unsigned int a3, unsigned int t0, unsigned int t1)
 {
     unsigned int *current;
-    unsigned int w0;
+    unsigned int w0, w1;
 
     /* terminate current packet first */
     sceVif1PkTerminate(pkt);
 
-    current = pkt->current;
+    w1 = a1 & 0x9FFFFFFF;
     a2 = a2 | 0x30000000;
+    current = pkt->current;
     w0 = t1 | a2;
     *current++ = w0;
-    *current = a1 & 0x9FFFFFFF;
+    *current = w1;
     pkt->current = current + 3;
     current[1] = a3;
     current[2] = t0;
@@ -418,32 +445,41 @@ void sceVif1PkRef(Vif1Packet *pkt, unsigned int a1, unsigned int a2, unsigned in
 /* Close a currently open GIF tag in the VIF1 packet */
 void sceVif1PkCloseGifTag(Vif1Packet *pkt)
 {
-    /* TODO: near-miss - logic and instruction sequence match the original (the
-       NLOOP division, FLG/NREG conditional-moves and the 16-byte fill loop all
-       line up), but GCC 2.9 allocates the $t0-$t2 pointers and temporaries to
-       different registers than the original build. */
+    /* TODO: near-miss (REGISTER, 13 words).  Structure now matches exactly: the
+       `nloop >>= 1` really is outside the `flg != 2` test in the original (the
+       movn sits in the beq's delay slot, so it runs unconditionally), and the
+       fill loop walks a fresh copy `p` of `current` (that is the `move a1,t2`).
+       What is left is a 3-cycle in local-alloc: flg wants $v1, `nloop >> 1`
+       wants $a0 and the literal 2 wants $a1; we get $a0/$a1/$v1.  Neither
+       declaration order, statement order nor `if (2 != flg)` moves it.  Pinning
+       `nloop >> 1` to $4 and `p` to $5 gets it down to 5 words, but gcc 2.9
+       silently ignores an __asm__ register spec on `flg` (any register), so the
+       last swap cannot be forced from the source. */
     unsigned int *current = pkt->current;
     unsigned int *openGif = pkt->openGif;
     unsigned long tag = *(unsigned long *)openGif;
     unsigned int nloop = (((int)current - (int)openGif) >> 3) - 2;
     unsigned int flg = (unsigned int)(tag >> 58) & 3;
+    unsigned int *p;
+
+    if (flg != 1)
+        nloop = nloop >> 1;
 
     if (flg != 2) {
         unsigned int nreg = (unsigned int)(tag >> 60);
-        if (flg != 1)
-            nloop = nloop >> 1;
         if (nreg == 0)
             nreg = 16;
         nloop = (nloop + nreg - 1) / nreg;
     }
 
-    *(unsigned long *)openGif = tag + nloop;
+    p = current;
     pkt->openGif = 0;
+    *(unsigned long *)openGif = tag + nloop;
 
-    while (((unsigned int)current & 0xC) != 0)
-        *current++ = 0;
+    while (((unsigned int)p & 0xC) != 0)
+        *p++ = 0;
 
-    pkt->current = current;
+    pkt->current = p;
 }
 
 /* Build a VIF1 packet to load an image into the GS */

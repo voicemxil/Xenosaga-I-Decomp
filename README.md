@@ -17,6 +17,14 @@ asm/                        Disassembled code and data
   data/cod/                 .data, .rodata, .lit4, .sdata, .sbss, .bss
   ov02/2DD000.s             Overlay segment
 src/                        Decompiled C source files
+  game/                     Game code (ACT, Umn, Java_* natives, menus, ...)
+  sdk/                      Sony SDK translation units (sce*, mpeg)
+  xgl/                      xgl* engine layer
+  nml/                      nml* model/filter/packet layer
+  ssd/                      Sound driver (ssd, sef*, srsGet, sdv)
+  libc/                     libc: newlib TU wrappers, libc.c, libm.c
+  libgcc/                   libgcc: soft-float fpbit.c, 64-bit int TUs
+newlib/                     Vendored newlib 1.8.2 sources (see src/libc)
 assets/                     Binary blobs (VU microcode)
 config/
   SLUS_204.69.yaml          Splat configuration
