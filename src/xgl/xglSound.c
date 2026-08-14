@@ -64,7 +64,7 @@ int xglCdStreamOpen(XGL_STREAM *, char *);
 int xglCdStreamReadRing(XGL_STREAM *, int);
 void xglCdStreamParamInit(XGL_STREAM *);
 int xglSRand(void);
-int xglMakeSePacket();
+void xglMakeSePacket(short nCode, ...);
 void *memset(void *, int, int);
 
 /* Block until any queued SPU DMA transfer has completed */
@@ -566,4 +566,135 @@ void xglSendSePacket(void)
     SsdSendFuncPacket(SoundWork.stream.aRing, SoundWork.stream.nCount);
     SoundWork.stream.nCount = 0;
     memset(SoundWork.stream.aRing, 0, 0x800);
+}
+
+/* --- Stream stop / mute --- */
+int SsdGetPcmStreamStatus(void);
+int SsdStopPcmStream(int);
+int SsdDisposePcmStream(void);
+int SsdGetVagStreamStatusStereo(void);
+int SsdStopVagStream(int);
+int SsdDisposeVagStream(void);
+int SsdSetVagStreamDataStereo(int, void *, int);
+void xglCdStreamClose(XGL_STREAM *);
+extern unsigned char *WorkEnd;
+
+/* Stop whichever stream is playing on channel 0 and dispose its decoder */
+void xglSoundStreamStop(int nChannel)
+{
+    XGL_STREAM *pStream;
+    int nResult;
+    int nMode;
+
+    if (nChannel == 0) {
+        pStream = &SoundWork.stream;
+        xglCdStreamClose(pStream);
+        nMode = pStream->nMode;
+        if (nMode == 1) {
+            goto pcm;
+        }
+        if (nMode < 2) {
+            goto out;
+        }
+        if (nMode == 2) {
+            goto stereo;
+        }
+        if (nMode != 3) {
+            goto out;
+        }
+        goto multi;
+    pcm:
+        SsdGetPcmStreamStatus();
+        while (SsdGetResultValue(&nResult) < 0) {
+            ;
+        }
+        if (*(unsigned char *)&nResult != 0) {
+            SsdStopPcmStream(0);
+            SsdDisposePcmStream();
+        }
+        goto out;
+    stereo:
+        SsdGetVagStreamStatusStereo();
+        while (SsdGetResultValue(&nResult) < 0) {
+            ;
+        }
+        if (*(unsigned char *)&nResult != 0) {
+            SsdStopVagStream(0);
+            SsdDisposeVagStream();
+        }
+        goto out;
+    multi:
+        SsdStopVagStream(0);
+        while (SsdGetResultValue(&nResult) < 0) {
+            ;
+        }
+        SsdDisposeVagStream();
+        while (SsdGetResultValue(&nResult) < 0) {
+            ;
+        }
+    out:
+        pStream->nMode = 0;
+    }
+}
+
+/* TODO: near-miss (5 words, pure REGISTER $v0<->$v1 swap in the final
+ * drain loop; do-while/polarity/sub-spelling variants all identical). */
+/* Flush the stereo VAG stream with silence until its queue drains */
+void xglSoundStreamMute(void)
+{
+    unsigned char *pBuf;
+    int nResult;
+    int i;
+
+    unsigned char *p;
+
+    pBuf = WorkEnd;
+    SsdGetVagStreamStatusStereo();
+    p = pBuf + 4095;
+    for (i = 4095; i >= 0; i--) {
+        *p-- = 0;
+    }
+    while (SsdGetResultValue(&nResult) < 0) {
+        ;
+    }
+    while (nResult >= 256) {
+        SsdSetVagStreamDataStereo(0, pBuf, 4096);
+        nResult -= 256;
+    }
+}
+
+/* --- SE packet builder (varargs) --- */
+typedef __builtin_va_list va_list;
+#define va_start(ap, last) __builtin_stdarg_start(ap, last)
+#define va_arg(ap, type) __builtin_va_arg(ap, type)
+
+typedef struct {
+    char pad00[0xA4];
+    short nCode;                    /* 0xA4: stream.aRing entry code */
+    char padA6[0xE];
+    int aParam[4];                  /* 0xB4: entry params */
+} SE_ENTRY;
+
+/* Append one SE command (code + up to four params) to the pending packet */
+void xglMakeSePacket(short nCode, ...)
+{
+    va_list ap;
+    SE_ENTRY *pEnt;
+    SE_ENTRY *pEnt2;
+    int *pDst;
+    int i;
+
+    if (SoundWork.stream.nCount < 65) {
+        pEnt = (SE_ENTRY *)((char *)&SoundWork + (SoundWork.stream.nCount << 5));
+        pEnt2 = pEnt;
+        __asm__("" : "+r"(pEnt2));
+        pEnt->nCode = nCode;
+        va_start(ap, nCode);
+        pDst = pEnt2->aParam;
+        for (i = 3; i >= 0; i--) {
+            *pDst = va_arg(ap, int);
+            pDst++;
+        }
+        SoundWork.stream.nCount++;
+    }
 }

@@ -285,3 +285,50 @@ void xglCdArcInitSub0(XGLCDFILEPOS *pPos, char *pBuf, int nCount)
     while (sceCdSync(1) > 0) {
     }
 }
+
+/* --- Stream close --- */
+int sceCdStStop(void);
+int sceSifFreeIopHeap(void *);
+extern XGLCDSTREAM *listnow[2];   /* active-stream slots (.sbss) */
+extern char D_0093CC30;          /* stream-busy flag (uncached mirror) */
+
+/* TODO: WIP (~30 diffs, built 148 vs orig 224 bytes). Two blockers:
+ * (1) the one-and-a-bit-iteration slot-search loop collapses (gcc folds
+ * i<=0 after i++ and deletes the back edge; the original keeps a peeled
+ * first compare + live loop); (2) `nType >= 0` on the int copy of the
+ * u_char field folds away (orig emits a real bltz), and the built picks
+ * beql/bnezl likely forms where orig has plain branches. */
+/* Close a CD stream: drop it from the active slots, stop/close the
+ * underlying transport and clear the busy flag */
+int xglCdStreamClose(XGLCDSTREAM *pStream)
+{
+    XGLCDSTREAM **pp;
+    int nType;
+    int i;
+
+    i = 0;
+    pp = listnow;
+    do {
+        if (*pp == pStream) {
+            *pp = 0;
+            break;
+        }
+        i++;
+        pp++;
+    } while (i <= 0);
+
+    if (pStream->nFd != -1) {
+        nType = pStream->nType;
+        if (nType == 0) {
+            sceCdStStop();
+            if (pStream->nUnk00 != 0) {
+                sceSifFreeIopHeap((void *)pStream->nUnk00);
+            }
+            pStream->nFd = -1;
+        } else if (nType >= 0 && nType < 3) {
+            sceClose(pStream->nFd);
+        }
+        D_0093CC30 = 0;
+    }
+    return 0;
+}

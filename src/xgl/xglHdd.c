@@ -258,14 +258,23 @@ int Judge_MakeNewSavedata(int nFd);
 /* TODO: near-miss (25/28 words). Original spills pBuf into $s0 across
  * the sceDopen call (unused afterward) instead of just moving it into
  * $a1 directly; every natural form here uses the cheaper single move. */
+/* TODO: near-miss (7 words, SCHEDULING): orig hoists the yoursaves %hi
+ * (lui $v0) above the sd/move prologue pair so the address tmp lands in
+ * $v0; ours schedules it after, so hi+lo fold into $a0. The $16 pin +
+ * barrier reproduces the original pBuf staging through $s0 (was 25/25
+ * wrong: branch polarity was also inverted -- fd<0 goes to
+ * Judge_MakeNewFolder, fd>=0 to Judge_MakeNewSavedata). */
 /* Ensure the memory card has a "Your Saves" folder, creating the folder
  * or an empty savedata block as needed */
 int xglHddMcCheckYourSaves(void *pBuf)
 {
+    register void *p __asm__("$16") = pBuf;
+    char *pDir = yoursaves;
     int nFd;
 
-    nFd = sceDopen(yoursaves, pBuf);
-    if (nFd >= 0) {
+    __asm__("" : "+r"(p));
+    nFd = sceDopen(pDir, p);
+    if (nFd < 0) {
         if (Judge_MakeNewFolder(nFd) == 1) {
             return 1;
         }

@@ -102,11 +102,13 @@ int xglFlagsGet(int nFlag, int nSize)
     long long nChunk;
     int nShift;
     int nBytes;
+    int nLim;
     int i;
 
     nShift = nFlag & 7;
     nBytes = (nSize + nShift + 7) >> 3;
-    for (i = 0; i < nBytes; i++) {
+    nLim = nBytes;
+    for (i = 0; i < nLim; i++) {
         ((unsigned char *)&nChunk)[i] = D_00491824[(nFlag >> 3) + i];
     }
     return (int)(nChunk >> nShift) & ((1 << nSize) - 1);
