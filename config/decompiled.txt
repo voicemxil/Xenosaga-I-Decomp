@@ -1611,10 +1611,10 @@ strrchr = 0x003301D0, 0x50; // newlib_str.c
 
 __muldi3 = 0x00329F38, 0x74; // _muldi3
 
-// __fixunsdfdi = 0x0032B7C0, 0x118; // _fixunsdfdi -- TODO: 39 diff words at best (2.96 -O2 -G8 -mlong32). Orig leaves jal delay slots empty with arg moves hoisted above the call; no flag combination tried so far (-fno-delayed-branch, -fno-schedule-insns, -O1/-O3, 2.9) reproduces it. Same story for __fixunssfdi (53d), __floatdidf (26d), __fixdfdi (21d) -- all four float<->DI conversions share the scheduling shape.
-// __fixunssfdi = 0x0032B8D8, 0x128; // _fixunssfdi -- TODO: see __fixunsdfdi note
-// __floatdidf = 0x0032DB50, 0xA8; // _floatdidf -- TODO: see __fixunsdfdi note
-// __fixdfdi = 0x003384F8, 0x78; // _fixdfdi -- TODO: see __fixunsdfdi note
+__fixunsdfdi = 0x0032B7C0, 0x118; // _fixunsdfdi
+__fixunssfdi = 0x0032B8D8, 0x128; // _fixunssfdi
+__floatdidf = 0x0032DB50, 0xA8; // _floatdidf
+__fixdfdi = 0x003384F8, 0x78; // _fixdfdi
 
 __divdi3 = 0x00329FB0, 0x694; // _divdi3
 __moddi3 = 0x0032A648, 0x690; // _moddi3
@@ -1659,3 +1659,7 @@ strlwr = 0x0032FE08, 0x4C; // newlib_strlwr
 __sccl = 0x00333B80, 0x100; // newlib_vfscanf
 _pow5mult = 0x00336AC8, 0xFC; // newlib_mprec
 quorem = 0x00333E88, 0x22C; // newlib_quorem
+ungetc = 0x00337B40, 0x188; // newlib_ungetc
+_ulp = 0x00336F18, 0xD0; // newlib_mprec
+_ratio = 0x00337308, 0xCC; // newlib_mprec
+_mprec_log10 = 0x003373D8, 0x70; // newlib_mprec

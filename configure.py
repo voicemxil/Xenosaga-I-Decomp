@@ -164,6 +164,17 @@ FILE_FIX_FLAGS = {
     # --hoist-return-store regresses other nmlModel.c functions (see
     # XENOSAGA_RESUME_PROMPT.md), so scope to just this one.
     "nmlModel.c": "--barrier-return-store nmlModelSetFadeInInterrupt",
+    # ungetc's CHECK_INIT tail and the mprec leaf returns keep their
+    # copies out of the delay slots, same class as fabs in libm.c.
+    "newlib_ungetc.c": "--barrier-return-store ungetc",
+    "newlib_mprec.c": "--barrier-return-store _ulp,_ratio --barrier-branch-move",
+    # The libgcc float<->DI conversion TUs never let gas fill a delay
+    # slot with a preceding copy/ALU op -- barrier both classes
+    # (whole-file; each TU is one function).
+    "_fixdfdi.c": "--barrier-return-store --barrier-branch-move",
+    "_fixunsdfdi.c": "--barrier-return-store --barrier-branch-move",
+    "_fixunssfdi.c": "--barrier-return-store --barrier-branch-move",
+    "_floatdidf.c": "--barrier-return-store --barrier-branch-move",
     # fabs: SET_HIGH_WORD's final `return x` computes the masked result
     # into a4/a1-family regs and needs an explicit copy into $2; gas's
     # reorder pass steals that copy into the jr $31 delay slot, but the

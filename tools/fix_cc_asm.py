@@ -206,6 +206,26 @@ RE_RETURN_MOVE = re.compile(r'^\tdaddu\t\$\w+,\$\w+,\$0$')
 # barrier above -- RE_RETURN alone is used elsewhere for return-only
 # fixes (la-before-return, mem-abs-before-return) that must not widen.
 RE_RETURN_OR_CALL = re.compile(r'^\t(j\t\$31|jr\t\$(ra|31)|jal\t[A-Za-z_]\w*)\b')
+# Any branch with a delay slot gas may steal a preceding move into:
+# conditional branches and unconditional b, on top of returns/calls.
+# Used by --barrier-branch-move, the conditional-branch analogue of
+# --barrier-return-store's move case -- confirmed on the libgcc
+# __fixunsdfdi/__fixunssfdi/__floatdidf conversions, where the original
+# keeps `move a1,s1` above a bgez and leaves a genuine nop in the slot.
+RE_ANY_BRANCH = re.compile(
+    r'^\t(b\t|beqz?l?\t|bnez?l?\t|bgezl?\t|bltzl?\t|blezl?\t|bgtzl?\t|'
+    r'j\t\$31|jr\t\$(ra|31)|jal\t[A-Za-z_]\w*)')
+# Non-likely branches only: branch-likely slots annul when not taken, so
+# gas never steals into them and they carry real content from gcc.
+# Simple one-output ALU ops --barrier-branch-move also keeps out of a
+# branch delay slot (a dsll32 before a bgez in __floatdidf, on top of
+# the daddu moves).
+RE_BARRIER_ALU = re.compile(
+    r'^\t(daddu|addu|subu|dsll32|dsll|dsra32|dsrl32|sll|srl|sra|or|and|xor)'
+    r'\t\$\w+,\$\w+(,(\$\w+|\d+))?$')
+RE_PLAIN_BRANCH = re.compile(
+    r'^\t(b\t|beqz?\t|bnez?\t|beq\t|bne\t|bgez\t|bltz\t|blez\t|bgtz\t|'
+    r'j\t\$31|jr\t\$(ra|31)|jal\t[A-Za-z_]\w*)')
 
 
 def synth_load32(reg, val):
@@ -362,7 +382,8 @@ def hoist_return_delay_stores(lines, scope=()):
 
 
 def main(path, omitted_hazards, barrier_return_store=None,
-         hoist_return_store=None):
+         hoist_return_store=None, barrier_branch_move=None,
+         no_fill_delay=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -471,6 +492,19 @@ def main(path, omitted_hazards, barrier_return_store=None,
                        "\n\t.set pop")
             continue
 
+
+        # --no-fill-delay: emit every reorder-mode plain branch with an
+        # explicit nop in a noreorder block, so gas can never steal the
+        # preceding instruction into the slot. The original objects for
+        # some TUs (libgcc float<->DI conversions) never have filled
+        # slots at all -- a per-file property, opt-in like the barriers.
+        if (no_fill_delay is not None
+                and RE_PLAIN_BRANCH.match(line)
+                and in_scope(owner[i], no_fill_delay)):
+            out.append("\t.set push\n\t.set noreorder\n" + line +
+                       "\n\tnop\n\t.set pop")
+            continue
+
         if RE_LA.match(line) or RE_MEM.match(line) or RE_CVT.match(line):
             # When an `la reg, sym(idx)` macro is the last computation before
             # a leaf return, the modern assembler pulls its final addu into
@@ -560,6 +594,26 @@ def main(path, omitted_hazards, barrier_return_store=None,
             out.append(f"\t.word {lo32}")
             out.append(f"\t.word {hi32}")
 
+
+    if barrier_branch_move is not None:
+        # Post-pass so it also covers lines synthesized by earlier passes
+        # (e.g. the li.d expansion's trailing dsll32): keep a simple ALU
+        # op or register copy out of a following plain branch's delay
+        # slot by pinning it behind a reorder barrier.
+        flat = "\n".join(out).split("\n")
+        res = []
+        for i, line in enumerate(flat):
+            nxt = flat[i + 1] if i + 1 < len(flat) else ""
+            prev = flat[i - 1] if i else ""
+            if ((RE_RETURN_MOVE.match(line) or RE_BARRIER_ALU.match(line))
+                    and RE_ANY_BRANCH.match(nxt)
+                    and "noreorder" not in prev):
+                res.append("\t.set push\n\t.set noreorder\n" + line +
+                           "\n\t.set pop")
+            else:
+                res.append(line)
+        out = res
+
     with open(path, 'w') as f:
         f.write('\n'.join(out))
 
@@ -573,6 +627,16 @@ if __name__ == "__main__":
                         help="keep a trailing store out of a leaf return delay "
                              "slot; optionally a comma-separated list of "
                              "function names to scope the pass to")
+    parser.add_argument("--barrier-branch-move", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="keep a preceding move out of ANY branch delay "
+                             "slot (incl. conditional branches); optionally "
+                             "a comma-separated function-name list")
+    parser.add_argument("--no-fill-delay", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="pin an explicit nop into every plain branch's "
+                             "delay slot (no gas filling at all); optionally "
+                             "a comma-separated function-name list")
     parser.add_argument("--hoist-return-store", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="move a store gcc placed in a leaf return's "
@@ -590,4 +654,5 @@ if __name__ == "__main__":
 
     ASSUME_NO_LIT4 = args.as_g0
     main(args.path, set(args.omit_hazard), scope(args.barrier_return_store),
-         scope(args.hoist_return_store))
+         scope(args.hoist_return_store), scope(args.barrier_branch_move),
+         scope(args.no_fill_delay))
