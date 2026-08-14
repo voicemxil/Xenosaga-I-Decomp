@@ -1640,3 +1640,8 @@ fflush = 0x00335320, 0x114; // newlib_fflush
 lflush = 0x00337448, 0x34; // newlib_refill
 __srefill = 0x00337480, 0x17C; // newlib_refill
 fread = 0x003356D8, 0x11C; // newlib_fread
+
+_read_r = 0x00337EF8, 0x60; // newlib_readr
+_write_r = 0x00337CC8, 0x60; // newlib_writer
+_lseek_r = 0x00337E98, 0x60; // newlib_lseekr
+_fstat_r = 0x00337E38, 0x5C; // newlib_fstatr
