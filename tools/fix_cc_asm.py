@@ -432,6 +432,48 @@ def unfill_gcc_slots(flat, scope, owner_of):
     return res
 
 
+RE_WAR_ALU = re.compile(r"^\t(?:daddu|addu|move|or)\t(\$\w+),(.*)$")
+RE_SP_RESTORE = re.compile(r"^\tld\t(\$\w+),\d+\(\$sp\)$")
+
+
+def war_restore_swap(flat, scope):
+    """Swap two adjacent epilogue register restores after a WAR hazard.
+
+    The original build's second scheduler delays an epilogue `ld $A,
+    off($sp)` by one slot when the immediately preceding instruction
+    still READS $A (a write-after-read dependence, e.g. `move $v0,$s0`
+    setting up the return value right before `ld $s0`), letting the next
+    independent restore go first.  Our gcc keeps the prologue's source
+    order instead.  Opt-in and function-scoped like the other passes:
+    the pattern (reader of $A / ld $A,off($sp) / ld $B,off2($sp) with
+    $B uninvolved) is swapped to (reader / ld $B / ld $A).  Seen in
+    gcc_frame.c's __deregister_frame_info found-path epilogue.
+    """
+    res = []
+    cur = None
+    i = 0
+    while i < len(flat):
+        line = flat[i]
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+        if in_scope(cur, scope) and i + 2 < len(flat):
+            m0 = RE_WAR_ALU.match(line)
+            m1 = RE_SP_RESTORE.match(flat[i + 1])
+            m2 = RE_SP_RESTORE.match(flat[i + 2])
+            if (m0 and m1 and m2
+                    and m1.group(1) != m2.group(1)
+                    and m1.group(1) in m0.group(2)
+                    and m2.group(1) not in line):
+                res.append(line)
+                res.append(flat[i + 2])
+                res.append(flat[i + 1])
+                i += 3
+                continue
+        res.append(line)
+        i += 1
+    return res
+
+
 RE_FLIP_COND_BRANCH = re.compile(
     r"^\t(beql?|bnel?|beqzl?|bnezl?|blezl?|bgtzl?|bltzl?|bgezl?"
     r"|bc1tl?|bc1fl?)([ \t])")
@@ -478,7 +520,8 @@ def main(path, omitted_hazards, barrier_return_store=None,
          hoist_return_store=None, barrier_branch_move=None,
          no_fill_delay=None, expand_sym_loads=False,
          unfill_slots=None, barrier_lo_load=None,
-         branch_likely=None, branch_unlikely=None):
+         branch_likely=None, branch_unlikely=None,
+         war_restore=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -741,6 +784,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
                 res.append(line)
         out = res
 
+    if war_restore is not None:
+        flat = "\n".join(out).split("\n")
+        out = war_restore_swap(flat, war_restore)
+
     if branch_likely or branch_unlikely:
         flat = "\n".join(out).split("\n")
         out = flip_branch_likely(flat, branch_likely or frozenset(),
@@ -772,6 +819,11 @@ if __name__ == "__main__":
                         default=None, metavar="FUNCS",
                         help="hoist gcc's own branch-delay-slot fills back "
                              "above the branch, leaving a literal nop")
+    parser.add_argument("--war-restore-swap", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="swap two adjacent epilogue $sp restores when "
+                             "the preceding insn still reads the first one's "
+                             "register (original sched2's WAR delay)")
     parser.add_argument("--branch-likely", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose Nth "
                              "conditional branch (0-based, asm order) is "
@@ -808,4 +860,5 @@ if __name__ == "__main__":
          scope(args.hoist_return_store), scope(args.barrier_branch_move),
          scope(args.no_fill_delay), args.expand_sym_loads,
          scope(args.unfill_gcc_slots), scope(args.barrier_lo_load),
-         scope(args.branch_likely), scope(args.branch_unlikely))
+         scope(args.branch_likely), scope(args.branch_unlikely),
+         scope(args.war_restore_swap))

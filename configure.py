@@ -209,7 +209,12 @@ FILE_FIX_FLAGS = {
     "_fixunsdfdi.c": "--barrier-return-store --barrier-branch-move",
     "_fixunssfdi.c": "--barrier-return-store --barrier-branch-move",
     "_floatdidf.c": "--barrier-return-store --barrier-branch-move",
-    "gcc_frame.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    # __deregister_frame_info: the found-path epilogue's ld $16/$17 pair
+    # is swapped in the original because `move $2,$16` still reads $16
+    # (WAR delay in the original's sched2); see war_restore_swap.
+    "gcc_frame.c": ("--barrier-return-store --barrier-branch-move "
+                    "--expand-sym-loads "
+                    "--war-restore-swap __deregister_frame_info"),
     "_main.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "fpbit_df.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "fpbit_sf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
