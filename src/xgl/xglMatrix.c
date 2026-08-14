@@ -408,3 +408,151 @@ void xglRotTransPersN(XGL_VECTOR *pOut, void *pMtx, XGL_VECTOR *pIn, int nCount,
     }
     xglMatrixStackPop((void *)1);
 }
+/* --- Euler rotation constructors (VU0 sin/cos + hand-scheduled row mix) --- */
+
+extern unsigned int Vu0CallSin[];
+extern unsigned int Vu0CallCos[];
+
+void xglMatrixRotX(XGL_MATRIX *pDst, XGL_MATRIX *pSrc, float fAngle)
+{
+    int nSin;
+    int nCos;
+    float aSC[4];
+    register float *pSC __asm__("$7") = aSC;
+    float fSin;
+    float fCos;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nSin)
+        : "r"((unsigned int)Vu0CallSin >> 3), "r"(fAngle));
+    fSin = *(float *)&nSin;
+    aSC[1] = fSin;
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nCos)
+        : "r"((unsigned int)Vu0CallCos >> 3), "r"(fAngle));
+    fCos = *(float *)&nCos;
+    aSC[0] = fCos;
+    __asm__ __volatile__(".set noreorder\n"
+        "lq $2, 0x0(%1)\n"
+        "lqc2 $vf28, 0x10(%1)\n"
+        "lqc2 $vf29, 0x20(%1)\n"
+        "lqc2 $vf1, 0x0(%2)\n"
+        "sq $2, 0x0(%0)\n"
+        "lq $2, 0x30(%1)\n"
+        "sq $2, 0x30(%0)\n"
+        "vmulax.xyzw $ACC, $vf28, $vf1x\n"
+        "vmaddy.xyzw $vf27, $vf29, $vf1y\n"
+        "vmulax.xyzw $ACC, $vf29, $vf1x\n"
+        "vmsuby.xyzw $vf30, $vf28, $vf1y\n"
+        "sqc2 $vf27, 0x10(%0)\n"
+        "sqc2 $vf30, 0x20(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(pSrc), "r"(pSC) : "$2", "memory");
+}
+
+void xglMatrixRotY(XGL_MATRIX *pDst, XGL_MATRIX *pSrc, float fAngle)
+{
+    int nSin;
+    int nCos;
+    float aSC[4];
+    register float *pSC __asm__("$7") = aSC;
+    float fSin;
+    float fCos;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nSin)
+        : "r"((unsigned int)Vu0CallSin >> 3), "r"(fAngle));
+    fSin = *(float *)&nSin;
+    aSC[1] = fSin;
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nCos)
+        : "r"((unsigned int)Vu0CallCos >> 3), "r"(fAngle));
+    fCos = *(float *)&nCos;
+    aSC[0] = fCos;
+    __asm__ __volatile__(".set noreorder\n"
+        "lq $2, 0x10(%1)\n"
+        "lqc2 $vf27, 0x0(%1)\n"
+        "lqc2 $vf29, 0x20(%1)\n"
+        "lqc2 $vf1, 0x0(%2)\n"
+        "sq $2, 0x10(%0)\n"
+        "lq $2, 0x30(%1)\n"
+        "sq $2, 0x30(%0)\n"
+        "vmulax.xyzw $ACC, $vf27, $vf1x\n"
+        "vmsuby.xyzw $vf28, $vf29, $vf1y\n"
+        "vmulax.xyzw $ACC, $vf29, $vf1x\n"
+        "vmaddy.xyzw $vf30, $vf27, $vf1y\n"
+        "sqc2 $vf28, 0x0(%0)\n"
+        "sqc2 $vf30, 0x20(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(pSrc), "r"(pSC) : "$2", "memory");
+}
+
+void xglMatrixRotZ(XGL_MATRIX *pDst, XGL_MATRIX *pSrc, float fAngle)
+{
+    int nSin;
+    int nCos;
+    float aSC[4];
+    register float *pSC __asm__("$7") = aSC;
+    float fSin;
+    float fCos;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nSin)
+        : "r"((unsigned int)Vu0CallSin >> 3), "r"(fAngle));
+    fSin = *(float *)&nSin;
+    aSC[1] = fSin;
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nCos)
+        : "r"((unsigned int)Vu0CallCos >> 3), "r"(fAngle));
+    fCos = *(float *)&nCos;
+    aSC[0] = fCos;
+    __asm__ __volatile__(".set noreorder\n"
+        "lq $2, 0x20(%1)\n"
+        "lqc2 $vf27, 0x0(%1)\n"
+        "lqc2 $vf28, 0x10(%1)\n"
+        "lqc2 $vf1, 0x0(%2)\n"
+        "sq $2, 0x20(%0)\n"
+        "lq $2, 0x30(%1)\n"
+        "sq $2, 0x30(%0)\n"
+        "vmulax.xyzw $ACC, $vf27, $vf1x\n"
+        "vmaddy.xyzw $vf29, $vf28, $vf1y\n"
+        "vmulax.xyzw $ACC, $vf28, $vf1x\n"
+        "vmsuby.xyzw $vf30, $vf27, $vf1y\n"
+        "sqc2 $vf29, 0x0(%0)\n"
+        "sqc2 $vf30, 0x10(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(pSrc), "r"(pSC) : "$2", "memory");
+}

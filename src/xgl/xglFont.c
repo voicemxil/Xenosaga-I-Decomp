@@ -9,7 +9,7 @@ typedef struct
     int      nLoadAddr;   /* 0x00 */
     char     pad04[4];
     u_short  nFlags;      /* 0x08 */
-    u_char   pad0A;       /* 0x0A */
+    u_char   nBank;       /* 0x0A */
     u_char   nDebugMode;  /* 0x0B */
     u_short  nLineHeight; /* 0x0C */
 } FSDATA;
@@ -31,6 +31,7 @@ typedef struct
 extern long long ModeEnv[];
 
 void xglFontFlushSub(int nAddr, int nB, int nC, int nD);
+extern int xglCdReadFile(char *pName, int nAddr, int nOfs, int nCb);
 
 void xglFontPrintDirectOT(int nOT, char *pStr);
 int xglFontGetStringWidth2(void *pStr, int nArg);
@@ -130,4 +131,32 @@ void xglFontDebugMode(int nMode)
         ModeEnv[4] = ((nMode & 0xFF) + 35) | 0x50000;
         ModeEnv[20] = FS.nDebugMode | 0x50000LL;
     }
+}
+
+/* TODO: near-miss (4 words). Structure/args/strings all line up; the
+ * residue is addressing-mode CSE: the original loads FS.nLoadAddr via
+ * the %hi reg with the %lo folded into the lw (4480($v1)) while ours
+ * folds it onto the byte-pair's materialized &FS pseudo (0($v0)).
+ * *(int *)&FS and pointer-staging variants did not split them. */
+/* Load one of the two font texture pages, returning the previous bank */
+int xglFontLoad(int nBank, int nNow)
+{
+    int nOld;
+    int nOfs;
+    int nCb;
+
+    nOld = FS.nBank;
+    FS.nBank = nBank;
+    nOfs = 1;
+    nCb = nNow;
+    if (nNow == 0) {
+        nOfs = 0;
+        nCb = 1;
+    }
+    if (nBank == 0) {
+        xglCdReadFile("data\\font0.tex", *(int *)&FS, nOfs, nCb);
+    } else {
+        xglCdReadFile("data\\font1.tex", *(int *)&FS, nOfs, nCb);
+    }
+    return nOld;
 }
