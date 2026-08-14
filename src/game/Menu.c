@@ -627,6 +627,7 @@ extern int dataAccBoxChk(int);
 typedef struct {
     char pad0C[0xC];
     int fC;
+    int f10;
 } PARAOBJ;
 extern int MenuParaPtNowGet(int nBase, int nType);
 extern int MenuParaUpMaxGet(int nType);
@@ -1700,7 +1701,7 @@ typedef struct {
     char pad23[0x30 - 0x23];
     unsigned char b30;         /* 0x30 */
     signed char b31;           /* 0x31: read back with lb */
-    unsigned char b32;         /* 0x32 */
+    signed char b32;           /* 0x32: read back with lb */
     unsigned char b33;         /* 0x33: radar display option */
     char pad34;
     unsigned char b35;         /* 0x35: HDD activate result */
@@ -3230,4 +3231,121 @@ void MenuItemListMake00_1(void)
     MenuItemList->p28 = MenuListGet(0);
     WindowSPItemChange((char *)MenuItemList + 12);
     WindowSPSetSelect((char *)MenuItemList + 12, D_0036C200);
+}
+
+/* --- Ether list construction --- */
+extern int func_A11220(int, int);
+
+/* Build ether list 0: name/points per entry, enable by learnable/usable state */
+void MenuEtherListMake00(void)
+{
+    MENUTECLISTENT *p;
+    int *pSort;
+    int nOn;
+    MENUTECWORK *w2;
+    MENUEPOBJ *rec;
+    int n;
+    int v;
+
+    p = (MENUTECLISTENT *)MenuListGet(0);
+    pSort = MenuSortAddrGet(0);
+    n = MenuSortCheck(0);
+    nOn = (int)&MenuWork;
+    rec = (MENUEPOBJ *)func_A191C0_2(((MENUTECWORK *)nOn)->bChr);
+    MenuListMake(0, 0);
+    if (n > 0) {
+        w2 = (MENUTECWORK *)nOn;
+        nOn = 1;
+        do {
+            func_A1A378(*(short *)((char *)func_A1A488(*(short *)pSort) + 6));
+            p->f0 = *(int *)MenuTextGet(*(int *)pSort);
+            v = func_A11220(w2->bChr, *(short *)pSort);
+            p->f4 = v;
+            if (v <= rec->h36) {
+                p->b8 = 0;
+                p->b9 = 0;
+            } else {
+                p->b8 = nOn;
+                p->b9 = nOn;
+            }
+            if (MenuEtherUseCheck(*(short *)pSort) == 0) {
+                p->b8 = nOn;
+                p->b9 = 2;
+            }
+            n--;
+            p++;
+            pSort++;
+        } while (n != 0);
+    }
+}
+
+/* Build one ether sub-list: points per entry, enable by owner/ep checks */
+void MenuEtherListMake02(int nIdx)
+{
+    MENUTECLISTENT *p2;
+    int nM1;
+    int nOn;
+    void *ptr;
+    MENUTECWORK *w2;
+    PARAOBJ *rec;
+    int n;
+    int v;
+    int f4;
+
+    nM1 = (int)MenuListGet(nIdx);
+    nOn = (int)MenuSortAddrGet(nIdx);
+    n = MenuSortCheck(nIdx);
+    ptr = &MenuWork;
+    rec = func_A19210(((MENUTECWORK *)ptr)->bChr);
+    MenuListMake(nIdx, 0);
+    if (n > 0) {
+        w2 = (MENUTECWORK *)ptr;
+        ptr = (void *)nOn;
+        p2 = (MENUTECLISTENT *)nM1;
+        nM1 = -1;
+        nOn = 1;
+        do {
+            p2->f4 = *(short *)((char *)func_A1A488(*(short *)ptr) + 8);
+            v = MenuEtherWhoCheck(*(short *)ptr);
+            ptr = (int *)ptr + 1;
+            f4 = p2->f4;
+            if (f4 == 0) {
+                p2->b8 = nOn;
+                p2->f4 = nM1;
+            } else if (w2->bChr != v) {
+                p2->b8 = nOn;
+            } else if (rec->f10 < f4 / 2) {
+                p2->b8 = nOn;
+            } else {
+                p2->b8 = 0;
+            }
+            n--;
+            p2++;
+        } while (n != 0);
+    }
+}
+
+/* --- Item list 2 (sorted key-item view) --- */
+extern char D_004C4F60[];
+extern char D_0036C205[];
+
+/* Re-sort item list 2 and refresh the item window onto it */
+void MenuItemListMake02(void)
+{
+    ITEMLISTWORK *w;
+
+    MenuSortSet(0, 2, 0);
+    MenuSortChange(0, 0);
+    MenuSortChange(0, MenuWork.b32);
+    MenuListMake(0, 0);
+    w = MenuItemList;
+    w->b0D = 7;
+    w->p1C = D_004C4F60;
+    MenuItemList->b20 = 2;
+    MenuItemList->b21 = 11;
+    MenuItemList->h18 = 468;
+    MenuItemList->h1A = MenuItemList->b21 * 24 + 6;
+    MenuItemList->p28 = MenuListGet(0);
+    WindowSPItemChange((char *)MenuItemList + 12);
+    WindowSPSetSelect((char *)MenuItemList + 12, D_0036C205);
 }

@@ -1885,3 +1885,5 @@ nmlFilterSetTexClear = 0x0023D010, 0xFC; // nmlFilter.c
 nmlFilterSetFrameAlphaClear = 0x0023CEF8, 0x114; // nmlFilter.c
 nmlFilterSetBufferToFrame = 0x0023CC00, 0x104; // nmlFilter.c
 nmlFilterSetFrameToBuffer = 0x0023CAF8, 0x104; // nmlFilter.c
+MenuEtherListMake00 = 0x002AD608, 0x11C; // Menu
+MenuItemListMake02 = 0x0028B9A8, 0xC8; // Menu
