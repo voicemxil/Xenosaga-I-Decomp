@@ -1675,3 +1675,15 @@ vfprintf = 0x00331578, 0x74; // newlib_vfprintf
 cvt = 0x00332C50, 0x1C0; // newlib_vfprintf
 exponent = 0x00332E10, 0xDC; // newlib_vfprintf
 _malloc_trim_r = 0x00335AF0, 0x16C; // newlib_freer
+
+_init_signal_r = 0x0032F1B8, 0x70; // newlib_signal
+_signal_r = 0x0032F228, 0x80; // newlib_signal
+_kill_r = 0x0032F4A0, 0x5C; // newlib_signalr
+_printf_r = 0x0032F010, 0x5C; // newlib_printf
+printf = 0x0032F070, 0x70; // newlib_printf
+_sprintf_r = 0x0032F518, 0x88; // newlib_sprintf
+sprintf = 0x0032F5A0, 0x90; // newlib_sprintf
+sscanf = 0x0032F638, 0xA8; // newlib_sscanf
+atexit = 0x0032E058, 0xA0; // newlib_atexit
+exit = 0x0032E168, 0xAC; // newlib_exit
+strcasecmp = 0x0032F6E0, 0xD8; // newlib_strcasecmp

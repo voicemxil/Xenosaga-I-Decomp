@@ -110,12 +110,16 @@ FILE_CFLAGS_OVERRIDE = {
 # the fetch-then-advance va_arg the original uses.
 NEWLIB_CFLAGS = ("-O2 -G0 -Inewlib/gccinc -Inewlib/libc/stdlib "
                  "-Inewlib/libc/stdio -Inewlib/libc/string "
+                 "-Inewlib/libc/signal -Inewlib/libc/reent "
                  "-Inewlib/libc/include "
                  "-I/usr/local/ps2dev/ee-gcc/lib/gcc-lib/ee/2.9-ee-991111/include")
 for _f in ("newlib_reallocr.c", "newlib_callocr.c", "newlib_ungetc.c",
            "newlib_strtod.c", "newlib_strtoul.c", "newlib_vfprintf.c",
            "newlib_mbtowc.c", "newlib_strlwr.c", "newlib_vfscanf.c",
-           "newlib_mprec.c", "newlib_dtoa2.c", "newlib_freer.c"):
+           "newlib_mprec.c", "newlib_dtoa2.c", "newlib_freer.c",
+           "newlib_signal.c", "newlib_signalr.c", "newlib_printf.c",
+           "newlib_sprintf.c", "newlib_sscanf.c", "newlib_atexit.c",
+           "newlib_exit.c", "newlib_strcasecmp.c"):
     FILE_CFLAGS_OVERRIDE[_f] = NEWLIB_CFLAGS
 
 
@@ -180,6 +184,14 @@ FILE_FIX_FLAGS = {
     "newlib_callocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_freer.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_dtoa2.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_signal.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_signalr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_printf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_sprintf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_sscanf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_atexit.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_exit.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_strcasecmp.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     # The libgcc float<->DI conversion TUs never let gas fill a delay
     # slot with a preceding copy/ALU op -- barrier both classes
     # (whole-file; each TU is one function).
