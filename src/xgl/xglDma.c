@@ -146,18 +146,22 @@ void xglDmaBufferRequest(XGLDMABUFF *pBuff, u_int nCh)
 void xglDmaMFIFOSetup(u_int nAddr, u_int nSize, int nCh)
 {
     XGLDMACHAN *pChan;
-    int nRingReg;
+    vu_int *pRing;
+    vu_int *pMask;
+    vu_int *pRingReg;
     u_int nCtrl;
 
     if (nCh < 3) {
         pChan = tbl_00490D60[nCh];
         nCtrl = *(vu_int *)0x1000E000;
-        nRingReg = 0x1000D010;
+        pRing = (vu_int *)0x1000E050;
+        pMask = (vu_int *)0x1000E040;
+        pRingReg = (vu_int *)0x1000D010;
+        *pRing = nAddr;
         *(vu_int *)0x1000E000 = nCtrl | 0xC;
-        *(vu_int *)0x1000E050 = nAddr;
-        *(vu_int *)0x1000E040 = nSize - 0x10;
+        *pMask = nSize - 0x10;
         mfifo_drain = pChan;
-        *(vu_int *)nRingReg = nAddr;
+        *pRingReg = nAddr;
         pChan->tadr = nAddr;
         pChan->qwc = 0;
         pChan->chcr = 0x104;

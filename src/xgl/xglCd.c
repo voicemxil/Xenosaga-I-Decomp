@@ -19,20 +19,33 @@ typedef struct {
     short nSectors;      /* 0x04 */
     short nRingSects;    /* 0x06 */
     char nUnk08;         /* 0x08 */
-    char pad09[3];
+    unsigned char nType; /* 0x09 */
+    char pad0A[2];
     int nUnk0C;          /* 0x0C */
     int nFd;             /* 0x10 */
-    char pad14[0xC];
+    int nUnk14;          /* 0x14 */
+    int nUnk18;          /* 0x18 */
+    char pad1C[4];
     int nUnk20;          /* 0x20 */
 } XGLCDSTREAM;
 
 typedef struct {
-    u_char aPad00[0x24];
+    int nUnk00;
+    u_char aPad04[0x20];
     u_char nType;
     u_char aPad25[3];
     int nFd;
     int nSize;
 } XGLCDFILEPOS;
+
+typedef struct {
+    char nReady;         /* 0x00 */
+    char pad01[3];
+    char *pBuf;          /* 0x04 */
+    int nLsn;            /* 0x08 */
+} XGLCDARC;
+
+void xglCdArcInitSub0(XGLCDFILEPOS *pPos, char *pBuf, int nBlock);
 
 extern XGLCDWORK LW;
 extern int D_0093DC44[4];
@@ -44,6 +57,8 @@ int WorkEnd;
 int sceCdPause(void);
 int sceCdSync(int nMode);
 int sceClose(int nFd);
+int sceCdStSeek(int nLsn);
+int sceLseek(int nFd, int nOffset, int nWhence);
 int xglCdGetFilePos(XGLCDFILEPOS *pPos, char *pName, void (*pFunc)());
 int xglCdReadFilePart(char *pName, u_int nAddr, int nOfs, int nSize, int nA, int nB);
 int xglCdArcInit(void);
@@ -205,4 +220,44 @@ char *xglCdArcInitSub2(char *pArc)
     p[1] = 0;
     p[0] = 0;
     return (char *)p;
+}
+
+/* Rewind a stream to its start (CD streams seek, HDD/host files lseek) */
+int xglCdStreamRewind(XGLCDSTREAM *pStream)
+{
+    int nType;
+
+    pStream->nUnk08 = 0;
+    pStream->nUnk18 = pStream->nUnk14;
+    nType = pStream->nType;
+    if (nType != 0) {
+        if (nType >= 0) {
+            if (nType < 3) {
+                sceLseek(pStream->nFd, 0, 0);
+            }
+        }
+    } else {
+        sceCdStSeek(pStream->nFd);
+    }
+    return 0;
+}
+
+/* Register one archive TOC block: record the buffer and size, clear the
+ * ready flag and prime the per-entry file positions */
+int xglCdArcInitSub1(XGLCDARC *pArc, char *pName, char *pBuf)
+{
+    XGLCDFILEPOS pos;
+    char nCount;
+
+    if (xglCdGetFilePos(&pos, pName, xglCdDummyCallback) != 0) {
+        pArc->pBuf = pBuf;
+        pArc->nLsn = pos.nUnk00;
+        pArc->nReady = 0;
+        xglCdArcInitSub0(&pos, pBuf, 0);
+        nCount = *pBuf;
+        if (nCount >= 2) {
+            xglCdArcInitSub0(&pos, pBuf + 0x800, nCount - 1);
+        }
+    }
+    return nCount + 1;
 }

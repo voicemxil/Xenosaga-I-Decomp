@@ -48,7 +48,7 @@ void xglLightIntensityAmbient(void *pLight, void *pSrc)
 /* Set one of a light's up-to-3 parallel colors (no-op past slot 2) */
 void xglLightIntensityParallel(void *pLight, unsigned int nNo, void *pSrc)
 {
-    register char *pBase __asm__("$2") = (char *)pLight + nNo * 0x20;
+    register char *pBase __asm__("$2") = (char *)(nNo * 0x20 + (unsigned int)pLight);
     register char *pDst __asm__("$3") = pBase + 0x10;
 
     if (nNo < 3) {
@@ -89,13 +89,6 @@ void xglLightCalcMatrix(void *pLight)
 
 /* Set light angles (rotation about Z,Y,X) and bake the resulting matrix's
  * direction row into slot nNo (no-op past slot 2) */
-/* TODO: near-miss (13/32 words, LOGIC/addressing) - the final quadword
- * copy's source is a known sp-relative stack slot (the just-saved local
- * matrix), so gcc always folds it to `lq $v0,0x20($sp)`; the original
- * instead materializes the address in a register (`addiu $a0,$sp,0x20;
- * lq $v0,0($a0)`). Every natural pointer-indirection form tried still
- * gets constant-folded back to the sp-immediate. Register-save/restore
- * epilogue also then differs in instruction count as a result. */
 void xglLightAngle(void *pLight, unsigned int nNo, void *pAngles)
 {
     unsigned int aMtx[16];
@@ -109,9 +102,11 @@ void xglLightAngle(void *pLight, unsigned int nNo, void *pAngles)
         xglMatrixStackRotY(pA[1]);
         xglMatrixStackRotX(pA[0]);
         xglMatrixStackSave(aMtx);
-        pDst = (char *)pLight + nNo * 0x20 + 0x20;
+        pDst = (char *)(nNo * 0x20 + (unsigned int)pLight) + 0x20;
         pRow = (char *)aMtx + 0x20;
-        *(TI *)pDst = *(TI *)pRow;
+        __asm__ __volatile__(".set noreorder\n"
+            "lq $2, 0x0(%1)\n sq $2, 0x0(%0)\n"
+            ".set reorder" : : "r"(pDst), "r"(pRow) : "$2", "memory");
     }
 }
 

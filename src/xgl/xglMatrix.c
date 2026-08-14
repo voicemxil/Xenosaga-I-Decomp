@@ -38,8 +38,8 @@ extern unsigned int Vu0CallMatrixStackPop[];
 extern unsigned int Vu0CallMatrixStackMulVector[];
 extern unsigned int Vu0CallMatrixStackRTPS[];
 
-/* TODO: near-match - $v0/$v1 are swapped and gcc fills the return delay slot with the last sq */
-/* Store the identity matrix */
+/* Store the identity matrix (quadword copy through the $2 scratch reg,
+ * matching the hand-rolled copy macro shape of the original) */
 void xglMatrixUnit(XGL_MATRIX *pDst)
 {
     static XGL_MATRIX unit = {{
@@ -48,19 +48,15 @@ void xglMatrixUnit(XGL_MATRIX *pDst)
         0.0f, 0.0f, 1.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 1.0f
     }};
-    TI t;
 
-    t = unit.q[0];
-    pDst->q[0] = t;
-    t = unit.q[1];
-    pDst->q[1] = t;
-    t = unit.q[2];
-    pDst->q[2] = t;
-    t = unit.q[3];
-    pDst->q[3] = t;
+    __asm__ __volatile__(".set noreorder\n"
+        "lq $2, 0x0(%1)\n sq $2, 0x0(%0)\n"
+        "lq $2, 0x10(%1)\n sq $2, 0x10(%0)\n"
+        "lq $2, 0x20(%1)\n sq $2, 0x20(%0)\n"
+        "lq $2, 0x30(%1)\n sq $2, 0x30(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(&unit) : "$2", "memory");
 }
 
-/* TODO: near-match - $v0/$v1 are swapped and gcc fills the return delay slot with the last sq */
 /* Store the identity matrix with every row scale factor set to 1.0 */
 void xglMatrixUnit4s(XGL_MATRIX *pDst)
 {
@@ -70,16 +66,13 @@ void xglMatrixUnit4s(XGL_MATRIX *pDst)
         0.0f, 0.0f, 1.0f, 1.0f,
         0.0f, 0.0f, 0.0f, 1.0f
     }};
-    TI t;
 
-    t = unit.q[0];
-    pDst->q[0] = t;
-    t = unit.q[1];
-    pDst->q[1] = t;
-    t = unit.q[2];
-    pDst->q[2] = t;
-    t = unit.q[3];
-    pDst->q[3] = t;
+    __asm__ __volatile__(".set noreorder\n"
+        "lq $2, 0x0(%1)\n sq $2, 0x0(%0)\n"
+        "lq $2, 0x10(%1)\n sq $2, 0x10(%0)\n"
+        "lq $2, 0x20(%1)\n sq $2, 0x20(%0)\n"
+        "lq $2, 0x30(%1)\n sq $2, 0x30(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(&unit) : "$2", "memory");
 }
 
 /* Multiply two 4x4 matrices through the VU0 macro-mode multiply-accumulate */
@@ -330,4 +323,88 @@ void xglMatrixStackRTPS(void *pDst, void *pA, void *pB, void *pC)
         "lqc2 $vf4, 0x0(%2)\n lqc2 $vf5, 0x0(%3)\n lqc2 $vf6, 0x0(%4)\n"
         "vcallmsr $vi27\n cfc2.i $0, $vi0\n sqc2 $vf7, 0x0(%1)\n"
         ".set reorder" : : "r"((unsigned int)Vu0CallMatrixStackRTPS >> 3), "r"(pDst), "r"(pA), "r"(pB), "r"(pC));
+}
+
+/* --- Quaternion -> rotation matrix (VU0 macro mode) --- */
+void xglQuaternion2Matrix(void *pMtx, void *pQuat)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf31, 0x0(%1)\n"
+        "vaddw.x $vf27x, $vf0x, $vf0w\n"
+        "vaddw.y $vf28y, $vf0y, $vf0w\n"
+        "vaddw.z $vf29z, $vf0z, $vf0w\n"
+        "vadd.xyzw $vf14xyzw, $vf31xyzw, $vf31xyzw\n"
+        "vsub.w $vf27w, $vf27w, $vf27w\n"
+        "vsub.w $vf28w, $vf28w, $vf28w\n"
+        "vsub.w $vf29w, $vf29w, $vf29w\n"
+        "vmulx.xyzw $vf15xyzw, $vf31xyzw, $vf14x\n"
+        "vmuly.xyzw $vf16xyzw, $vf31xyzw, $vf14y\n"
+        "vmulz.xyzw $vf17xyzw, $vf31xyzw, $vf14z\n"
+        "vnop\n"
+        "vnop\n"
+        "vaddy.x $vf20x, $vf15x, $vf16y\n"
+        "vaddz.y $vf20y, $vf16y, $vf17z\n"
+        "vaddx.z $vf20z, $vf17z, $vf15x\n"
+        "vnop\n"
+        "vsubw.z $vf27z, $vf15z, $vf16w\n"
+        "vaddw.y $vf27y, $vf15y, $vf17w\n"
+        "vsuby.x $vf27x, $vf27x, $vf20y\n"
+        "vsubw.x $vf28x, $vf16x, $vf17w\n"
+        "vaddw.z $vf28z, $vf16z, $vf15w\n"
+        "vsubz.y $vf28y, $vf28y, $vf20z\n"
+        "vsubw.y $vf29y, $vf17y, $vf15w\n"
+        "vaddw.x $vf29x, $vf17x, $vf16w\n"
+        "vsubx.z $vf29z, $vf29z, $vf20x\n"
+        "sqc2 $vf0, 0x30(%0)\n"
+        "sqc2 $vf27, 0x0(%0)\n"
+        "sqc2 $vf28, 0x10(%0)\n"
+        "sqc2 $vf29, 0x20(%0)\n"
+        ".set reorder" : : "r"(pMtx), "r"(pQuat) : "memory");
+}
+
+/* --- Rotate/translate/perspective transforms through the studio camera --- */
+
+typedef struct {
+    char pad00[0x70];
+    int nUnk70;          /* 0x70 */
+    char pad74[0xC];
+    int nUnk80;          /* 0x80 */
+    char pad84[0x470 - 0x84];
+    int nUnk470;         /* 0x470 */
+} XGLSTUDIOCAM;
+
+XGLSTUDIOCAM *xglStudioGetCamera2(int nCamera);
+
+float xglRotTransPers(XGL_VECTOR *pOut, void *pMtx, XGL_VECTOR *pIn, int nCamera)
+{
+    XGLSTUDIOCAM *pCam;
+
+    xglMatrixStackPush();
+    pCam = xglStudioGetCamera2(nCamera);
+    xglMatrixStackLoad(&pCam->nUnk470);
+    if (pMtx != 0) {
+        xglMatrixStackMul(pMtx);
+    }
+    xglMatrixStackRTPS(pOut, pIn, &pCam->nUnk80, &pCam->nUnk70);
+    xglMatrixStackPop((void *)1);
+    return pOut->w;
+}
+
+void xglRotTransPersN(XGL_VECTOR *pOut, void *pMtx, XGL_VECTOR *pIn, int nCount, int nCamera)
+{
+    XGLSTUDIOCAM *pCam;
+
+    xglMatrixStackPush();
+    pCam = xglStudioGetCamera2(nCamera);
+    xglMatrixStackLoad(&pCam->nUnk470);
+    if (pMtx != 0) {
+        xglMatrixStackMul(pMtx);
+    }
+    while (nCount > 0) {
+        nCount--;
+        xglMatrixStackRTPS(pOut, pIn, &pCam->nUnk80, &pCam->nUnk70);
+        pOut++;
+        pIn++;
+    }
+    xglMatrixStackPop((void *)1);
 }
