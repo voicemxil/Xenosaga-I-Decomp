@@ -60,7 +60,13 @@ RE_MEM_BIGOFF = re.compile(r'^\t(' + '|'.join(re.escape(op) for op in MEM_OPS_BI
 # The original reuses the destination register as the address-computation
 # scratch (lui v0,%hi; addu v0,v0,v1; ld v0,%lo(v0)) rather than $1/$at,
 # so mirror that exactly. Found via __ieee754_fmod's `Zero[sx>>31]`.
-RE_MEM_SYM_REG = re.compile(r'^\t(sd|ld)[ \t]([^,]*),([A-Za-z_][A-Za-z0-9_.]*)\((\$[a-z0-9]+)\)[ \t]*$')
+# The symbol may carry a constant displacement (`__mprec_tens-8($2)`, from
+# _dtoa_r's `tens[k-1]`-style indexing); gas folds it into %lo() exactly
+# the same way, so accept it here too rather than letting that form fall
+# through to gas's own daddu-based expansion.
+RE_MEM_SYM_REG = re.compile(
+    r'^\t(sd|ld)[ \t]([^,]*),([A-Za-z_][A-Za-z0-9_.]*(?:[+-][0-9]+)?)'
+    r'\((\$[a-z0-9]+)\)[ \t]*$')
 RE_LIS = re.compile(r'^\tli\.s[ \t](.*)$')
 # li.d loads a 64-bit double-precision bit pattern into a GPR (this target's
 # soft-float double ABI packs a double into one 64-bit register/register
@@ -397,7 +403,19 @@ def main(path, omitted_hazards, barrier_return_store=None,
         if m_lid:
             reg, valstr = m_lid.groups()
             bits = struct.unpack('<Q', struct.pack('<d', float(valstr)))[0]
-            out.append('\n'.join(synth_li_d(reg, bits, lit_pool)))
+            synth = '\n'.join(synth_li_d(reg, bits, lit_pool))
+            # gcc leaves the call in `.set reorder` whenever it did not fill
+            # the delay slot itself; gas then steals the immediately
+            # preceding instruction into it. When that preceding
+            # instruction is the tail of a li.d expansion, the original
+            # ee-as did NOT steal it -- li.d was a real macro there, and gas
+            # never reorders across a macro expansion, so the call kept its
+            # nop. Barrier the synthesized sequence in that case. (Same
+            # class as the RE_CVT-before-call rule below.) Found on
+            # _dtoa_r's `d.d *= 10.` at $L416.
+            if re.match(r'^\t(jal|j)\t[A-Za-z_]', following):
+                synth = "\t.set push\n\t.set noreorder\n" + synth + "\n\t.set pop"
+            out.append(synth)
             continue
 
         m_sqrt = RE_SQRT.match(line)

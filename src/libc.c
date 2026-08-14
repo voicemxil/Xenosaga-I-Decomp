@@ -1193,68 +1193,132 @@ quorem (_Bigint * b, _Bigint * S)
 }
 
 /* dtoa for IEEE arithmetic (dmg): convert double to ASCII string.
-   Literal transcription of newlib's dtoa.c, IEEE_8087 (little-endian),
+   Transcription of newlib's dtoa.c, IEEE_8087 (little-endian),
    non-_DOUBLE_IS_32BITS, Pack_32 branch -- same branch already selected
    for _d2b/_b2d/_lshift/etc above. ptr->_result/_result_k live in
    struct _reent_full at their real reent.h offsets (64/68), just before
    _p5s (72).
 
-   UPDATE 2026-08-13 (later session): the note below (dpadd/dpsub/dpmul/
-   dpdiv/etc are fp-bit.c, real names) is still correct background, but
-   its two "TO CLOSE THIS" conclusions were WRONG and have been verified
-   directly, twice:
-     (1) native double operators (+/-/x// etc) in THIS transcription
-         already compile to `jal dpadd` / `jal dpmul` / etc under
-         ee-gcc 2.96 -O2 -G8 -- no source-level call injection needed.
-         Confirmed: after the li.d fix below, the entire quick-path
-         dpmul/dpadd/litodp call sequence (previously the biggest
-         visible diff block, ~20 words) now matches the original
-         byte-for-byte with ZERO changes to this function's C.
-     (2) tools/verify.py masks jal targets (R_MIPS_26), so an unresolved
-         `jal 0 <__errno>`-looking call can never itself cause a diff.
+   The game's newlib is NOT 1.8.2 here, it is a slightly later revision.
+   Two places prove it, and both are load-bearing for the match:
+     - `ilim = ilim1 = -1;` sits BEFORE `switch (mode)`, not inside
+       `case 0: case 1:` (the "silence erroneous gcc -Wall warning"
+       hoist).  The original's jump-table block pre-stores the default
+       into two stack slots before the range check; 1.8.2's shape does
+       not, and that region only matches with the hoist.
+     - `spec_case = 0;` is hoisted ABOVE `if (mode < 2)` instead of
+       living in an `else` arm inside it.  This one is worth a paragraph;
+       see below.
 
-   THE ACTUAL CAUSE of the (previously) ~1004/1177-word diff was
-   tools/fix_cc_asm.py's li.d-synthesis fallback. gcc emits `li.d` for
-   every compile-time double constant, which the r5900 assembler can't
-   encode; fix_cc_asm.py rewrites it into real instructions. Its old
-   fallback for a constant with more than 16 bits of real precision
-   (dtoa.c's irrational quick-path coefficients: 0.289529654602168,
-   0.1760912590558, 0.301029995663981, ...) synthesized hi32/lo32 halves
-   and OR'd them together (5-6 instructions) -- but the ORIGINAL doesn't
-   synthesize those at all. It pools them into a `.rdata` literal table
-   and loads with `lui $at,%hi(LCx)` / `ld $a1,%lo(LCx)($at)` (three
-   consecutive constants sit 8 bytes apart at 0x4d79a0/0x4d79a8/
-   0x4d79b0) -- 2 instructions, and the source of most of this
-   function's structural +20-instruction LENGTH-class gap. Separately,
-   the "round" constants that genuinely ARE bit-shift-synthesized
-   (-1.0, 2.0**32, 1.5, ...) were using the wrong trailing-zero-rounding
-   rule (round down to nearest halfword) instead of the real rule
-   (16-bit window anchored at the value's highest set bit). Both are now
-   fixed in tools/fix_cc_asm.py's synth_li_d -- see its comments for the
-   four real bit patterns the corrected rule was verified against. This
-   dropped _dtoa_r from 1004 to 867 differing words (of 1177) and its
-   built length from 1197 to 1179 words (orig is 1177) with ZERO changes
-   to this function's C and no regressions elsewhere (full verify.py
-   unchanged: 1567 passed). Any future li.d user in libc.c/libm.c/
-   fpbit.c benefits automatically.
+   HISTORY OF THE DIFF: 1004 -> 867 (li.d fixes, commit 5013e1a)
+   -> 509 (ld-macro fix) -> 501 (spec_case hoist) -> 5 (li.d-before-call
+   delay-slot barrier).  Three of those four were toolchain bugs, one was
+   source shape.  In order:
 
-   REMAINING ~867-word gap, not yet closed:
-     - A handful of stack-slot offsets (e.g. `denorm`/`b` at sp+64/+68 in
-       the original vs sp+68/+72 here) are shifted by a consistent 4
-       bytes -- a compiler stack-slot-allocation tie-break in the same
-       class as this project's other documented "allocator order not
-       reachable from C" walls, not a source bug.
-     - The `switch (mode)` dispatch (the mode/ilim/ndigits setup block)
-       has a different instruction order/spill pattern around the jump
-       table (the original pre-stores a default value to two stack
-       slots before the range check; the built version doesn't). Tried
-       staging `switch (mode)` through a fresh local first (the idiom
-       that fixed EventDoorFunc's jump-table generation) -- no effect,
-       so it is not that specific pattern.
-     - The rest of the 867 words have not been individually triaged one
-       by one; this is a 4708-byte function and this pass focused on
-       structural/toolchain causes rather than exhaustively walking
-       every remaining diff. */
+   1. tools/fix_cc_asm.py's li.d synthesis (already fixed, 5013e1a):
+      irrational constants are pooled in .rdata and loaded with
+      lui %hi / ld %lo, not bit-synthesized; "round" constants use a
+      16-bit window anchored at the value's highest set bit.
+
+   2. RE_MEM_SYM_REG in fix_cc_asm.py did not accept a symbol with a
+      constant displacement, so `ld $5,__mprec_tens-8($2)` (from
+      `tens[k-1]`-shaped indexing) fell through to gas's own macro
+      expansion and got `daddu` where the original has `addu`.  Two
+      words.  Fixed by allowing `sym[+-]N` in the regex.
+
+   3. `spec_case` was the whole stack-layout gap.  With 1.8.2's
+      `if (mode < 2) { ... } else spec_case = 0; }` shape, ee-gcc 2.96
+      fails to give spec_case a hard register and spills it to a NEW
+      4-byte frame slot at sp+64 -- which shifts EVERY later local
+      (denorm, b, S, mhi, mlo, ...) up by 4 and repainted ~80 words as
+      differing, plus the extra branch/store needed to set a memory
+      spec_case on both paths.  The original keeps spec_case in $s0.
+      Hoisting the `spec_case = 0;` initialisation above the `if` makes
+      the pseudo's definition unconditional; the allocator then keeps it
+      in $s0 exactly like the original, the frame layout collapses onto
+      the original's, and 501 -> 56 real-differing words in one step.
+      (The frame size was 176 bytes in BOTH builds all along -- the
+      extra slot came out of otherwise-unused padding, which is why the
+      symptom looked like a pure "allocator tie-break" and was
+      previously written off as one.  It was not.)
+
+   4. gcc leaves a call in `.set reorder` whenever it did not fill the
+      delay slot itself.  gas then steals the immediately preceding
+      instruction into that slot.  When the preceding instruction is the
+      tail of a li.d expansion (`d.d *= 10.` at $L416: li/dsll32 then
+      `jal dpmul`), the original ee-as did NOT steal it -- li.d was a
+      real assembler macro there and gas never reorders across a macro
+      expansion, so the call kept its nop.  fix_cc_asm.py now barriers a
+      li.d synthesis that is immediately followed by a bare jal/j, the
+      same rule already applied to cvt.* before a call.  This closed the
+      last two-instruction length gap AND, with the lengths finally
+      equal, every remaining "differing" branch displacement.
+      Scope-checked: across all of src/*.c only libc.c and libm.c emit
+      this pattern, and libm.c stays at 19/19 matched.
+
+   REMAINING: 5 words of 1177 (99.6%), all the same thing -- gcc's
+   delayed-branch pass (reorg.c) picking a plain branch where the
+   original picked the branch-LIKELY form, or vice versa:
+     [ 778] orig beqzl  s0  / built beqz  s0
+     [ 859] orig blezl  v1  / built blez  v1
+     [ 879] orig bgezl  v0  / built bgez  v0
+     [ 970] orig bne  a0,v0 / built bnel  a0,v0
+     [1006] orig bnez   v0  / built bnezl v0
+   Every one has the SAME target and the SAME delay-slot instruction on
+   both sides, and in every case that instruction is dead on the
+   fall-through path (it is redefined a few insns later), so annulling it
+   is optional and both encodings are correct code.  The choice is
+   reorg.c's `must_annul` test -- whether `insn_sets_resource_p (trial,
+   &opposite_needs)` says the delay insn clobbers something live on the
+   opposite thread -- and it disagrees in BOTH directions (3 one way, 2
+   the other).
+
+   WHY THE USUAL SOURCE LEVERS CANNOT REACH THIS.  This project has two
+   documented idioms that DO steer the annulled-vs-plain choice per site:
+   putting a loop-header load at the top of the `do { }` body (rotates it
+   into an annulled slot, JTHREAD_getSymbol/JTHREAD_get) and the
+   fresh-local walking-pointer copy (`q = p + 1; *ppText = q; p = q;`
+   gives plain `beq`, `*ppText = ++p;` gives `beql`,
+   UmnEventTextGyouJump).  Both work by changing WHICH instruction lands
+   in the delay slot.  Here the right instruction is ALREADY in the slot
+   at all five sites -- the whole 1177-word stream is the original's, bit
+   for bit, except these five annul flags.  So any source change that
+   perturbs reorg's input necessarily perturbs the stream too, and that
+   is exactly what is observed.  Tried and measured, 16 variants:
+     [ 778] `j = b5 - m5;` then `if (j)`; `if ((j = b5 - m5) != 0)`;
+            fresh `int j5` copy               -> all still 5, byte-identical
+            `j = b5 - m5; if (b5 != m5)`      -> 28 words (worse)
+     [ 859] fresh `int nb2` copy; `if (0 < b2)`; `if (b2 >= 1)`;
+            hoisting `s2` into a local ahead of both `if`s
+                                              -> all still 5, byte-identical
+     [ 879] flattened `if (k_check && __mcmp (b, S) < 0)`;
+            `if ((j = __mcmp (b, S)) < 0)`    -> all still 5, byte-identical
+     [ 970] fresh `_Bigint *nmhi` copy; `_Bigint *t` for the shared
+            multadd result                    -> all still 5, byte-identical
+            inverted `if (mlo != mhi)` arms   -> 209 words (worse)
+     [1006] fresh `int dsign = delta->_sign;` -> still 5, byte-identical
+            `if (delta->_sign) j1 = 1; else ...` and
+            `j1 = 1; if (!delta->_sign) ...`  -> 533/540 words (much worse:
+            both destroy the ternary's branchless shape and cascade)
+   Flag sweep (all neutral or worse): -fno-caller-saves, -fno-peephole,
+   -fno-cse-follow-jumps, -fno-expensive-optimizations, -fno-thread-jumps,
+   -fno-gcse, -fno-strength-reduce, -fno-defer-pop,
+   -fno-optimize-register-move.
+
+   CORROBORATION: this is not a _dtoa_r quirk.  Two other mprec-family
+   functions in this file, _pow5mult and quorem, are each stuck at
+   exactly ONE differing word, and both are this same class --
+   _pow5mult[22] orig `bnez s0` / built `bnezl s0`, quorem[73] orig
+   `beqzl v0` / built `beqz v0`.  Verified those two sit at 1 word with
+   the PRE-session source and pre-session fix_cc_asm.py as well, so they
+   are long-standing near-misses of the same kind, not fallout from the
+   fixes above.
+
+   Filed as a reorg annul tie-break -- reachable only from reorg.c's own
+   liveness precision (`mark_target_live_regs`), i.e. the compiler build,
+   not the C.  Same class as the project's other "not reachable from C"
+   walls.  Note triage.py calls these five LOGIC because 4 of the 5 have a
+   different primary opcode; that classification is wrong here. */
 char *
 _dtoa_r (struct _reent * ptr, double _d, int mode, int ndigits, int *decpt,
 	 int *sign, char **rve)
@@ -1396,11 +1460,12 @@ _dtoa_r (struct _reent * ptr, double _d, int mode, int ndigits, int *decpt,
       try_quick = 0;
     }
   leftright = 1;
+  ilim = ilim1 = -1;		/* Values for cases 0 and 1; done here to */
+				/* silence erroneous "gcc -Wall" warning. */
   switch (mode)
     {
     case 0:
     case 1:
-      ilim = ilim1 = -1;
       i = 18;
       ndigits = 0;
       break;
@@ -1641,6 +1706,11 @@ _dtoa_r (struct _reent * ptr, double _d, int mode, int ndigits, int *decpt,
 
   /* Check for special case that d is a normalized power of 2. */
 
+  /* The `spec_case = 0` initialisation is hoisted out of the `if` (rather
+     than living in an `else` arm inside it, as in newlib 1.8.2) because
+     that is what the original does -- and it is what keeps spec_case in
+     $s0 instead of a new stack slot.  See the header comment. */
+  spec_case = 0;
   if (mode < 2)
     {
       if (!word1 (d) && !(word0 (d) & Bndry_mask) && word0 (d) & Exp_mask)
@@ -1650,8 +1720,6 @@ _dtoa_r (struct _reent * ptr, double _d, int mode, int ndigits, int *decpt,
 	  s2 += Log2P;
 	  spec_case = 1;
 	}
-      else
-	spec_case = 0;
     }
 
   /* Arrange for convenient computation of quotients:
