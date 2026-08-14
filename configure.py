@@ -87,6 +87,7 @@ def cc_for(name):
 # this is a lone -G threshold difference, not a compiler-family swap.
 FILE_CFLAGS_OVERRIDE = {
     "libm.c": "-O2 -G0",
+    "malloc_lock.c": "-O2 -G0",
     # libgcc2 64-bit division TUs: Sony built libgcc with -mlong32 (long is
     # 32-bit), which keeps __ll_B's `1L << 16` in SImode -- plain `sll`
     # instead of the canonicalizing dsll32/dsra32 pair. All four functions
@@ -119,7 +120,7 @@ for _f in ("newlib_reallocr.c", "newlib_callocr.c", "newlib_ungetc.c",
            "newlib_mprec.c", "newlib_dtoa2.c", "newlib_freer.c",
            "newlib_signal.c", "newlib_signalr.c", "newlib_printf.c",
            "newlib_sprintf.c", "newlib_sscanf.c", "newlib_atexit.c",
-           "newlib_exit.c", "newlib_strcasecmp.c"):
+           "newlib_exit.c", "newlib_strcasecmp.c", "newlib_mallocr.c"):
     FILE_CFLAGS_OVERRIDE[_f] = NEWLIB_CFLAGS
 
 
@@ -183,6 +184,7 @@ FILE_FIX_FLAGS = {
     "newlib_reallocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_callocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_freer.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_mallocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_dtoa2.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_signal.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_signalr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",

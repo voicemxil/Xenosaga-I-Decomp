@@ -1687,3 +1687,6 @@ sscanf = 0x0032F638, 0xA8; // newlib_sscanf
 atexit = 0x0032E058, 0xA0; // newlib_atexit
 exit = 0x0032E168, 0xAC; // newlib_exit
 strcasecmp = 0x0032F6E0, 0xD8; // newlib_strcasecmp
+__malloc_lock = 0x0032EF40, 0x7C; // malloc_lock
+__malloc_unlock = 0x0032EFC0, 0x4C; // malloc_lock
+malloc_extend_top = 0x0032E2B8, 0x258; // newlib_mallocr
