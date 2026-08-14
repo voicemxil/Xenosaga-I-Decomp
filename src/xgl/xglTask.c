@@ -150,37 +150,23 @@ void *xglTaskRemove(XGL_TASK *node)
 /* Run every task in queue's active list, caching the next pointer in the
  * queue's iterator scratch before each call so a callback may safely
  * remove itself (or any other node) via xglTaskRemove mid-iteration */
-/* TODO: near-miss, same instruction count (22) as the original but 2.96
- * allocates registers/schedules the loop body differently: the original
- * preloads the look-ahead `next` pointer once before the loop and only
- * refreshes it in the back-edge branch's delay slot (bnel), keeping the
- * store to queue->fieldC in the func-null-check branch's delay slot;
- * every natural variant tried here instead recomputes `next` per
- * iteration or schedules the store into the jalr delay slot. */
 void xglTaskExecute(XGL_TASK *queue)
 {
     XGL_TASK *node;
-    XGL_TASK *next;
-    void (*func)(void);
 
     if (queue == 0) {
         return;
     }
     node = queue->field4;
-    if (node == 0) {
-        return;
-    }
-    next = node->field4;
-    for (;;) {
-        func = node->fieldC;
-        if (func != 0) {
+    if (node != 0) {
+        do {
+            XGL_TASK *next = node->field4;
+            void (*func)(XGL_TASK *) = (void (*)(XGL_TASK *))node->fieldC;
             queue->fieldC = (void (*)(void))next;
-            ((void (*)(XGL_TASK *))func)(node);
-        }
-        node = (XGL_TASK *)queue->fieldC;
-        if (node == 0) {
-            break;
-        }
-        next = node->field4;
+            if (func != 0) {
+                func(node);
+            }
+            node = (XGL_TASK *)queue->fieldC;
+        } while (node != 0);
     }
 }

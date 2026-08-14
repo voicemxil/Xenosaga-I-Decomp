@@ -233,3 +233,60 @@ void xglVectorMulMat(void *pDest, void *pMtx, void *pVec)
         "sqc2 $vf31, 0x0(%0)\n"
         ".set reorder" : : "r"(pDest), "r"(pMtx), "r"(pVec));
 }
+
+/* --- VU0 macro-mode length helpers --- */
+
+/* Length of the xyz part of a vector, stored through pDest */
+void xglVectorLength(float *pDest, const float *pVector)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf3, 0x0(%1)\n"
+        "vmul.xyz $vf3xyz, $vf3xyz, $vf3xyz\n"
+        "vaddy.x $vf3x, $vf3x, $vf3y\n"
+        "vaddz.x $vf3x, $vf3x, $vf3z\n"
+        "vsqrt $Q, $vf3x\n"
+        "vwaitq\n"
+        "vaddq.x $vf4x, $vf0x, $Q\n"
+        "qmfc2 $2, $vf4\n"
+        "sw $2, 0x0(%0)\n"
+        ".set reorder" : : "r"(pDest), "r"(pVector) : "$2", "memory");
+}
+
+/* Distance between two points (xyz) */
+float xglPointLength(const float *pFrom, const float *pTo)
+{
+    int nRet;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf2, 0x0(%1)\n"
+        "lqc2 $vf3, 0x0(%2)\n"
+        "vsub.xyz $vf2xyz, $vf2xyz, $vf3xyz\n"
+        "vmul.xyz $vf3xyz, $vf2xyz, $vf2xyz\n"
+        "vaddy.x $vf3x, $vf3x, $vf3y\n"
+        "vaddz.x $vf3x, $vf3x, $vf3z\n"
+        "vsqrt $Q, $vf3x\n"
+        "vwaitq\n"
+        "vaddq.x $vf4x, $vf0x, $Q\n"
+        "qmfc2 %0, $vf4\n"
+        ".set reorder" : "=r"(nRet) : "r"(pFrom), "r"(pTo));
+    return *(float *)&nRet;
+}
+
+/* Distance between two points in the XZ plane only */
+float xglPointLengthXZ(const float *pFrom, const float *pTo)
+{
+    int nRet;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf2, 0x0(%1)\n"
+        "lqc2 $vf3, 0x0(%2)\n"
+        "vsub.xyz $vf2xyz, $vf2xyz, $vf3xyz\n"
+        "vmul.xyz $vf3xyz, $vf2xyz, $vf2xyz\n"
+        "vaddz.x $vf3x, $vf3x, $vf3z\n"
+        "vsqrt $Q, $vf3x\n"
+        "vwaitq\n"
+        "vaddq.x $vf4x, $vf0x, $Q\n"
+        "qmfc2 %0, $vf4\n"
+        ".set reorder" : "=r"(nRet) : "r"(pFrom), "r"(pTo));
+    return *(float *)&nRet;
+}

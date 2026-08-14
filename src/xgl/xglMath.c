@@ -140,3 +140,242 @@ unsigned short xglSRand(void)
     iRandSeed = iRandSeed * 0x41c64e6dULL + 0x3039;
     return (unsigned long long) iRandSeed >> 0x10 & 0x7FFF;
 }
+
+/* --- Quadword/halfword block copies (hand-written asm in the original:
+ * trapping addi, unfilled delay slots, $zero-first bne) --- */
+
+void xglMemCopy64(void *pDst, const void *pSrc, int nCount)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "1:\n"
+        "lq $2, 0x0($5)\n sq $2, 0x0($4)\n"
+        "lq $2, 0x10($5)\n sq $2, 0x10($4)\n"
+        "lq $2, 0x20($5)\n sq $2, 0x20($4)\n"
+        "lq $2, 0x30($5)\n sq $2, 0x30($4)\n"
+        "addi $6, $6, -1\n"
+        "addi $4, $4, 0x40\n"
+        "addi $5, $5, 0x40\n"
+        "bne $0, $6, 1b\n"
+        "nop\n"
+        ".set reorder" : : : "$2", "$4", "$5", "$6", "memory");
+}
+
+void xglMemCopy64b(void *pDst, const void *pSrc, int nCount)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "1:\n"
+        "lq $2, 0x0($5)\n sq $2, 0x0($4)\n"
+        "lq $2, -0x10($5)\n sq $2, -0x10($4)\n"
+        "lq $2, -0x20($5)\n sq $2, -0x20($4)\n"
+        "lq $2, -0x30($5)\n sq $2, -0x30($4)\n"
+        "addi $6, $6, -1\n"
+        "addi $4, $4, -0x40\n"
+        "addi $5, $5, -0x40\n"
+        "bne $0, $6, 1b\n"
+        "nop\n"
+        ".set reorder" : : : "$2", "$4", "$5", "$6", "memory");
+}
+
+void xglMemCopy16(void *pDst, const void *pSrc, int nCount)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "1:\n"
+        "lq $2, 0x0($5)\n sq $2, 0x0($4)\n"
+        "addi $6, $6, -1\n"
+        "addi $4, $4, 0x10\n"
+        "addi $5, $5, 0x10\n"
+        "bne $0, $6, 1b\n"
+        "nop\n"
+        ".set reorder" : : : "$2", "$4", "$5", "$6", "memory");
+}
+
+void xglMemCopy16b(void *pDst, const void *pSrc, int nCount)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "1:\n"
+        "lq $2, 0x0($5)\n sq $2, 0x0($4)\n"
+        "addi $6, $6, -1\n"
+        "addi $4, $4, -0x10\n"
+        "addi $5, $5, -0x10\n"
+        "bne $0, $6, 1b\n"
+        "nop\n"
+        ".set reorder" : : : "$2", "$4", "$5", "$6", "memory");
+}
+
+void xglMemCopy8(void *pDst, const void *pSrc, int nCount)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "1:\n"
+        "ld $2, 0x0($5)\n sd $2, 0x0($4)\n"
+        "addi $6, $6, -1\n"
+        "addi $4, $4, 0x8\n"
+        "addi $5, $5, 0x8\n"
+        "bne $0, $6, 1b\n"
+        "nop\n"
+        ".set reorder" : : : "$2", "$4", "$5", "$6", "memory");
+}
+
+void xglMemCopy8b(void *pDst, const void *pSrc, int nCount)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "1:\n"
+        "ld $2, 0x0($5)\n sd $2, 0x0($4)\n"
+        "addi $6, $6, -1\n"
+        "addi $4, $4, -0x8\n"
+        "addi $5, $5, -0x8\n"
+        "bne $0, $6, 1b\n"
+        "nop\n"
+        ".set reorder" : : : "$2", "$4", "$5", "$6", "memory");
+}
+
+void xglMemCopy4(void *pDst, const void *pSrc, int nCount)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "1:\n"
+        "lw $2, 0x0($5)\n sw $2, 0x0($4)\n"
+        "addi $6, $6, -1\n"
+        "addi $4, $4, 0x4\n"
+        "addi $5, $5, 0x4\n"
+        "bne $0, $6, 1b\n"
+        "nop\n"
+        ".set reorder" : : : "$2", "$4", "$5", "$6", "memory");
+}
+
+void xglMemCopy4b(void *pDst, const void *pSrc, int nCount)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "1:\n"
+        "lw $2, 0x0($5)\n sw $2, 0x0($4)\n"
+        "addi $6, $6, -1\n"
+        "addi $4, $4, -0x4\n"
+        "addi $5, $5, -0x4\n"
+        "bne $0, $6, 1b\n"
+        "nop\n"
+        ".set reorder" : : : "$2", "$4", "$5", "$6", "memory");
+}
+
+void xglMemCopy2(void *pDst, const void *pSrc, int nCount)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "1:\n"
+        "lh $2, 0x0($5)\n sh $2, 0x0($4)\n"
+        "addi $6, $6, -1\n"
+        "addi $4, $4, 0x2\n"
+        "addi $5, $5, 0x2\n"
+        "bne $0, $6, 1b\n"
+        "nop\n"
+        ".set reorder" : : : "$2", "$4", "$5", "$6", "memory");
+}
+
+void xglMemCopy2b(void *pDst, const void *pSrc, int nCount)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "1:\n"
+        "lh $2, 0x0($5)\n sh $2, 0x0($4)\n"
+        "addi $6, $6, -1\n"
+        "addi $4, $4, -0x2\n"
+        "addi $5, $5, -0x2\n"
+        "bne $0, $6, 1b\n"
+        "nop\n"
+        ".set reorder" : : : "$2", "$4", "$5", "$6", "memory");
+}
+
+/* --- VU0 random-number generator --- */
+
+/* Seed the VU0 R register from a float */
+void xglFSrand(float fSeed)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "mfc1 $2, %0\n"
+        "qmtc2 $2, $vf1\n"
+        "vrinit $R, $vf1x\n"
+        ".set reorder" : : "f"(fSeed) : "$2");
+}
+
+/* Draw the next VU0 random float */
+float xglFRand(void)
+{
+    int nRet;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "vrnext.x $vf1x, $R\n"
+        "qmfc2 %0, $vf1\n"
+        ".set reorder" : "=r"(nRet));
+    return *(float *)&nRet;
+}
+
+/* --- VU0 macro-mode sine/cosine --- */
+
+extern unsigned int Vu0CallSin[];
+extern unsigned int Vu0CallCos[];
+
+float xglSin(float fAngle)
+{
+    int nRet;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nRet)
+        : "r"((unsigned int)Vu0CallSin >> 3), "r"(fAngle));
+    return *(float *)&nRet;
+}
+
+float xglCos(float fAngle)
+{
+    int nRet;
+
+    __asm__ __volatile__(".set noreorder\n"
+        "ctc2.i %1, $vi27\n"
+        "vnop\n"
+        "qmtc2 %2, $vf4\n"
+        "vcallmsr $vi27\n"
+        "qmfc2.i %0, $vf1\n"
+        ".set reorder"
+        : "=r"(nRet)
+        : "r"((unsigned int)Vu0CallCos >> 3), "r"(fAngle));
+    return *(float *)&nRet;
+}
+
+/* --- 32-bit LCG on top of the shared 64-bit seed --- */
+
+/* Two LCG steps; returns the concatenated middle bits of both */
+int xglLRand(void)
+{
+    int a;
+    unsigned long long s;
+
+    a = iRandSeed * 0x41C64E6D + 12345;
+    s = (unsigned int)(a * 0x41C64E6D + 12345);
+    iRandSeed = s;
+    return (a << 16) + (s >> 16);
+}
+
+/* --- Geometry engine bring-up --- */
+
+extern unsigned int PacketDataVu0MicroCode[];
+extern void xglDmaDirectSrcChain(unsigned int nCh, unsigned int nAddr);
+
+/* TODO: near-miss (2d) blocked on a fixer flag. Writing the seed as a
+ * plain "r"(0.1f) operand reproduces the original exactly (lwc1
+ * scheduled above the addiu sp prologue, compiler-emitted mfc1) EXCEPT
+ * that our gas inserts a hazard nop between the mfc1 and the asm
+ * block's qmtc2; the original has none. Needs
+ * FILE_FIX_FLAGS["xglMath.c"] = "--omit-hazard qmtc2". The variant
+ * below (mfc1 inside the noreorder block) avoids the nop but then the
+ * lwc1 loses its scheduling priority and lands below the prologue. */
+/* Seed the VU0 R register, reset the LCG seed and upload the VU0
+ * microcode overlay through a source-chain DMA */
+void xglGeometryInit(void)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "qmtc2 %0, $vf1\n"
+        "vrinit $R, $vf1x\n"
+        ".set reorder" : : "r"(0.1f));
+    iRandSeed = 0x12345678;
+    xglDmaDirectSrcChain(0, (unsigned int)PacketDataVu0MicroCode);
+}
