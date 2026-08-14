@@ -36,11 +36,7 @@ int _EXFUN(_toupper, (int __c));
 #define _X	0100
 #define	_B	0200
 
-#if !defined(__CYGWIN32__) || defined(__INSIDE_CYGWIN__) || defined(_COMPILING_NEWLIB)
-extern	_CONST char	_ctype_[];
-#else
-extern	_CONST char	_ctype_[] __declspec(dllimport);
-#endif
+extern	__IMPORT _CONST char	_ctype_[];
 
 #define	isalpha(c)	((_ctype_+1)[(unsigned)(c)]&(_U|_L))
 #define	isupper(c)	((_ctype_+1)[(unsigned)(c)]&_U)
@@ -57,9 +53,9 @@ extern	_CONST char	_ctype_[] __declspec(dllimport);
    slightly slower */
 #ifdef __GNUC__
 # define toupper(c) \
-	({ int __x = (c); islower(__x) ? (__x - 'a' + 'A') : __x;})
+	__extension__ ({ int __x = (c); islower(__x) ? (__x - 'a' + 'A') : __x;})
 # define tolower(c) \
-	({ int __x = (c); isupper(__x) ? (__x - 'A' + 'a') : __x;})
+	__extension__ ({ int __x = (c); isupper(__x) ? (__x - 'A' + 'a') : __x;})
 #endif
 
 #ifndef __STRICT_ANSI__

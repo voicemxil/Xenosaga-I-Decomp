@@ -1663,3 +1663,5 @@ ungetc = 0x00337B40, 0x188; // newlib_ungetc
 _ulp = 0x00336F18, 0xD0; // newlib_mprec
 _ratio = 0x00337308, 0xCC; // newlib_mprec
 _mprec_log10 = 0x003373D8, 0x70; // newlib_mprec
+_d2b = 0x00337180, 0x184; // newlib_mprec
+strtodf = 0x003311E8, 0x28; // newlib_strtod

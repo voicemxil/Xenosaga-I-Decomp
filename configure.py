@@ -110,6 +110,7 @@ NEWLIB_CFLAGS = ("-O2 -G8 -Inewlib/libc/stdlib -Inewlib/libc/stdio -Inewlib/libc
                  "-Inewlib/libc/include "
                  "-I/usr/local/ps2dev/ee-gcc/lib/gcc-lib/ee/2.9-ee-991111/include")
 for _f in ("newlib_reallocr.c", "newlib_callocr.c", "newlib_ungetc.c",
+           "newlib_strtod.c",
            "newlib_mbtowc.c", "newlib_strlwr.c", "newlib_vfscanf.c",
            "newlib_mprec.c", "newlib_quorem.c"):
     FILE_CFLAGS_OVERRIDE[_f] = NEWLIB_CFLAGS
@@ -167,7 +168,8 @@ FILE_FIX_FLAGS = {
     # ungetc's CHECK_INIT tail and the mprec leaf returns keep their
     # copies out of the delay slots, same class as fabs in libm.c.
     "newlib_ungetc.c": "--barrier-return-store ungetc",
-    "newlib_mprec.c": "--barrier-return-store _ulp,_ratio --barrier-branch-move",
+    "newlib_mprec.c": "--barrier-return-store --barrier-branch-move",
+    "newlib_strtod.c": "--barrier-return-store --barrier-branch-move",
     # The libgcc float<->DI conversion TUs never let gas fill a delay
     # slot with a preceding copy/ALU op -- barrier both classes
     # (whole-file; each TU is one function).

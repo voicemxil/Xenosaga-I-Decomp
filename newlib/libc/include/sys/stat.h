@@ -126,6 +126,7 @@ mode_t	_EXFUN(umask,( mode_t __mask ));
 
 #if defined(__rtems__)
 int	_EXFUN(mknod,( const char *_path, mode_t _mode, dev_t dev ));
+int	_EXFUN(lstat,( const char *__path, struct stat *__buf ));
 #endif
 
 /* Provide prototypes for most of the _<systemcall> names that are
@@ -133,7 +134,7 @@ int	_EXFUN(mknod,( const char *_path, mode_t _mode, dev_t dev ));
 int	_EXFUN(_fstat,( int __fd, struct stat *__sbuf ));
 int	_EXFUN(_stat,( const char *__path, struct stat *__sbuf ));
 
-#ifdef __CYGWIN32__
+#ifdef __CYGWIN__
 int	_EXFUN(lstat,( const char *__path, struct stat *__buf ));
 #endif
 

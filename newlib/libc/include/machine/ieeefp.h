@@ -144,6 +144,23 @@
 #define __IEEE_BIG_ENDIAN
 #endif
 
+#ifdef __ia64__
+#ifdef __BIG_ENDIAN__
+#define __IEEE_BIG_ENDIAN
+#else
+#define __IEEE_LITTLE_ENDIAN
+#endif
+#endif
+
+#ifdef __AVR__
+#define __IEEE_LITTLE_ENDIAN
+#define __SMALL_BITFIELDS
+#define _DOUBLE_IS_32BITS
+#endif
+
+#if defined(__or32__) || defined(__or1k__) || defined(__or16__)
+#define __IEEE_BIG_ENDIAN
+#endif
 
 
 #ifndef __IEEE_BIG_ENDIAN

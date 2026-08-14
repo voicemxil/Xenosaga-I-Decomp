@@ -12,6 +12,7 @@ extern "C" {
 #endif
 
 #include "_ansi.h"
+#include <sys/reent.h>
 
 #define __need_size_t
 #include <stddef.h>
@@ -59,12 +60,15 @@ _PTR	 _EXFUN(memccpy,(_PTR, const _PTR, int, size_t));
 char 	*_EXFUN(rindex,(const char *, int));
 int	 _EXFUN(strcasecmp,(const char *, const char *));
 char 	*_EXFUN(strdup,(const char *));
+char 	*_EXFUN(_strdup_r,(struct _reent *, const char *));
 int	 _EXFUN(strncasecmp,(const char *, const char *, size_t));
 char 	*_EXFUN(strsep,(char **, const char *));
 char	*_EXFUN(strlwr,(char *));
 char	*_EXFUN(strupr,(char *));
-#ifdef __CYGWIN32__
-char    *_EXFUN(strsignal, (int __signo));
+#ifdef __CYGWIN__
+#ifndef DEFS_H	/* Kludge to work around problem compiling in gdb */
+const char  *_EXFUN(strsignal, (int __signo));
+#endif
 int     _EXFUN(strtosigno, (const char *__name));
 #endif
 

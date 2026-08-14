@@ -21,9 +21,12 @@ union __dmath
   double d;
 };
 
-extern const union __dmath __infinity;
+/* Declare this as an array without bounds so that no matter what small data
+   support a port and/or library has, this reference will be via the general
+   method for accessing globals. */
+extern __IMPORT const union __dmath __infinity[];
 
-#define HUGE_VAL (__infinity.d)
+#define HUGE_VAL (__infinity[0].d)
 
 #endif /* ! defined (HUGE_VAL) */
 
@@ -183,7 +186,7 @@ extern float dremf _PARAMS((float, float));
 
 /* The gamma functions use a global variable, signgam.  */
 
-extern int signgam;
+extern __IMPORT int signgam;
 
 /* The exception structure passed to the matherr routine.  */
 
@@ -254,7 +257,7 @@ enum __fdlibm_version
 #define _LIB_VERSION_TYPE enum __fdlibm_version
 #define _LIB_VERSION __fdlib_version
 
-extern _CONST _LIB_VERSION_TYPE _LIB_VERSION;
+extern __IMPORT _CONST _LIB_VERSION_TYPE _LIB_VERSION;
 
 #define _IEEE_  __fdlibm_ieee
 #define _SVID_  __fdlibm_svid

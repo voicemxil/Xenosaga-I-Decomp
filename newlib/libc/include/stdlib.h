@@ -37,13 +37,9 @@ typedef struct
 #define EXIT_FAILURE 1
 #define EXIT_SUCCESS 0
 
-#define RAND_MAX 0x7fffffff
+#define RAND_MAX __RAND_MAX
 
-#if (defined(__CYGWIN__) || defined(__CYGWIN32__)) && ! defined(_COMPILING_NEWLIB)
-extern __declspec(dllimport) int __mb_cur_max;
-#else
-extern int __mb_cur_max;
-#endif
+extern __IMPORT int __mb_cur_max;
 
 #define MB_CUR_MAX __mb_cur_max
 
@@ -60,7 +56,7 @@ _PTR	_EXFUN(bsearch,(const _PTR __key,
 		       const _PTR __base,
 		       size_t __nmemb,
 		       size_t __size,
-		       int _EXFUN((*_compar),(const _PTR, const _PTR))));
+		       int _EXPARM(_compar,(const _PTR, const _PTR))));
 _PTR	_EXFUN(calloc,(size_t __nmemb, size_t __size));
 div_t	_EXFUN(div,(int __numer, int __denom));
 _VOID	_EXFUN(exit,(int __status) _ATTRIBUTE ((noreturn)));
@@ -82,6 +78,12 @@ size_t	_EXFUN(mbstowcs,(wchar_t *, const char *, size_t));
 size_t	_EXFUN(_mbstowcs_r,(struct _reent *, wchar_t *, const char *, size_t, int *));
 size_t	_EXFUN(wcstombs,(char *, const wchar_t *, size_t));
 size_t	_EXFUN(_wcstombs_r,(struct _reent *, char *, const wchar_t *, size_t, int *));
+#ifndef __STRICT_ANSI__
+#ifndef _REENT_ONLY
+int     _EXFUN(mkstemp,(char *));
+char *  _EXFUN(mktemp,(char *));
+#endif
+#endif
 _VOID	_EXFUN(qsort,(_PTR __base, size_t __nmemb, size_t __size, int(*_compar)(const _PTR, const _PTR)));
 int	_EXFUN(rand,(_VOID));
 _PTR	_EXFUN(realloc,(_PTR __r, size_t __size));
@@ -96,8 +98,8 @@ unsigned long _EXFUN(_strtoul_r,(struct _reent *,const char *_n_PTR, char **_end
 int	_EXFUN(system,(const char *__string));
 
 #ifndef __STRICT_ANSI__
-_VOID	_EXFUN(cfree,(_PTR));
 int	_EXFUN(putenv,(const char *__string));
+int	_EXFUN(_putenv_r,(struct _reent *, const char *__string));
 int	_EXFUN(setenv,(const char *__string, const char *__value, int __overwrite));
 int	_EXFUN(_setenv_r,(struct _reent *, const char *__string, const char *__value, int __overwrite));
 
@@ -112,9 +114,12 @@ char *	_EXFUN(ecvtf,(float,int,int *,int *));
 char *	_EXFUN(dtoa,(double, int, int, int *, int*, char**));
 int	_EXFUN(rand_r,(unsigned *__seed));
 
-#ifdef __CYGWIN32__
+#ifndef __CYGWIN__
+_VOID	_EXFUN(cfree,(_PTR));
+#else
 char *	_EXFUN(realpath,(const char *, char *));
 void	_EXFUN(unsetenv,(const char *__string));
+void	_EXFUN(_unsetenv_r,(struct _reent *, const char *__string));
 int	_EXFUN(random,(_VOID));
 long	_EXFUN(srandom,(unsigned __seed));
 char *  _EXFUN(ptsname, (int));

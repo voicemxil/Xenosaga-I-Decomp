@@ -25,7 +25,7 @@
 #endif
 
 /* 16 bit integer machines */
-#if defined(__Z8001__) || defined(__Z8002__) || defined(__H8300__) || defined(__H8500__) || defined(__W65__) || defined (__H8300H__) || defined (__H8300S__) || defined (__mn10200__)
+#if defined(__Z8001__) || defined(__Z8002__) || defined(__H8300__) || defined(__H8500__) || defined(__W65__) || defined (__H8300H__) || defined (__H8300S__) || defined (__mn10200__) || defined (__AVR__)
 
 #undef INT_MAX
 #undef UINT_MAX
@@ -73,6 +73,13 @@
 #define __IEEE_LITTLE_ENDIAN
 #endif
 
+#ifdef __AVR__
+#define _DOUBLE_IS_32BITS
+#define __SMALL_BITFIELDS
+#define __IEEE_LITTLE_ENDIAN
+#define _POINTER_INT short
+#endif
+
 #ifdef __TIC80__
 #define __IEEE_LITTLE_ENDIAN
 #endif
@@ -109,6 +116,26 @@ typedef unsigned int __uint32_t;
 
 #ifndef _POINTER_INT
 #define _POINTER_INT long
+#endif
+
+#undef __RAND_MAX
+#if INT_MAX == 32767
+#define __RAND_MAX 32767
+#else
+#define __RAND_MAX 0x7fffffff
+#endif
+
+
+#if defined(__CYGWIN32__) || defined(__CYGWIN__)
+#if defined(__INSIDE_CYGWIN__) || defined(_COMPILING_NEWLIB)
+#define __IMPORT
+#else
+#define __IMPORT __declspec(dllimport)
+#endif
+#endif
+
+#ifndef __IMPORT
+#define __IMPORT
 #endif
 
 

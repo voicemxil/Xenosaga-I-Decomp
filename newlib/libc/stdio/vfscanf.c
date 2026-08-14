@@ -21,6 +21,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #ifdef _HAVE_STDC
 #include <stdarg.h>
 #else
@@ -33,8 +34,22 @@
 #endif
 
 #ifdef FLOATING_POINT
+#include <float.h>
+
+/* Currently a test is made to see if long double processing is warranted.
+   This could be changed in the future should the _ldtoa_r code be
+   preferred over _dtoa_r.  */
+#define _NO_LONGDBL
+#if defined WANT_IO_LONG_DBL && (LDBL_MANT_DIG > DBL_MANT_DIG)
+#undef _NO_LONGDBL
+extern _LONG_DOUBLE _strtold _PARAMS((char *s, char **sptr));
+#endif
+
 #include "floatio.h"
 #define	BUF	(MAXEXP+MAXFRACT+3)	/* 3 = sign + decimal point + NUL */
+/* An upper bound for how long a long prints in decimal.  4 / 13 approximates
+   log (2).  Add one char for roundoff compensation and one for the sign.  */
+#define MAX_LONG_LEN ((CHAR_BIT * sizeof (long)  - 1) * 4 / 13 + 2)
 #else
 #define	BUF	40
 #endif
@@ -44,7 +59,7 @@
  */
 
 #define	LONG		0x01	/* l: long or double */
-#define	LONGDBL		0x02	/* L: long double; unimplemented */
+#define	LONGDBL		0x02	/* L: long double */
 #define	SHORT		0x04	/* h: short */
 #define	SUPPRESS	0x08	/* suppress assignment */
 #define	POINTER		0x10	/* weird %p pointer (`fake hex') */
@@ -112,7 +127,9 @@ __svfscanf (fp, fmt0, ap)
   char ccltab[256];		/* character class table for %[...] */
   char buf[BUF];		/* buffer for numeric conversions */
   char *lptr;                   /* literal pointer */
+#ifdef MB_CAPABLE
   int state = 0;                /* value to keep track of multibyte state */
+#endif
 
   short *sp;
   int *ip;
@@ -366,7 +383,7 @@ __svfscanf (fp, fmt0, ap)
 
 	      for (;;)
 		{
-		  if ((n = fp->_r) < width)
+		  if ((n = fp->_r) < (int)width)
 		    {
 		      sum += n;
 		      width -= n;
@@ -671,7 +688,15 @@ __svfscanf (fp, fmt0, ap)
 
 #ifdef FLOATING_POINT
 	case CT_FLOAT:
+	{
 	  /* scan a floating point number as if by strtod */
+	  /* This code used to assume that the number of digits is reasonable.
+	     However, ANSI / ISO C makes no such stipulation; we have to get
+	     exact results even when there is an unreasonable amount of
+	     leading zeroes.  */
+	  long leading_zeroes = 0;
+	  long zeroes, exp_adjust;
+	  char *exp_start = NULL;
 #ifdef hardway
 	  if (width == 0 || width > sizeof (buf) - 1)
 	    width = sizeof (buf) - 1;
@@ -682,7 +707,9 @@ __svfscanf (fp, fmt0, ap)
 	  width++;
 #endif
 	  flags |= SIGNOK | NDIGITS | DPTOK | EXPOK;
-	  for (p = buf; width; width--)
+	  zeroes = 0;
+	  exp_adjust = 0;
+	  for (p = buf; width; )
 	    {
 	      c = *fp->_p;
 	      /*
@@ -693,6 +720,13 @@ __svfscanf (fp, fmt0, ap)
 		{
 
 		case '0':
+		  if (flags & NDIGITS)
+		    {
+		      flags &= ~SIGNOK;
+		      zeroes++;
+		      goto fskip;
+		    }
+		  /* Fall through.  */
 		case '1':
 		case '2':
 		case '3':
@@ -717,17 +751,25 @@ __svfscanf (fp, fmt0, ap)
 		  if (flags & DPTOK)
 		    {
 		      flags &= ~(SIGNOK | DPTOK);
+		      leading_zeroes = zeroes;
 		      goto fok;
 		    }
 		  break;
 		case 'e':
 		case 'E':
 		  /* no exponent without some digits */
-		  if ((flags & (NDIGITS | EXPOK)) == EXPOK)
+		  if ((flags & (NDIGITS | EXPOK)) == EXPOK
+		      || ((flags & EXPOK) && zeroes))
 		    {
+		      if (! (flags & DPTOK))
+			{
+			  exp_adjust = zeroes - leading_zeroes;
+			  exp_start = p;
+			}
 		      flags =
 			(flags & ~(EXPOK | DPTOK)) |
 			SIGNOK | NDIGITS;
+		      zeroes = 0;
 		      goto fok;
 		    }
 		  break;
@@ -735,6 +777,9 @@ __svfscanf (fp, fmt0, ap)
 	      break;
 	    fok:
 	      *p++ = c;
+	      width--;
+	    fskip:
+              ++nread;
 	      if (--fp->_r > 0)
 		fp->_p++;
 	      else
@@ -743,6 +788,8 @@ __svfscanf (fp, fmt0, ap)
 #endif
 		break;		/* EOF */
 	    }
+	  if (zeroes)
+	    flags &= ~NDIGITS;
 	  /*
 	   * If no digits, might be missing exponent digits
 	   * (just give back the exponent) or might be missing
@@ -754,24 +801,55 @@ __svfscanf (fp, fmt0, ap)
 		{
 		  /* no digits at all */
 		  while (p > buf)
-		    ungetc (*(u_char *)-- p, fp);
+                    {
+		      ungetc (*(u_char *)-- p, fp);
+                      --nread;
+                    }
 		  goto match_failure;
 		}
 	      /* just a bad exponent (e and maybe sign) */
 	      c = *(u_char *)-- p;
+              --nread;
 	      if (c != 'e' && c != 'E')
 		{
 		  _CAST_VOID ungetc (c, fp);	/* sign */
 		  c = *(u_char *)-- p;
+                  --nread;
 		}
 	      _CAST_VOID ungetc (c, fp);
 	    }
 	  if ((flags & SUPPRESS) == 0)
 	    {
+#ifdef _NO_LONGDBL
 	      double res;
+#else  /* !_NO_LONG_DBL */
+	      long double res;
+#endif /* !_NO_LONG_DBL */
+	      long new_exp;
 
 	      *p = 0;
+	      if ((flags & (DPTOK | EXPOK)) == EXPOK)
+		{
+		  exp_adjust = zeroes - leading_zeroes;
+		  new_exp = -exp_adjust;
+		  exp_start = p;
+		}
+	      else if (exp_adjust)
+		new_exp = atol (exp_start + 1) - exp_adjust;
+	      if (exp_adjust)
+		{
+
+		  /* If there might not be enough space for the new exponent,
+		     truncate some trailing digits to make room.  */
+		  if (exp_start >= buf + sizeof (buf) - MAX_LONG_LEN)
+		    exp_start = buf + sizeof (buf) - MAX_LONG_LEN - 1;
+                 sprintf (exp_start, "e%ld", new_exp);
+		}
+#ifdef _NO_LONGDBL
 	      res = atof (buf);
+#else  /* !_NO_LONGDBL */
+	      res = _strtold (buf, NULL);
+#endif /* !_NO_LONGDBL */
 	      if (flags & LONG)
 		{
 		  dp = va_arg (ap, double *);
@@ -789,8 +867,8 @@ __svfscanf (fp, fmt0, ap)
 		}
 	      nassigned++;
 	    }
-	  nread += p - buf;
 	  break;
+	}
 #endif /* FLOATING_POINT */
 	}
     }

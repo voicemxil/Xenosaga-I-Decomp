@@ -13,7 +13,7 @@ extern "C" {
 #include "_ansi.h"
 
 #ifndef NULL
-#define NULL    0L
+#define NULL    0
 #endif
 
 #define LC_ALL	    0
