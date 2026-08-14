@@ -432,10 +432,53 @@ def unfill_gcc_slots(flat, scope, owner_of):
     return res
 
 
+RE_FLIP_COND_BRANCH = re.compile(
+    r"^\t(beql?|bnel?|beqzl?|bnezl?|blezl?|bgtzl?|bltzl?|bgezl?"
+    r"|bc1tl?|bc1fl?)([ \t])")
+
+
+def flip_branch_likely(flat, likely_sites, plain_sites):
+    """Flip the branch-likely (annul) bit on explicitly named sites.
+
+    gcc 2.96's delayed-branch pass sometimes disagrees with the original
+    build over WHICH filled branch gets the annulled (branch-likely)
+    form -- same slot content, same target, only the l-bit differs.  No
+    structural heuristic discriminates (the taken-path test matches both
+    the flipped and the correctly-plain sites), so the sites are named
+    explicitly: FUNC:N where N is the 0-based index of the conditional
+    branch within the function, counted over the emitted asm in order
+    (which is binary order).  --branch-likely makes the site the likely
+    form (beqz -> beqzl); --branch-unlikely the reverse.  bltzal/bgezal
+    are excluded from both the flip and the count (trailing-l ambiguity;
+    gcc does not emit them here).  The resulting bytes reproduce the
+    original binary at the site, so semantics are the original's by
+    definition.
+    """
+    res = []
+    cur = None
+    count = 0
+    for line in flat:
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            count = 0
+        m = RE_FLIP_COND_BRANCH.match(line)
+        if m:
+            mn = m.group(1)
+            key = f"{cur}:{count}"
+            if key in likely_sites and not mn.endswith("l"):
+                line = "\t" + mn + "l" + line[1 + len(mn):]
+            elif key in plain_sites and mn.endswith("l"):
+                line = "\t" + mn[:-1] + line[1 + len(mn):]
+            count += 1
+        res.append(line)
+    return res
+
+
 def main(path, omitted_hazards, barrier_return_store=None,
          hoist_return_store=None, barrier_branch_move=None,
          no_fill_delay=None, expand_sym_loads=False,
-         unfill_slots=None, barrier_lo_load=None):
+         unfill_slots=None, barrier_lo_load=None,
+         branch_likely=None, branch_unlikely=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -698,6 +741,11 @@ def main(path, omitted_hazards, barrier_return_store=None,
                 res.append(line)
         out = res
 
+    if branch_likely or branch_unlikely:
+        flat = "\n".join(out).split("\n")
+        out = flip_branch_likely(flat, branch_likely or frozenset(),
+                                 branch_unlikely or frozenset())
+
     with open(path, 'w') as f:
         f.write('\n'.join(out))
 
@@ -724,6 +772,13 @@ if __name__ == "__main__":
                         default=None, metavar="FUNCS",
                         help="hoist gcc's own branch-delay-slot fills back "
                              "above the branch, leaving a literal nop")
+    parser.add_argument("--branch-likely", default=None, metavar="SITES",
+                        help="comma-separated FUNC:N sites whose Nth "
+                             "conditional branch (0-based, asm order) is "
+                             "flipped to the branch-likely (annulled) form")
+    parser.add_argument("--branch-unlikely", default=None, metavar="SITES",
+                        help="comma-separated FUNC:N sites flipped from the "
+                             "branch-likely form back to the plain form")
     parser.add_argument("--expand-sym-loads", action="store_true",
                         help="also manually expand integer loads with "
                              "symbol(+off)(reg) addresses (see "
@@ -752,4 +807,5 @@ if __name__ == "__main__":
     main(args.path, set(args.omit_hazard), scope(args.barrier_return_store),
          scope(args.hoist_return_store), scope(args.barrier_branch_move),
          scope(args.no_fill_delay), args.expand_sym_loads,
-         scope(args.unfill_gcc_slots), scope(args.barrier_lo_load))
+         scope(args.unfill_gcc_slots), scope(args.barrier_lo_load),
+         scope(args.branch_likely), scope(args.branch_unlikely))
