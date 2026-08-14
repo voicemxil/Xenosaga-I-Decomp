@@ -569,7 +569,8 @@ scalbn (double x, int n)
     {
       if (n > 50000)		/* in case integer overflow in n+k */
 	return huge_s * copysign (huge_s, x);	/*overflow */
-      return tiny_s * copysign (tiny_s, x);	/*underflow */
+      else
+	return tiny_s * copysign (tiny_s, x);	/*underflow */
     }
   k += 54;			/* subnormal result */
   SET_HIGH_WORD (x, (hx & 0x800fffff) | (k << 20));
@@ -1063,33 +1064,50 @@ __ieee754_rem_pio2 (double x, double *y)
 /* s_sin.c / s_cos.c                                                  */
 /* ------------------------------------------------------------------ */
 
-/* BLOCKED (2026-08-13, same root cause as _dtoa_r in src/libc.c -- read
-   that comment first): the `x - x` NaN/Inf path below is a `double`
-   subtraction, and R5900 has no double-precision FPU, so the ORIGINAL
-   lowers it to a call into a renamed GCC fp-bit.c soft-double library
-   (`dpsub` at 0x0032be80, confirmed by disassembly -- word 62 of sin's
-   77-word body is `jal dpsub`). Our current toolchain instead emits an
-   unresolved unnamed soft-float libcall for the same subtraction, so
-   the shapes diverge (39/77 words differ, triage: LOGIC, a real
-   difference). This is not fixable by editing sin/cos alone.
+/* STATUS 2026-08-14 (supersedes the 2026-08-13 BLOCKED note that stood
+   here).  The soft-double wall is CLOSED: src/libgcc/fpbit.c provides
+   the renamed GOFAST library (dpadd/dpsub/dpmul/dpdiv/dpcmp/litodp/
+   dptoli/...), the compiler emits those exact call names, and e.g.
+   __ieee754_fmod links and matches against them.
 
-   This generalizes: EVERY double-precision function in this file whose
-   diff involves real double arithmetic (not just bit-twiddling via
-   GET_HIGH_WORD/SET_LOW_WORD etc.) is probably blocked the same way --
-   at minimum sin, cos, floor, scalbn, atan, __ieee754_acos,
-   __ieee754_pow, __kernel_sin, __kernel_cos, __kernel_rem_pio2,
-   __ieee754_rem_pio2 all show LENGTH/LOGIC diffs consistent with this.
-   The float (single-precision) kernels are NOT affected -- R5900 has a
-   real single-precision FPU -- but several of those (__kernel_sinf,
-   __ieee754_atan2f, floorf) are separately blocked by the mtc1
-   hazard-chaining wall documented above main(); do not conflate the
-   two walls when triaging a float-kernel near-miss.
+   The remaining wall for the double-precision fdlibm functions is the
+   ASSEMBLER, not the compiler: the original ee-as never stole
+     (a) a `%lo(sym)` constant load, or
+     (b) the trailing addu of an `la reg,sym(idx)` macro expansion
+   into a following jal/j/b delay slot, and it kept simple register
+   copies / one-output ALU ops out of branch delay slots gcc had not
+   filled itself; modern gas steals all three, so these functions show
+   LENGTH diffs -- one missing nop per stolen slot -- that cascade into
+   huge word-diff counts.  Verified 2026-08-14 by compiling THIS file,
+   unchanged, with a locally patched tools/fix_cc_asm.py (two new rules:
+   barrier a %lo load whose next line is jal/j/b, same .set-push/
+   noreorder shape as the existing barriers; and la-before-jal ->
+   wrap_mips1_noreorder, mirroring the existing la-before-return rule)
+   plus FILE_FIX_FLAGS["libm.c"] += " --barrier-branch-move" in
+   configure.py (NB: that pass's per-function scope list is parsed but
+   IGNORED by the implementation -- it is file-wide).  Results with only
+   those toolchain changes:
+     atan             0 diffs     floor              0 diffs
+     __ieee754_sqrt   0 diffs     __kernel_sin       0 diffs
+     __kernel_cos     0 diffs     scalbn             2 diffs (below)
+     __ieee754_atan2  1 diff      __ieee754_rem_pio2 1 diff
+   and ZERO regressions across all 19 functions of this file already in
+   config/decompiled.txt.  __ieee754_pow/__ieee754_acos/
+   __kernel_rem_pio2/sin/cos improve but keep real diffs -- more classes
+   (or source variants) remain there.
 
-   Closing this needs the fp-bit adaptation project described in
-   src/libc.c's _dtoa_r comment (dpadd/dpsub/dpmul/dpdiv/dpcmp/litodp/
-   dptoli + __pack_d/__unpack_d/_fpadd_parts), done once and shared by
-   both files. Budget it as its own session; do not attempt piecemeal
-   inside a single function's diff. */
+   scalbn's 2 residual diffs are single-bit annul flips (words 76/80:
+   original beqzl/beq, ours beq/beql -- same slot contents, same
+   targets).  They survived every C-level permutation tried (else
+   shapes, operand commutation, inverted conditions, splitting the
+   const declarations), so they look like gcc dbr-pass prediction state
+   needing either the exact original source shape or a fixer annul-bit
+   pass.
+
+   None of this is expressible from inside this file: it needs the two
+   fix_cc_asm.py rules plus the configure.py flag, after which atan,
+   floor, __ieee754_sqrt, __kernel_sin and __kernel_cos can be
+   registered as-is. */
 
 double
 sin (double x)
