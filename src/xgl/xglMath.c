@@ -134,17 +134,24 @@ float xglAtan2(float y, float x)
     return r;
 }
 
-/* TODO: near-miss (7d) - the original bit-copies f through a GPR
- * (mfc1/mtc1 round-trip) before trunc.w.s; every pun shape tried either
- * collapses to a plain trunc or spills to the stack. */
+/* Bit-copy f through a GPR (mfc1/mtc1 round-trip) before the truncate;
+ * every C pun shape either collapses to a plain trunc or spills to the
+ * stack, so the bounce is spelled as single-instruction asm moves with
+ * the original's register assignment pinned ($3 for the bits, $f0 for
+ * the staging float). The truncate must be written "cvt.w.s" -- gas
+ * rejects two-operand trunc.w.s, and on the EE cvt.w.s IS the
+ * truncating encoding (funct 0x24, what objdump prints as trunc.w.s). */
 int F2I(float f)
 {
-    int bits;
-    float x;
+    register int bits __asm__("$3");
+    register float x __asm__("$f0");
+    int r;
 
-    bits = *(int *) &f;
-    x = *(float *) &bits;
-    return (int) x;
+    __asm__("mfc1 %0, %1" : "=r"(bits) : "f"(f));
+    __asm__("mtc1 %1, %0" : "=f"(x) : "r"(bits));
+    __asm__("cvt.w.s %0, %0" : "=f"(x) : "0"(x));
+    __asm__("mfc1 %0, %1" : "=r"(r) : "f"(x));
+    return r;
 }
 
 /* LCG step over the shared 64-bit seed; 15-bit result */
@@ -380,7 +387,19 @@ extern void xglDmaDirectSrcChain(unsigned int nCh, unsigned int nAddr);
  * block's qmtc2; the original has none. Needs
  * FILE_FIX_FLAGS["xglMath.c"] = "--omit-hazard qmtc2". The variant
  * below (mfc1 inside the noreorder block) avoids the nop but then the
- * lwc1 loses its scheduling priority and lands below the prologue. */
+ * lwc1 loses its scheduling priority and lands below the prologue.
+ * UPDATE (wave 3): --omit-hazard qmtc2 is registered but does NOT help --
+ * the nop is inserted by gas itself, not the fixer. gas pads a
+ * reorder-mode mfc1 before ANY dependent next insn (dependence-aware for
+ * insns, unconditional flush before .word/data/labels), and it tracks
+ * the hazard even across .set noreorder boundaries, so no template
+ * spelling hides the qmtc2 read of $2. A ".set mips4" window around the
+ * compiler mfc1 kills the hoisted lwc1 (the extra volatile asm is a
+ * scheduling barrier) and did not suppress the pad. Chain-lengthening
+ * empty-asm passthroughs ("" : "=f"(x) : "0"(0.1f)) hoist the lwc1 above
+ * the sd $31 but perturb the tail regalloc (9 diffs). Would need a fixer
+ * feature that pulls a compiler-emitted mfc1 into a following #APP
+ * noreorder block (out of scope for shared tools). */
 /* TODO: near-miss (2 words, SCHEDULING): the original's lwc1 of the 0.1f
  * seed sits ABOVE the `addiu sp,sp,-16` prologue word; no source form can
  * hoist body code above the textual prologue. Everything else matches

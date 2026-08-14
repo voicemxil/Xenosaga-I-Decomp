@@ -139,7 +139,13 @@ void xglFontDebugMode(int nMode)
  * residue is addressing-mode CSE: the original loads FS.nLoadAddr via
  * the %hi reg with the %lo folded into the lw (4480($v1)) while ours
  * folds it onto the byte-pair's materialized &FS pseudo (0($v0)).
- * *(int *)&FS and pointer-staging variants did not split them. */
+ * *(int *)&FS and pointer-staging variants did not split them.
+ * Wave-3 findings: the built lui is IN-PLACE (lui $v0 / addiu $v0,$v0)
+ * because CSE rewrites the lw's address to reuse the materialized &FS,
+ * killing the hi reg early; orig keeps hi in $v1 across the calls.
+ * Tried and failed: volatile read (address CSE unaffected), asm-renamed
+ * alias symbol (extra lui, or sdata path), plain/opaque byte-pointer
+ * staging (opaque asm passthrough perturbs the call-setup schedule). */
 /* Load one of the two font texture pages, returning the previous bank */
 int xglFontLoad(int nBank, int nNow)
 {

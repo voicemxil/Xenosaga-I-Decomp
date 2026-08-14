@@ -637,8 +637,12 @@ void xglSoundStreamStop(int nChannel)
     }
 }
 
-/* TODO: near-miss (5 words, pure REGISTER $v0<->$v1 swap in the final
- * drain loop; do-while/polarity/sub-spelling variants all identical). */
+/* The final drain loop's decrement must land in $v0 (with the slti temp
+ * in $v1); every plain source shape allocates them swapped, and a bare
+ * register-asm local gets coalesced away. The zero-code empty-asm
+ * passthrough (__asm__("" : "=r"(t) : "0"(expr)) with t pinned to $2)
+ * forces the subtraction to compute directly into $v0 without emitting
+ * any instruction. */
 /* Flush the stereo VAG stream with silence until its queue drains */
 void xglSoundStreamMute(void)
 {
@@ -658,8 +662,11 @@ void xglSoundStreamMute(void)
         ;
     }
     while (nResult >= 256) {
+        register int t __asm__("$2");
+
         SsdSetVagStreamDataStereo(0, pBuf, 4096);
-        nResult -= 256;
+        __asm__("" : "=r"(t) : "0"(nResult - 256));
+        nResult = t;
     }
 }
 
@@ -675,19 +682,25 @@ typedef struct {
     int aParam[4];                  /* 0xB4: entry params */
 } SE_ENTRY;
 
-/* Append one SE command (code + up to four params) to the pending packet */
+/* Append one SE command (code + up to four params) to the pending packet.
+ * Register shape: the (nCount << 5) offset must compute into $v0 (a
+ * plain pinned register var suffices here -- gcc honors it without a
+ * passthrough), the entry pointer lands in $v1, and the original's
+ * redundant pointer copy back into $v0 is reproduced by the zero-code
+ * tied empty-asm passthrough (ofs and pEnt2 share $2; disjoint lives). */
 void xglMakeSePacket(short nCode, ...)
 {
     va_list ap;
-    SE_ENTRY *pEnt;
-    SE_ENTRY *pEnt2;
+    register SE_ENTRY *pEnt __asm__("$3");
+    register SE_ENTRY *pEnt2 __asm__("$2");
+    register int ofs __asm__("$2");
     int *pDst;
     int i;
 
     if (SoundWork.stream.nCount < 65) {
-        pEnt = (SE_ENTRY *)((char *)&SoundWork + (SoundWork.stream.nCount << 5));
-        pEnt2 = pEnt;
-        __asm__("" : "+r"(pEnt2));
+        ofs = SoundWork.stream.nCount << 5;
+        pEnt = (SE_ENTRY *)((char *)&SoundWork + ofs);
+        __asm__("" : "=r"(pEnt2) : "0"(pEnt));
         pEnt->nCode = nCode;
         va_start(ap, nCode);
         pDst = pEnt2->aParam;

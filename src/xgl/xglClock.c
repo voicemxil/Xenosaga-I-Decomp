@@ -27,10 +27,9 @@ extern XGLCDCLOCK PresentTime;
 int sceCdReadClock(XGLCDCLOCK *pClock);
 
 /* Two-digit BCD -> binary */
-static int BCD2INT(int nBcd)
+static int BCD2INT(unsigned char nBcd)
 {
-    unsigned int n = nBcd & 0xFF;
-    return (n >> 4) * 10 + (n & 0xF);
+    return ((unsigned int)nBcd >> 4) * 10 + (nBcd & 0xF);
 }
 
 /* Read the RTC (at most once per interval window) and unpack it */
@@ -58,7 +57,13 @@ extern unsigned short D_00491676[];   /* cumulative days before month m */
  * one slot (orig gives the accumulator $a1 with highest priority, ours
  * allocates it last -> $t1, shifting hour/const/day/min down). Tried:
  * in-place += chain (fixed the addu shapes), unsigned year (srl), nDaySec
- * constant-range lever, declaration order. */
+ * constant-range lever, declaration order. Wave 3: systematic
+ * register-asm pinning (single pins and the full orig set, with and
+ * without zero-code tied passthroughs) -- every pinned variant inserts
+ * one extra reload word (176 vs 172 bytes) and hoists the month sltiu
+ * from its late slot up into the load block; the closest pinned shape
+ * still shifts every word after [5] by one. The rotation is an RA
+ * priority artifact pins cannot reproduce without changing code. */
 /* Convert a calendar date to seconds since 2000-01-01 */
 unsigned int xglClockDayTime2UInt(XGLDAYTIME *pTime)
 {

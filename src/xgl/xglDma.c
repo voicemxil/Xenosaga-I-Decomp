@@ -142,43 +142,66 @@ void xglDmaBufferRequest(XGLDMABUFF *pBuff, u_int nCh)
 }
 
 /* Configure the DMA controller for memory FIFO transfers */
-/* TODO: Match the remaining MMIO pointer/value register rotation. */
+/* TODO: near-miss (4 words, down from 14, pure SCHEDULING): two adjacent
+ * pair swaps remain -- orig orders (lui $a2 ; lw $v0) and (ori $v0,0xc ;
+ * ori $a2,0xe050), ours schedules the lw/ori-v0 first. sched2 gives the
+ * load priority and no source order, false-dependence asm, volatile
+ * passthrough or hi/lo split changed the tie (each of those regressed to
+ * 5-27). The MMIO register rotation itself is fully solved by zero-code
+ * tied empty-asm passthroughs pinning nCtrl=$2, E040=$3, E000=$5,
+ * E050=$6, plus $9 for the 0x104 chcr constant. */
 void xglDmaMFIFOSetup(u_int nAddr, u_int nSize, int nCh)
 {
     XGLDMACHAN *pChan;
-    u_int nCtrl;
+    register u_int nCtrl __asm__("$2");
+    register vu_int *pE040 __asm__("$3");
+    register vu_int *pE000 __asm__("$5");
+    register vu_int *pE050 __asm__("$6");
+    register u_int nChcr __asm__("$9");
 
     if (nCh < 3) {
         pChan = tbl_00490D60[nCh];
-        nCtrl = *(vu_int *)0x1000E000;
-        *(vu_int *)0x1000E050 = nAddr;
-        *(vu_int *)0x1000E000 = nCtrl | 0xC;
-        *(vu_int *)0x1000E040 = nSize - 0x10;
+        __asm__("" : "=r"(pE000) : "0"((vu_int *)0x1000E000));
+        __asm__("" : "=r"(pE050) : "0"((vu_int *)0x1000E050));
+        nCtrl = *pE000;
+        *pE050 = nAddr;
+        *pE000 = nCtrl | 0xC;
+        pE040 = (vu_int *)0x1000E040;
+        *pE040 = nSize - 0x10;
         mfifo_drain = pChan;
         *(vu_int *)0x1000D010 = nAddr;
         pChan->tadr = nAddr;
         pChan->qwc = 0;
-        pChan->chcr = 0x104;
+        nChcr = 0x104;
+        pChan->chcr = nChcr;
     }
 }
 
 /* Submit data to the memory FIFO and wait for drain space */
-/* TODO: Match the t0/t1 allocation and MMIO store scheduling. */
+/* TODO: near-miss (9 words, was 11; t0/t1 rotation solved by the
+ * zero-code tied passthroughs pinning nMask=$8 / pChan=$9). Residue:
+ * (a) the trailing D000 store is stolen into the jr delay slot -- fixing
+ * it needs FILE_FIX_FLAGS["xglDma.c"] = "--barrier-return-store
+ * xglDmaMFIFOKick" (VERIFIED: with that flag this drops to 7 diffs and
+ * the length matches); (b) two scheduling windows: the same adjacent
+ * (lui ; ori) pair swap seen in xglDmaMFIFOSetup, and the nMask addiu
+ * hoisted above the drain lw/sw/sll group (false-dep asm inputs do not
+ * move it). */
 u_int xglDmaMFIFOKick(u_int nTadr, u_int nQwc)
 {
     u_int nSize;
-    u_int nMask;
+    register u_int nMask __asm__("$8");
     u_int nSpace;
-    XGLDMACHAN *pChan;
+    register XGLDMACHAN *pChan __asm__("$9");
 
     nSize = *(vu_int *)0x1000E040 + 0x10;
     while (*(vu_int *)0x1000D000 & 0x100) {
     }
     *(vu_int *)0x1000D080 = nTadr & 0x3FF0;
-    pChan = mfifo_drain;
+    __asm__("" : "=r"(pChan) : "0"(mfifo_drain));
     *(vu_int *)0x1000D020 = nQwc;
     nQwc <<= 4;
-    nMask = nSize - 0x10;
+    __asm__("" : "=r"(nMask) : "0"(nSize - 0x10));
     do {
         nSpace = (pChan->tadr - *(vu_int *)0x1000D010 + nSize) & nMask;
         nSpace = nSpace ? nSpace : nSize;
