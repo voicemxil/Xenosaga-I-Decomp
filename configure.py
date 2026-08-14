@@ -90,7 +90,6 @@ FILE_CFLAGS_OVERRIDE = {
     # Three camera functions need -fno-strict-aliasing; verified per-file
     # only (the flag regresses xglTask.c's matches if applied globally).
     "xglCamera.c": "-O2 -G8 -fno-strict-aliasing",
-    "tskMenuPause.c": "-O2 -G8 -fno-thread-jumps",
     "malloc_lock.c": "-O2 -G0",
     # libgcc2 64-bit division TUs: Sony built libgcc with -mlong32 (long is
     # 32-bit), which keeps __ll_B's `1L << 16` in SImode -- plain `sll`
@@ -196,6 +195,7 @@ FILE_FIX_FLAGS = {
                "--branch-likely MenuFaceEpidGet:3"),
     # xgl delay-slot shapes found by the xgl subagent (all verified):
     "xglTimer.c": "--barrier-return-store xglTimer0Reset",
+    "tskMenuPause.c": "--pin-slot-nop PauseMenu:0",
     "xglMovie.c": "--barrier-branch-move xglMovieClose",
     "xglMath.c": "--omit-hazard qmtc2",
     "newlib_mprec.c": "--barrier-return-store --barrier-branch-move",
