@@ -1609,6 +1609,13 @@ __pack_d = 0x0032DC88, 0x118; // fpbit.c
 strstr = 0x00330220, 0x84; // newlib_str.c
 strrchr = 0x003301D0, 0x50; // newlib_str.c
 
+__muldi3 = 0x00329F38, 0x74; // _muldi3
+
+// __fixunsdfdi = 0x0032B7C0, 0x118; // _fixunsdfdi -- TODO: 39 diff words at best (2.96 -O2 -G8 -mlong32). Orig leaves jal delay slots empty with arg moves hoisted above the call; no flag combination tried so far (-fno-delayed-branch, -fno-schedule-insns, -O1/-O3, 2.9) reproduces it. Same story for __fixunssfdi (53d), __floatdidf (26d), __fixdfdi (21d) -- all four float<->DI conversions share the scheduling shape.
+// __fixunssfdi = 0x0032B8D8, 0x128; // _fixunssfdi -- TODO: see __fixunsdfdi note
+// __floatdidf = 0x0032DB50, 0xA8; // _floatdidf -- TODO: see __fixunsdfdi note
+// __fixdfdi = 0x003384F8, 0x78; // _fixdfdi -- TODO: see __fixunsdfdi note
+
 __divdi3 = 0x00329FB0, 0x694; // _divdi3
 __moddi3 = 0x0032A648, 0x690; // _moddi3
 __udivdi3 = 0x0032ACD8, 0x57C; // _udivdi3

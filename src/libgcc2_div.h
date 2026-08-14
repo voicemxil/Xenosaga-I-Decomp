@@ -1,6 +1,6 @@
 /*
  * 64-bit integer division support, verbatim from EE-GCC's libgcc2.c
- * (gcc-2.9x, SSXModding/ps2-ee-toolchain ee/gcc/libgcc2.c lines 60-734)
+ * (gcc-2.9x, SSXModding/ps2-ee-toolchain ee/gcc/libgcc2.c lines 60-1002)
  * with the tm.h-provided configuration resolved for the R5900:
  * little-endian, 8-bit units, 64-bit long double. Each of the four
  * division TUs (_divdi3.c, _moddi3.c, _umoddi3.c, _udivdi3.c) defines
@@ -13,6 +13,8 @@
 #define LIBGCC2_WORDS_BIG_ENDIAN 0
 #define BITS_PER_UNIT 8
 #define LIBGCC2_LONG_DOUBLE_TYPE_SIZE 64
+/* In a cross-compilation situation, default to inhibiting compilation
+   of routines that use libc.  */
 /* In a cross-compilation situation, default to inhibiting compilation
    of routines that use libc.  */
 
@@ -688,3 +690,271 @@ __udivdi3 (UDItype n, UDItype d)
 }
 #endif
 
+#ifdef L_cmpdi2
+word_type
+__cmpdi2 (DItype a, DItype b)
+{
+  DIunion au, bu;
+
+  au.ll = a, bu.ll = b;
+
+  if (au.s.high < bu.s.high)
+    return 0;
+  else if (au.s.high > bu.s.high)
+    return 2;
+  if ((USItype) au.s.low < (USItype) bu.s.low)
+    return 0;
+  else if ((USItype) au.s.low > (USItype) bu.s.low)
+    return 2;
+  return 1;
+}
+#endif
+
+#ifdef L_ucmpdi2
+word_type
+__ucmpdi2 (DItype a, DItype b)
+{
+  DIunion au, bu;
+
+  au.ll = a, bu.ll = b;
+
+  if ((USItype) au.s.high < (USItype) bu.s.high)
+    return 0;
+  else if ((USItype) au.s.high > (USItype) bu.s.high)
+    return 2;
+  if ((USItype) au.s.low < (USItype) bu.s.low)
+    return 0;
+  else if ((USItype) au.s.low > (USItype) bu.s.low)
+    return 2;
+  return 1;
+}
+#endif
+
+#if defined(L_fixunstfdi) && (LIBGCC2_LONG_DOUBLE_TYPE_SIZE == 128)
+#define WORD_SIZE (sizeof (SItype) * BITS_PER_UNIT)
+#define HIGH_WORD_COEFF (((UDItype) 1) << WORD_SIZE)
+
+DItype
+__fixunstfdi (TFtype a)
+{
+  TFtype b;
+  UDItype v;
+
+  if (a < 0)
+    return 0;
+
+  /* Compute high word of result, as a flonum.  */
+  b = (a / HIGH_WORD_COEFF);
+  /* Convert that to fixed (but not to DItype!),
+     and shift it into the high word.  */
+  v = (USItype) b;
+  v <<= WORD_SIZE;
+  /* Remove high part from the TFtype, leaving the low part as flonum.  */
+  a -= (TFtype)v;
+  /* Convert that to fixed (but not to DItype!) and add it in.
+     Sometimes A comes out negative.  This is significant, since
+     A has more bits than a long int does.  */
+  if (a < 0)
+    v -= (USItype) (- a);
+  else
+    v += (USItype) a;
+  return v;
+}
+#endif
+
+#if defined(L_fixtfdi) && (LIBGCC2_LONG_DOUBLE_TYPE_SIZE == 128)
+DItype
+__fixtfdi (TFtype a)
+{
+  if (a < 0)
+    return - __fixunstfdi (-a);
+  return __fixunstfdi (a);
+}
+#endif
+
+#if defined(L_fixunsxfdi) && (LIBGCC2_LONG_DOUBLE_TYPE_SIZE == 96)
+#define WORD_SIZE (sizeof (SItype) * BITS_PER_UNIT)
+#define HIGH_WORD_COEFF (((UDItype) 1) << WORD_SIZE)
+
+DItype
+__fixunsxfdi (XFtype a)
+{
+  XFtype b;
+  UDItype v;
+
+  if (a < 0)
+    return 0;
+
+  /* Compute high word of result, as a flonum.  */
+  b = (a / HIGH_WORD_COEFF);
+  /* Convert that to fixed (but not to DItype!),
+     and shift it into the high word.  */
+  v = (USItype) b;
+  v <<= WORD_SIZE;
+  /* Remove high part from the XFtype, leaving the low part as flonum.  */
+  a -= (XFtype)v;
+  /* Convert that to fixed (but not to DItype!) and add it in.
+     Sometimes A comes out negative.  This is significant, since
+     A has more bits than a long int does.  */
+  if (a < 0)
+    v -= (USItype) (- a);
+  else
+    v += (USItype) a;
+  return v;
+}
+#endif
+
+#if defined(L_fixxfdi) && (LIBGCC2_LONG_DOUBLE_TYPE_SIZE == 96)
+DItype
+__fixxfdi (XFtype a)
+{
+  if (a < 0)
+    return - __fixunsxfdi (-a);
+  return __fixunsxfdi (a);
+}
+#endif
+
+#ifdef L_fixunsdfdi
+#define WORD_SIZE (sizeof (SItype) * BITS_PER_UNIT)
+#define HIGH_WORD_COEFF (((UDItype) 1) << WORD_SIZE)
+
+DItype
+__fixunsdfdi (DFtype a)
+{
+  DFtype b;
+  UDItype v;
+
+  if (a < 0)
+    return 0;
+
+  /* Compute high word of result, as a flonum.  */
+  b = (a / HIGH_WORD_COEFF);
+  /* Convert that to fixed (but not to DItype!),
+     and shift it into the high word.  */
+  v = (USItype) b;
+  v <<= WORD_SIZE;
+  /* Remove high part from the DFtype, leaving the low part as flonum.  */
+  a -= (DFtype)v;
+  /* Convert that to fixed (but not to DItype!) and add it in.
+     Sometimes A comes out negative.  This is significant, since
+     A has more bits than a long int does.  */
+  if (a < 0)
+    v -= (USItype) (- a);
+  else
+    v += (USItype) a;
+  return v;
+}
+#endif
+
+#ifdef L_fixdfdi
+DItype
+__fixdfdi (DFtype a)
+{
+  if (a < 0)
+    return - __fixunsdfdi (-a);
+  return __fixunsdfdi (a);
+}
+#endif
+
+#ifdef L_fixunssfdi
+#define WORD_SIZE (sizeof (SItype) * BITS_PER_UNIT)
+#define HIGH_WORD_COEFF (((UDItype) 1) << WORD_SIZE)
+
+DItype
+__fixunssfdi (SFtype original_a)
+{
+  /* Convert the SFtype to a DFtype, because that is surely not going
+     to lose any bits.  Some day someone else can write a faster version
+     that avoids converting to DFtype, and verify it really works right.  */
+  DFtype a = original_a;
+  DFtype b;
+  UDItype v;
+
+  if (a < 0)
+    return 0;
+
+  /* Compute high word of result, as a flonum.  */
+  b = (a / HIGH_WORD_COEFF);
+  /* Convert that to fixed (but not to DItype!),
+     and shift it into the high word.  */
+  v = (USItype) b;
+  v <<= WORD_SIZE;
+  /* Remove high part from the DFtype, leaving the low part as flonum.  */
+  a -= (DFtype)v;
+  /* Convert that to fixed (but not to DItype!) and add it in.
+     Sometimes A comes out negative.  This is significant, since
+     A has more bits than a long int does.  */
+  if (a < 0)
+    v -= (USItype) (- a);
+  else
+    v += (USItype) a;
+  return v;
+}
+#endif
+
+#ifdef L_fixsfdi
+DItype
+__fixsfdi (SFtype a)
+{
+  if (a < 0)
+    return - __fixunssfdi (-a);
+  return __fixunssfdi (a);
+}
+#endif
+
+#if defined(L_floatdixf) && (LIBGCC2_LONG_DOUBLE_TYPE_SIZE == 96)
+#define WORD_SIZE (sizeof (SItype) * BITS_PER_UNIT)
+#define HIGH_HALFWORD_COEFF (((UDItype) 1) << (WORD_SIZE / 2))
+#define HIGH_WORD_COEFF (((UDItype) 1) << WORD_SIZE)
+
+XFtype
+__floatdixf (DItype u)
+{
+  XFtype d;
+
+  d = (SItype) (u >> WORD_SIZE);
+  d *= HIGH_HALFWORD_COEFF;
+  d *= HIGH_HALFWORD_COEFF;
+  d += (USItype) (u & (HIGH_WORD_COEFF - 1));
+
+  return d;
+}
+#endif
+
+#if defined(L_floatditf) && (LIBGCC2_LONG_DOUBLE_TYPE_SIZE == 128)
+#define WORD_SIZE (sizeof (SItype) * BITS_PER_UNIT)
+#define HIGH_HALFWORD_COEFF (((UDItype) 1) << (WORD_SIZE / 2))
+#define HIGH_WORD_COEFF (((UDItype) 1) << WORD_SIZE)
+
+TFtype
+__floatditf (DItype u)
+{
+  TFtype d;
+
+  d = (SItype) (u >> WORD_SIZE);
+  d *= HIGH_HALFWORD_COEFF;
+  d *= HIGH_HALFWORD_COEFF;
+  d += (USItype) (u & (HIGH_WORD_COEFF - 1));
+
+  return d;
+}
+#endif
+
+#ifdef L_floatdidf
+#define WORD_SIZE (sizeof (SItype) * BITS_PER_UNIT)
+#define HIGH_HALFWORD_COEFF (((UDItype) 1) << (WORD_SIZE / 2))
+#define HIGH_WORD_COEFF (((UDItype) 1) << WORD_SIZE)
+
+DFtype
+__floatdidf (DItype u)
+{
+  DFtype d;
+
+  d = (SItype) (u >> WORD_SIZE);
+  d *= HIGH_HALFWORD_COEFF;
+  d *= HIGH_HALFWORD_COEFF;
+  d += (USItype) (u & (HIGH_WORD_COEFF - 1));
+
+  return d;
+}
+#endif

@@ -92,6 +92,11 @@ FILE_CFLAGS_OVERRIDE = {
     # instead of the canonicalizing dsll32/dsra32 pair. All four functions
     # match byte-exactly with this single extra flag; without it each one
     # is ~300 diff words. Confirmed by flag sweep 2026-08-14.
+    "_muldi3.c": "-O2 -G8 -mlong32",
+    "_fixunsdfdi.c": "-O2 -G8 -mlong32",
+    "_fixunssfdi.c": "-O2 -G8 -mlong32",
+    "_floatdidf.c": "-O2 -G8 -mlong32",
+    "_fixdfdi.c": "-O2 -G8 -mlong32",
     "_divdi3.c": "-O2 -G8 -mlong32",
     "_moddi3.c": "-O2 -G8 -mlong32",
     "_udivdi3.c": "-O2 -G8 -mlong32",
