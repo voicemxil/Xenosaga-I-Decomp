@@ -204,10 +204,14 @@ FILE_FIX_FLAGS = {
     # loop-preheader `addiu s0,s0,8/9` increment BEFORE the MenuWork
     # %lo() addiu; ours orders them the other way. Instruction 30 is the
     # %lo addiu in all three (same preheader shape).
+    # MenuShopModelDisp: filled-branch site 6 (beqz to $L907) -- gcc
+    # hoists the target block's l.s gp-load into the slot, the original
+    # hoisted the move $4,$16 that follows it.
     "Menu.c": ("--barrier-return-store MenuRWeaponCheck2 "
                "--branch-likely MenuFaceEpidGet:3 "
                "--swap-adjacent MenuAgwsListMake_Gun:30,"
-               "MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30"),
+               "MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30 "
+               "--swap-slot-target MenuShopModelDisp:6"),
     # TMENU_addItem: the original orders the li $7,-1 / li $5,1024
     # MSG_convert argument pair the other way (instruction 4 is the
     # li $5,1024).

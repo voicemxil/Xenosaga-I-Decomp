@@ -1945,3 +1945,4 @@ PauseMenu = 0x002461C8, 0x140; // tskMenuPause.c
 nmlModelSetFadeIn = 0x0022EE78, 0x84; // nmlModel.c
 nmlModelFogPara = 0x00230040, 0xC8; // nmlModel.c
 nmlPacketAddTransMicrocodeInit = 0x00236B98, 0x118; // nmlPacket.c
+MenuShopModelDisp = 0x002A2188, 0x118; // Menu.c
