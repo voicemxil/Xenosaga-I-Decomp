@@ -1741,3 +1741,59 @@ void nmlModelSetPartsVisible(void *pData, int nParts, int nVisible)
         }
     }
 }
+
+/* --- Drop-shadow circle rendering --- */
+
+int s_aCircleShadow[16];
+extern LAYOUT *D_009550B0[];
+extern unsigned short D_00952410[];
+extern char D_00955900[];
+extern char D_00956920[];
+void nmlPacketSendCircleTexture(void *p1, void *p2);
+void nmlPacketMakeCircleTexture(void *pLayout, int nArg);
+
+/* Fill the circle-shadow alpha ramp from a 0-128 ratio */
+static void set_circle_shadow_ratio(int nRatio)
+{
+    float fStep;
+    int i;
+    int j;
+
+    fStep = (float)nRatio * 0.0625f;
+    for (i = 0; i < 16; i++) {
+        j = (i < 8) ? i : i + 8;
+        s_aCircleShadow[j] = (int)(128.0f - (float)i * fStep) << 24;
+    }
+}
+
+/* Render the drop-shadow circle for the first visible model in the
+ * given index ring */
+/* TODO: near-miss (44 diffs, 52 orig vs 53 built, REGISTER/scheduling)
+ * -- logic verified against asm (ring walk, face-model skip bit
+ * 0x100000, alpha*transparency ratio). The header lh pair schedules in
+ * the opposite order and i/nEnd land in a1/a2 vs the original's a0/a2,
+ * cascading through the loop. set_circle_shadow_ratio (its helper)
+ * matches. */
+int nmlModelRenderDropCircle(void *pHdr, int nStep, int nArg)
+{
+    LAYOUT *pM;
+    int i;
+    int nEnd;
+    int nC;
+
+    pM = 0;
+    nC = *(short *)pHdr;
+    i = nC - nStep;
+    nEnd = *(short *)((char *)pHdr + 2) * nStep + nC - nStep;
+    while (i != nEnd) {
+        i += nStep;
+        pM = D_009550B0[D_00952410[i]];
+        if ((pM->nStatus & 0x100000) == 0) {
+            break;
+        }
+    }
+    set_circle_shadow_ratio((int)((float)pM->nTexMapAlpha * pM->fTransparency));
+    nmlPacketSendCircleTexture(D_00955900, D_00956920);
+    nmlPacketMakeCircleTexture(pM, nArg);
+    return 0;
+}

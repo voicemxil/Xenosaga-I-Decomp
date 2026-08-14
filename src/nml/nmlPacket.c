@@ -350,7 +350,10 @@ void nmlPacketAddGsPAbe(u_long nPabe)
 
 /* TODO: near-miss (17/18 words, missing one xori-0 boolean-normalize
  * instruction vs orig's movn-based ternary; logic/values verified correct).
- * Parked per budget rule after triage + one extra source-shape attempt. */
+ * Re-probed this session: ternary (!=0 / ==0 with movn/movz) and
+ * long-typed selects all fold the xori away; the orig's `xori v1,v1,0`
+ * after andi looks like an unfolded compare-against-0 the 2.96 movn
+ * path normally deletes. Parked again. */
 /* Queue a PRMODE register write; the value is 88 or 72 depending on bit 0
  * of the model's flags word at +0xC0 */
 void nmlPacketAddGsPrmode(void *pModel)
@@ -522,4 +525,76 @@ void packet_gs_entry64(u_int nReg, u_long *pData)
     q[2] = pData[0];
     q[3] = nReg;
     *pn = n + 1;
+}
+
+/* --- Transform-microcode init --- */
+
+typedef union {
+    float f[4];
+    TI q;
+} VEC4P;
+
+void xglMatrixUnit(void *pDst);
+float xglSin(float fAngle);
+
+extern int D_004AE5A0[];
+extern char D_004AE5B0[];
+extern int D_00338690[];
+extern float s_fTransAngleStep;
+
+int s_nTransUnk38;
+int s_nTransUnk3C;
+int s_nTransUnk1C;
+int s_nTransUnk20;
+int s_nTransUnk24;
+int s_nTransUnk2C;
+int s_nTransUnk30;
+int s_nTransUnk40;
+float s_fTransAngle;
+float s_fTransSin;
+VEC4P s_inTransMtx[4];
+
+/* Reference the transform microprogram, reset the transform state,
+ * advance the water angle and upload a unit matrix */
+/* TODO: near-miss (3 diffs, 70 orig vs 69 built) -- everything matches
+ * except the tail: the original stalls one nop after mtc1 (ld ra
+ * scheduled earlier) before the four 1.0f stores; ours fills the slot
+ * with the last store. Same hazard-nop scheduling class as
+ * nmlModelSetFadeIn / nmlModelFogPara; asm barriers cannot reproduce
+ * the stall. */
+void nmlPacketAddTransMicrocodeInit(void)
+{
+    VEC4P aMtx[4];
+    VEC4P *p;
+    float fOne;
+
+    s_pPacket = xglPacketGetCurrent();
+    sceVif1PkRef(s_pPacket, (u_int)D_004AE5B0, D_004AE5A0[0], 0, 0, 0);
+    s_nTransUnk38 = 2;
+    s_nTransUnk3C = -1;
+    s_nTransUnk1C = 0;
+    s_nTransUnk20 = 0;
+    s_nTransUnk24 = 0;
+    s_nTransUnk2C = 0;
+    s_nTransUnk30 = 0;
+    s_fTransSin = xglSin(s_fTransAngle);
+    if ((D_00338690[0] & 1) == 0) {
+        s_fTransAngle += s_fTransAngleStep;
+    }
+    xglMatrixUnit(aMtx);
+    sceVif1PkCnt(s_pPacket, 0);
+    sceVif1PkOpenUpkCode(s_pPacket, 0x3EC, 0x6C, 1, 1);
+    sceVif1PkAddUpkData128N(s_pPacket, (u_int *)aMtx, 3);
+    sceVif1PkCloseUpkCode(s_pPacket);
+    s_nTransUnk40 = 1;
+    p = s_inTransMtx;
+    __asm__ __volatile__(
+        "sq $0, 0x0(%0)\n sq $0, 0x10(%0)\n"
+        "sq $0, 0x20(%0)\n sq $0, 0x30(%0)"
+        : : "r"(p) : "memory");
+    fOne = 1.0f;
+    p[3].f[0] = fOne;
+    p[3].f[3] = fOne;
+    p[3].f[2] = fOne;
+    p[3].f[1] = fOne;
 }

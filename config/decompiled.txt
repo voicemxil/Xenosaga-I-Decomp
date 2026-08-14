@@ -1893,3 +1893,4 @@ srsSetLoadMode = 0x002E84C0, 0x8; // srsGet.c
 srsSetViewPath = 0x002E84D0, 0x20; // srsGet.c
 srsFileLoad = 0x002E9780, 0x14; // srsGet.c
 sefHitEffect = 0x002E7BF8, 0xC; // sef.c
+set_circle_shadow_ratio = 0x00230FA0, 0x84; // nmlModel.c
