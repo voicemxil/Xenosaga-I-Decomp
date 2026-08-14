@@ -160,6 +160,69 @@ int xglCdStreamReadRingCore(void *pStr)
     return StreamReadRingCoreNormal(pStr);
 }
 
+extern char loaded_overlay;
+extern u_char ArcHeader[];
+extern u_char system_cnf[];
+int sceCdInit(int nMode);
+int sceCdMmode(int nMedia);
+int sceCdReadDvdDualInfo(int *pOnDual);
+void xglHddActivate(int nArg);
+int xglHddMount(void);
+int xglCdReadFile(char *pName, u_int nAddr, int nOfs, int nSize);
+
+/* Bring up the CD/DVD subsystem: reset state, note dual-layer media,
+ * invalidate the archive-header slots, read system.cnf into the work
+ * buffer and mirror it, then mount the HDD and archive tables.
+ * Register shape: pArc/nM1 need the zero-code tied passthroughs while
+ * nTwo/nDualByte only pin (asm forms there push the lbu below the
+ * lui/lw pair); ArcHeader store order back-solved to 72,24,48,0. */
+void xglCdInitial(void)
+{
+    u_char *p;
+    u_char *pSrc;
+    u_int nAddr;
+    register u_char *pArc __asm__("$3");
+    register int nM1 __asm__("$2");
+    register int nDualByte __asm__("$9");
+    register int nTwo __asm__("$10");
+    u_char *pDst;
+    int i;
+    int nDual;
+
+    p = (u_char *)&LW;
+    p[49] = 0;
+    p[50] = 0;
+    p[51] = 0;
+    p[52] = 0;
+    p[28] = 0;
+    p[29] = 0;
+    sceCdInit(0);
+    sceCdMmode(2);
+    xglCdReset();
+    nDual = 0;
+    sceCdReadDvdDualInfo(&nDual);
+    nTwo = 2;
+    nDualByte = *(u_char *)&nDual;
+    p[51] = nDualByte;
+    nAddr = WorkEnd;
+    __asm__("" : "=r"(pArc) : "0"(ArcHeader));
+    __asm__("" : "=r"(nM1) : "0"(-1));
+    pArc[72] = nM1;
+    loaded_overlay = nTwo;
+    pArc[24] = nM1;
+    pArc[48] = nM1;
+    pArc[0] = nM1;
+    pDst = system_cnf;
+    xglCdReadFile("system.cnf", nAddr, 0, 1);
+    pSrc = (u_char *)nAddr;
+    for (i = 79; i >= 0; i--) {
+        *pDst++ = *pSrc++;
+    }
+    xglHddActivate(256);
+    xglHddMount();
+    xglCdArcInit();
+}
+
 /* Probe the archive table using the reserved work area */
 int xglCdArcCheck(void)
 {

@@ -63,7 +63,19 @@ extern unsigned short D_00491676[];   /* cumulative days before month m */
  * one extra reload word (176 vs 172 bytes) and hoists the month sltiu
  * from its late slot up into the load block; the closest pinned shape
  * still shifts every word after [5] by one. The rotation is an RA
- * priority artifact pins cannot reproduce without changing code. */
+ * priority artifact pins cannot reproduce without changing code.
+ * Priority-lever hunt (coordinator directive): "+r" empty-asm touches
+ * to inflate REG_N_REFS regress to 35-42d (gcc 2.96 sched treats every
+ * ASM_OPERANDS as a barrier, splitting the compound chains); statement
+ * reorders, merged/split assignments and ref-count changes ALL produce
+ * byte-identical 32d output -- combine canonicalizes the arithmetic DAG
+ * before RA, so user-variable granularity does not survive to the
+ * allocator and no source spelling reaches the tie-break. Distinction
+ * for the rotation family: rotations rooted in ADDRESS/COPY pseudos
+ * (xglDmaMFIFOSetup, xglSoundStreamMute, xglMakeSePacket, xglMcRequest)
+ * are solvable with the zero-code tied passthrough because the pinned
+ * point is a real materialization; rotations inside a pure arithmetic
+ * chain (here, xglMatrixRotV) are not reachable from source. */
 /* Convert a calendar date to seconds since 2000-01-01 */
 unsigned int xglClockDayTime2UInt(XGLDAYTIME *pTime)
 {
