@@ -1169,3 +1169,331 @@ int MenuShionMwsCheck(void)
     }
     return dataEvtBoxChk(10) != 0;
 }
+
+/* --- Tag/para name tables (function-local statics in the original TU) --- */
+extern void *tag_name_3[] __asm__("tag_name.3");
+extern void *para_name_4[] __asm__("para_name.4");
+extern void *para_name2_5[] __asm__("para_name2.5");
+
+/* Return the status-tag name string for one tag index */
+void *MenuTagTextGet(int nIdx)
+{
+    return tag_name_3[nIdx];
+}
+
+/* Return the primary parameter-name string for one parameter index */
+void *MenuParaNameGet(int nIdx)
+{
+    return para_name_4[nIdx];
+}
+
+/* Return the secondary parameter-name string for one parameter index */
+void *MenuParaNameGet2(int nIdx)
+{
+    return para_name2_5[nIdx];
+}
+
+/* Ask whether a technique's wait-up slot has already been taken */
+int MenuTecWaitLimitCheck(int nId, int nWait)
+{
+    unsigned char *pSave;
+
+    pSave = (unsigned char *)MenuTecSaveDataGet(nId);
+    if (nWait < 0) {
+        return 0;
+    }
+    return *(unsigned char *)(nWait + (int)pSave + 16) != 0;
+}
+
+/* Ask whether a technique's speed-up slot is still unclaimed */
+int MenuTecSpeedLimitCheck(int nId, int nSpeed)
+{
+    unsigned char *pSave;
+
+    pSave = (unsigned char *)MenuTecSaveDataGet(nId);
+    if (nSpeed < 0) {
+        return 0;
+    }
+    return pSave[nSpeed + 8] != 1;
+}
+
+/* Fetch the point cost of a technique's next speed-up step */
+int MenuTecNextSpeedPointGet(int nId, int nSpeed)
+{
+    char *pData;
+
+    pData = (char *)MenuTecDataGet(nId);
+    if (nSpeed < 0) {
+        return 0;
+    }
+    return *(unsigned short *)(pData + nSpeed * 2 + 0x20);
+}
+
+/* Fetch the point cost of a technique's next wait-up step */
+int MenuTecNextWaitPointGet(int nId, int nWait)
+{
+    char *pData;
+
+    pData = (char *)MenuTecDataGet(nId);
+    if (nWait < 0) {
+        return 0;
+    }
+    return *(unsigned short *)(pData + nWait * 2 + 0x30);
+}
+
+/* --- Config "taiki" (waiting) slot cache --- */
+extern int MenuCfTaiki[8];
+extern char sRender[];
+
+/* Pop the 8 saved "taiki" (waiting) slots back into the render work block */
+void MenuCfTaikiPop(void)
+{
+    int i;
+
+    for (i = 0; i < 8; i++) {
+        *(int *)(sRender + 0x24 + i * 4) = MenuCfTaiki[i];
+    }
+}
+
+/* --- Model menu-motion resource pointer --- */
+extern void *D_0036D5C8[];
+
+/* Return the menu-motion resource pointer when the model state and flag allow it */
+void *MenuModelMenuMotionGet(void)
+{
+    void *p;
+
+    p = 0;
+    if (MenuModelMenuMotionCheck() == 1) {
+        if (MenuModelFlag & 2) {
+            p = D_0036D5C8[0];
+        }
+    }
+    return p;
+}
+
+extern void MenuModelDrawTypeSet(void *, int);
+
+/* Apply a draw type to the actor behind one of a model's weapon slots */
+void MenuModelWeaponOpen(char *pModel, int nType, int nIdx)
+{
+    char *pWeapon;
+    char *pActor;
+
+    if (pModel == 0) {
+        return;
+    }
+    pWeapon = *(char **)((nIdx << 2) + (int)pModel + 0x34);
+    if (pWeapon == 0) {
+        return;
+    }
+    pActor = *(char **)(pWeapon + 0x20);
+    if (pActor == 0) {
+        return;
+    }
+    MenuModelDrawTypeSet(pActor, nType);
+}
+
+/* --- Background task plumbing --- */
+extern unsigned char MenuBgRgba;   /* r; g/b bytes follow at +1/+2 */
+extern int MenuBgTask;
+extern void endBackTexDraw(unsigned char *);
+
+/* Fade the background tint toward black, then run the background task and z-clear */
+void MenuBgTaskMain(void)
+{
+    unsigned char *p;
+    unsigned char v;
+
+    p = (unsigned char *)(int)&MenuBgRgba;
+    v = *p;
+    if (v != 0) {
+        p[2] = v - 8;
+        MenuBgRgba = v - 8;
+        p[1] = v - 8;
+    }
+    endBackTexDraw(p);
+    xglTaskExecute(MenuBgTask);
+    MenuModelDirectSendZClear();
+}
+
+/* Remap the three dual-wield right-hand weapon ids onto their left-hand pair */
+int MenuRWeaponCheck2(int nId)
+{
+    switch (nId) {
+    case 0x70:
+        nId = 0x5B;
+        break;
+    case 0x71:
+        nId = 0x5C;
+        break;
+    case 0x72:
+        nId = 0x5E;
+        break;
+    }
+    return nId;
+}
+
+/* --- Model resource-request table --- */
+typedef struct {
+    unsigned short id;         /* 0x00 */
+    short pad02;
+    void *pData;               /* 0x04 */
+    void *pArg;                /* 0x08 */
+} MODELRESENT;
+typedef struct {
+    int f0;                    /* 0x00 */
+    int f4;                    /* 0x04 */
+    MODELRESENT ent[16];       /* 0x08 */
+    int fC8;                   /* 0xC8 */
+} MODELRES;
+extern MODELRES MenuModelResourceState;
+
+/* Clear every model resource-request slot and the table header */
+void MenuModelResourceInit(void)
+{
+    MODELRES *w;
+    int i;
+
+    w = &MenuModelResourceState;
+    for (i = 0; i < 16; i++) {
+        w->ent[i].pData = 0;
+        w->ent[i].id = 0;
+        w->ent[i].pArg = 0;
+    }
+    w->f4 = 0;
+    w->fC8 = 0;
+    w->f0 = 0;
+}
+
+/* Queue a model resource request into the first free slot (slot 0 is reserved) */
+void MenuModelResourceRequest(void *pData, unsigned short nId, void *pArg)
+{
+    int i;
+
+    for (i = 1; i < 16; i++) {
+        if (MenuModelResourceState.ent[i].pData == 0) {
+            MenuModelResourceState.ent[i].pData = pData;
+            MenuModelResourceState.ent[i].id = nId;
+            MenuModelResourceState.ent[i].pArg = pArg;
+            return;
+        }
+    }
+}
+
+/* --- Model memory-slot table --- */
+typedef struct {
+    unsigned char used;        /* 0x00 */
+    unsigned char id;          /* 0x01 */
+    char pad02[26];
+} MODELMEMENT;                 /* 0x1C bytes */
+typedef struct {
+    int f0;                    /* 0x00 */
+    void *f4;                  /* 0x04 */
+    void *f8;                  /* 0x08 */
+    MODELMEMENT ent[16];       /* 0x0C */
+} MODELMEM;
+
+/* Find the free model memory slot already tagged with the given id */
+MODELMEMENT *MenuModelMemoryGet(int nArg, int nId)
+{
+    unsigned char *q;
+    int i;
+
+    for (i = 0; i < 16; i++) {
+        q = (unsigned char *)MenuModelMemoryState + i * 28;
+        if (q[12] == 0) {
+            if (q[13] == nId) {
+                return (MODELMEMENT *)((unsigned char *)MenuModelMemoryState + i * 28 + 12);
+            }
+        }
+    }
+    return 0;
+}
+
+/* Reset the model memory table and record its heap bounds */
+void MenuModelMemoryInit(void *pTop, void *pEnd)
+{
+    MODELMEM *w;
+
+    w = (MODELMEM *)MenuModelMemoryState;
+    memset(w, 0, 0x1CC);
+    w->f4 = pTop;
+    w->f8 = pEnd;
+    w->f0 = -1;
+}
+
+extern int xglFontLoad(int, void *);
+
+/* Load (or reload) the menu font, optionally with the shared load callback */
+void MenuFontLoad(int nFlag, int nCallback)
+{
+    static int original_font_no;
+    void *pFunc;
+
+    pFunc = 0;
+    if (nCallback != 0) {
+        pFunc = &menuCallback;
+    }
+    if (nFlag != 0) {
+        original_font_no = xglFontLoad(1, pFunc);
+    } else {
+        xglFontLoad(original_font_no, pFunc);
+    }
+}
+
+extern int xglTaskInitial(int, int, int);
+
+/* Align the model heap, reset the model state and create the model task */
+int MenuModelInit(int nMemory)
+{
+    int nTask;
+
+    nTask = (nMemory + 15) & ~15;
+    MenuModelTask = nTask;
+    MenuModelFlag = 0;
+    nTask = xglTaskInitial(nTask, 32, 0);
+    MenuModelResourceInit();
+    MenuModelSubWindowinit();
+    return nTask;
+}
+
+extern void nmlModelSetTransparency(float);
+extern void nmlModelSetToumei(int);
+extern void nmlModelSetZwrite(int);
+
+typedef struct {
+    char pad0[0x120];
+    float alpha;               /* 0x120 */
+} ALPHAOBJ;
+
+/* Push a model's per-object alpha into the renderer when it is translucent */
+void MenuModelAlphaDraw(ALPHAOBJ *p)
+{
+    float a;
+
+    a = p->alpha;
+    if (a < 1.0f) {
+        nmlModelSetTransparency(a);
+        nmlModelSetToumei(1);
+        nmlModelSetZwrite(1);
+    }
+}
+
+/* Count how many of a character's six technique slots hold the given technique */
+int MenuTecEquipCheck(unsigned short nChr, unsigned short nTec)
+{
+    short *p;
+    int nCount;
+    int i;
+
+    p = (short *)((char *)func_A191C0_2(nChr) + 0x82);
+    nCount = 0;
+    for (i = 5; i >= 0; i--) {
+        if (*p == nTec) {
+            nCount++;
+        }
+        p++;
+    }
+    return nCount;
+}
