@@ -1941,3 +1941,4 @@ TMENU_addItem = 0x0025F2C8, 0x144; // TMENU.c
 MenuAgwsListMake_Gun = 0x0029AFE0, 0x11C; // Menu.c
 MenuAgwsListMake_Acc = 0x0029B100, 0x124; // Menu.c
 MenuAgwsListMake_Pilot = 0x0029B228, 0x14C; // Menu.c
+PauseMenu = 0x002461C8, 0x140; // tskMenuPause.c
