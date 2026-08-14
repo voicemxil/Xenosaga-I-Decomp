@@ -87,6 +87,15 @@ def cc_for(name):
 # this is a lone -G threshold difference, not a compiler-family swap.
 FILE_CFLAGS_OVERRIDE = {
     "libm.c": "-O2 -G0",
+    # libgcc2 64-bit division TUs: Sony built libgcc with -mlong32 (long is
+    # 32-bit), which keeps __ll_B's `1L << 16` in SImode -- plain `sll`
+    # instead of the canonicalizing dsll32/dsra32 pair. All four functions
+    # match byte-exactly with this single extra flag; without it each one
+    # is ~300 diff words. Confirmed by flag sweep 2026-08-14.
+    "_divdi3.c": "-O2 -G8 -mlong32",
+    "_moddi3.c": "-O2 -G8 -mlong32",
+    "_udivdi3.c": "-O2 -G8 -mlong32",
+    "_umoddi3.c": "-O2 -G8 -mlong32",
 }
 
 

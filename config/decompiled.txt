@@ -1608,3 +1608,8 @@ __pack_d = 0x0032DC88, 0x118; // fpbit.c
 
 strstr = 0x00330220, 0x84; // newlib_str.c
 strrchr = 0x003301D0, 0x50; // newlib_str.c
+
+__divdi3 = 0x00329FB0, 0x694; // _divdi3
+__moddi3 = 0x0032A648, 0x690; // _moddi3
+__udivdi3 = 0x0032ACD8, 0x57C; // _udivdi3
+__umoddi3 = 0x0032B258, 0x568; // _umoddi3
