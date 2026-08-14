@@ -1706,3 +1706,6 @@ __register_frame_info_table = 0x0032CD88, 0x68; // gcc_frame
 add_fdes = 0x0032CF40, 0x8C; // gcc_frame
 search_fdes = 0x0032CFD0, 0x58; // gcc_frame
 __main = 0x0032BB50, 0x38; // _main
+__make_dp = 0x0032C4B8, 0x2C; // fpbit_df
+dptoul = 0x0032C540, 0xA0; // fpbit_df
+__make_fp = 0x0032DC58, 0x2C; // fpbit_sf
