@@ -13,6 +13,7 @@ extern "C" {
 
 #include "_ansi.h"
 #include <sys/reent.h>
+#include <sys/types.h>
 
 #define __need_size_t
 #include <stddef.h>
@@ -71,6 +72,7 @@ const char  *_EXFUN(strsignal, (int __signo));
 #endif
 int     _EXFUN(strtosigno, (const char *__name));
 #endif
+void	 _EXFUN(swab,(const void *, void *, ssize_t));
 
 /* These function names are used on Windows and perhaps other systems.  */
 #ifndef strcmpi

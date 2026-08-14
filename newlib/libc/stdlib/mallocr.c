@@ -3198,7 +3198,7 @@ Void_t* cALLOc(RARG n, elem_size) RDECL size_t n; size_t elem_size;
 
 #endif /* DEFINE_CALLOC */
 
-#if defined(DEFINE_CFREE) && !defined(__CYGWIN__)
+#ifdef DEFINE_CFREE
 
 /*
  

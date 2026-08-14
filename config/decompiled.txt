@@ -1667,3 +1667,10 @@ _d2b = 0x00337180, 0x184; // newlib_mprec
 strtodf = 0x003311E8, 0x28; // newlib_strtod
 _strtoul_r = 0x003377F8, 0x22C; // newlib_strtoul
 _strtol_r = 0x00331210, 0x238; // libc.c
+
+__svfscanf = 0x00332EF0, 0xC8C; // newlib_vfscanf
+__sprint = 0x00331478, 0x48; // newlib_vfprintf
+__sbprintf = 0x003314C0, 0xB4; // newlib_vfprintf
+vfprintf = 0x00331578, 0x74; // newlib_vfprintf
+cvt = 0x00332C50, 0x1C0; // newlib_vfprintf
+exponent = 0x00332E10, 0xDC; // newlib_vfprintf
