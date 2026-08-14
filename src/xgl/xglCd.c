@@ -151,6 +151,69 @@ int xglCdSync(void)
     return LW.nStatus != 0;
 }
 
+extern unsigned char loaded_overlay;
+extern char arcfileaddr[];
+extern char D_00491708[];
+int sceSifLoadElf(char *pName, void *pData);
+int FlushCache(int nMode);
+
+/* TODO: near-miss (~4 real diffs in a 1-word length shift). Structure,
+ * strings, both copy loops and the div digits all line up; the residue
+ * is one scheduling nop the original carries before the first copy
+ * loop's bottom bnez (ours fills tighter, 60 vs 61 words) plus the
+ * entry `move t0,s0` sitting after the sll instead of after the lbu.
+ * No FILE_FIX_FLAGS entry exists for xglCd.c to scope a slot-nop fix. */
+/* Load the numbered engine overlay ELF ("OV%02d" + arcfileaddr suffix
+ * appended to the cdrom0 prefix) unless it is already resident */
+void xglCdLoadOverlay(int nNo)
+{
+    char aData[16];
+    char aBuf[256];
+    register u_char *pSrc __asm__("$5");
+    char *pDst;
+    register int c __asm__("$2");
+
+    if (nNo != loaded_overlay) {
+        loaded_overlay = nNo;
+        pSrc = (u_char *)D_00491708;
+        c = *pSrc;
+        pDst = aBuf;
+        __asm__("" : "=r"(c) : "0"(c));
+        for (;;) {
+            *pDst = c;
+            if ((c << 24) == 0) {
+                break;
+            }
+            pSrc++;
+            pDst++;
+            c = *pSrc;
+            __asm__("" : "=r"(c) : "0"(c));
+        }
+        pDst[1] = 'V';
+        pDst[0] = 'O';
+        pDst[2] = nNo / 10 + 48;
+        pDst[3] = nNo % 10 + 48;
+        pDst += 4;
+        pSrc = (u_char *)arcfileaddr;
+        for (;;) {
+            c = *pSrc;
+            __asm__("" : "=r"(c) : "0"(c));
+            *pDst = c;
+            if ((c << 24) == 0) {
+                break;
+            }
+            pSrc++;
+            pDst++;
+        }
+        FlushCache(0);
+        FlushCache(2);
+        sceSifLoadElf(aBuf, aData);
+        FlushCache(0);
+        FlushCache(2);
+    }
+}
+
+
 int StreamReadRingCoreSub(XGLCDSTREAM *pStr, char *pBuf, int nSectors);
 
 /* Blocking stream read: pull whole sectors through the ring core, track
@@ -189,7 +252,6 @@ int xglCdStreamReadRingCore(void *pStr)
     return StreamReadRingCoreNormal(pStr);
 }
 
-extern char loaded_overlay;
 extern u_char ArcHeader[];
 extern u_char system_cnf[];
 int sceCdInit(int nMode);
