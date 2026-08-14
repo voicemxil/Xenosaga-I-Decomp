@@ -382,16 +382,14 @@ int nmlModelGetFadeLevel(void)
     return level;
 }
 
-/* Copy the global position into pOut, forcing w = 1.0 */
-/* TODO: near-miss (LOGIC, 5 diffs) -- gcc 2.96 schedules the lq load ahead
- * of the two lui address computations regardless of source statement order;
- * the original keeps both lui's together before the load. Every natural
- * ordering tried gives the same schedule -- looks like a scheduler
- * tie-break, not a source issue. See nmlModelSetShadowVec/MulColor/FogCol/
- * GlobalFogCol below for the same wall on TI-mode lq/sq copies. */
+/* Copy the global position into pOut, forcing w = 1.0.  The lq/sq pair
+ * is inline asm: compiled TI copies always hoist the lq above the two
+ * address lui's; an asm block with the address as an operand pins the
+ * original order (same trick for the other lq/sq copies below). */
 void nmlModelGetGblPosition(void *pOut)
 {
-    ((VEC4 *)pOut)->q = s_inGblPos.q;
+    __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
+        : : "r"(pOut), "r"(&s_inGblPos) : "$2", "memory");
     ((float *)pOut)[3] = 1.0f;
 }
 
@@ -481,11 +479,10 @@ void nmlModelSetShadowHeight(float height)
 }
 
 /* Set the shadow direction vector */
-/* TODO: near-miss (LOGIC, 5 diffs) -- same TI lq/sq scheduling wall as
- * nmlModelGetGblPosition. */
 void nmlModelSetShadowVec(void *vec)
 {
-    s_inShadowVec.q = ((VEC4 *)vec)->q;
+    __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
+        : : "r"(&s_inShadowVec), "r"(vec) : "$2", "memory");
     s_nShadowVec = 1;
 }
 
@@ -647,17 +644,17 @@ void nmlModelSetMatrix(void *matrix)
 }
 
 /* Copy a multiplier color into the layout (aFogDist overlay) */
-/* TODO: near-miss (LOGIC, 5 diffs) -- same TI lq/sq scheduling wall. */
 void nmlModelSetMulColor(void *color)
 {
-    ((VEC4 *)&s_inLayout.aFogDist[12])->q = ((VEC4 *)color)->q;
+    __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)\n nop"
+        : : "r"(&s_inLayout.aFogDist[12]), "r"(color) : "$2", "memory");
 }
 
 /* Set the fog color for the current model */
-/* TODO: near-miss (LENGTH, 9 diffs) -- same TI lq/sq scheduling wall. */
 void nmlModelSetFogCol(void *color)
 {
-    s_inLayout.uFogCol1.q = ((VEC4 *)color)->q;
+    __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
+        : : "r"(&s_inLayout.uFogCol1), "r"(color) : "$2", "memory");
     s_inLayout.nStatus |= 0x2;
 }
 
@@ -669,10 +666,10 @@ void nmlModelSetFogDist(float fNear, float fFar, float fMin, float fMax)
 }
 
 /* Set the global fog color */
-/* TODO: near-miss (LOGIC, 10 diffs) -- same TI lq/sq scheduling wall. */
 void nmlModelSetGlobalFogCol(void *color)
 {
-    s_inGblFogCol.q = ((VEC4 *)color)->q;
+    __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
+        : : "r"(&s_inGblFogCol), "r"(color) : "$2", "memory");
     s_inLayout.nStatus |= 0x1000000;
 }
 
@@ -1047,17 +1044,18 @@ void xglVectorScaleXYZ(void *pDst, void *pSrc, float fScale);
 void nmlModelSetGlobalPointLightReset(void)
 {
     s_inLayout.nStatus &= ~0x2000000;
-    s_inGblPointC[0].q = 0;
-    s_inGblPointC[1].q = 0;
-    s_inGblPointC[2].q = 0;
-    s_inGblPointC[3].q = 0;
+    __asm__ __volatile__(
+        "sq $0, 0x0(%0)\n sq $0, 0x10(%0)\n"
+        "sq $0, 0x20(%0)\n sq $0, 0x30(%0)\n nop"
+        : : "r"(s_inGblPointC) : "memory");
 }
 
 /* Set one global point-light position */
 void nmlModelSetGlobalPointLightPos(int no, void *pPos)
 {
     if ((unsigned int)no < 3U) {
-        s_inGblPointP[no].q = ((VEC4 *)pPos)->q;
+        __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
+            : : "r"(&s_inGblPointP[no]), "r"(pPos) : "$2", "memory");
         s_inLayout.nStatus |= 0x2000000;
     }
 }
@@ -1066,7 +1064,7 @@ void nmlModelSetGlobalPointLightPos(int no, void *pPos)
 void nmlModelSetGlobalPointLightCol(int no, void *pCol)
 {
     if ((unsigned int)no < 3U) {
-        xglVectorScaleXYZ(&s_inGblPointC[no], pCol, 255.0f);
+        xglVectorScaleXYZ(&s_inGblPointC[no], pCol, 128.0f);
         s_inLayout.nStatus |= 0x2000000;
     }
 }
@@ -1075,8 +1073,9 @@ void nmlModelSetGlobalPointLightCol(int no, void *pCol)
 void nmlModelSetGlobalPointLight(int no, void *pPos, void *pCol)
 {
     if ((unsigned int)no < 3U) {
-        s_inGblPointP[no].q = ((VEC4 *)pPos)->q;
-        xglVectorScaleXYZ(&s_inGblPointC[no], pCol, 255.0f);
+        __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
+            : : "r"(&s_inGblPointP[no]), "r"(pPos) : "$2", "memory");
+        xglVectorScaleXYZ(&s_inGblPointC[no], pCol, 128.0f);
         s_inLayout.nStatus |= 0x2000000;
     }
 }
@@ -1084,9 +1083,15 @@ void nmlModelSetGlobalPointLight(int no, void *pPos, void *pCol)
 /* Set one per-model point light (position and color, x255 scale) */
 void nmlModelSetPointLight(int no, void *pPos, void *pCol)
 {
+    VEC4 *pP;
+    VEC4 *pC;
+
     if ((unsigned int)no < 3U) {
-        s_inLayout.aPointP[no].q = ((VEC4 *)pPos)->q;
-        xglVectorScaleXYZ(&s_inLayout.aPointC[no], pCol, 255.0f);
+        pP = s_inLayout.aPointP;
+        pC = s_inLayout.aPointC;
+        __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
+            : : "r"(&pP[no]), "r"(pPos) : "$2", "memory");
+        xglVectorScaleXYZ(&pC[no], pCol, 128.0f);
         s_inLayout.nStatus |= 0x1000;
     }
 }
@@ -1094,18 +1099,23 @@ void nmlModelSetPointLight(int no, void *pPos, void *pCol)
 /* Copy the parallel-light direction and color blocks into the layout */
 void nmlModelSetLight(void *pDir, void *pCol)
 {
-    TI *d;
+    VEC4 *p;
+    VEC4 *q;
 
-    d = (TI *)s_inLayout.aLightP;
-    d[0] = ((TI *)pDir)[0];
-    d[1] = ((TI *)pDir)[1];
-    d[2] = ((TI *)pDir)[2];
-    d[3] = ((TI *)pDir)[3];
-    d = (TI *)s_inLayout.aLightC;
-    d[0] = ((TI *)pCol)[0];
-    d[1] = ((TI *)pCol)[1];
-    d[2] = ((TI *)pCol)[2];
-    d[3] = ((TI *)pCol)[3];
+    p = s_inLayout.aLightP;
+    __asm__ __volatile__(
+        "lq $2, 0x0(%1)\n sq $2, 0x0(%0)\n"
+        "lq $2, 0x10(%1)\n sq $2, 0x10(%0)\n"
+        "lq $2, 0x20(%1)\n sq $2, 0x20(%0)\n"
+        "lq $2, 0x30(%1)\n sq $2, 0x30(%0)"
+        : : "r"(p), "r"(pDir) : "$2", "memory");
+    q = s_inLayout.aLightC;
+    __asm__ __volatile__(
+        "lq $2, 0x0(%1)\n sq $2, 0x0(%0)\n"
+        "lq $2, 0x10(%1)\n sq $2, 0x10(%0)\n"
+        "lq $2, 0x20(%1)\n sq $2, 0x20(%0)\n"
+        "lq $2, 0x30(%1)\n sq $2, 0x30(%0)"
+        : : "r"(q), "r"(pCol) : "$2", "memory");
     s_inLayout.nStatus |= 0x10;
 }
 
@@ -1123,13 +1133,15 @@ extern float D_004A940C[];
 /* Set the model place matrix and cache its inverse */
 void nmlModelSetPlace(void *pMtx)
 {
-    TI *d;
+    VEC4 *p;
 
-    d = (TI *)s_inLayout.inPlace;
-    d[0] = ((TI *)pMtx)[0];
-    d[1] = ((TI *)pMtx)[1];
-    d[2] = ((TI *)pMtx)[2];
-    d[3] = ((TI *)pMtx)[3];
+    p = s_inLayout.inPlace;
+    __asm__ __volatile__(
+        "lq $2, 0x0(%1)\n sq $2, 0x0(%0)\n"
+        "lq $2, 0x10(%1)\n sq $2, 0x10(%0)\n"
+        "lq $2, 0x20(%1)\n sq $2, 0x20(%0)\n"
+        "lq $2, 0x30(%1)\n sq $2, 0x30(%0)"
+        : : "r"(p), "r"(pMtx) : "$2", "memory");
     xglMatrixInverse(s_inLayout.inPlaceInv, pMtx);
     s_inLayout.nStatus |= 0x1;
 }
@@ -1138,25 +1150,29 @@ void nmlModelSetPlace(void *pMtx)
  * (min 1.0) and recording that maximum */
 void nmlModelSetScale(void *pScale)
 {
+    VEC4 *p;
     float fMax;
     float f;
+    float fOne;
 
-    s_inScale.q = ((VEC4 *)pScale)->q;
-    fMax = s_inScale.f[0];
-    f = s_inScale.f[1];
+    p = &s_inScale;
+    __asm__ __volatile__("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
+        : : "r"(p), "r"(pScale) : "$2", "memory");
+    fMax = p->f[0];
+    f = p->f[1];
+    fOne = 1.0f;
     if (fMax < f) {
-        s_inScale.f[0] = f;
+        p->f[0] = f;
         fMax = f;
     }
-    f = s_inScale.f[2];
+    f = p->f[2];
     if (fMax < f) {
-        s_inScale.f[0] = f;
+        p->f[0] = f;
         fMax = f;
     }
-    f = 1.0f;
-    if (fMax < f) {
-        s_inScale.f[0] = f;
-        fMax = f;
+    if (fMax < fOne) {
+        p->f[0] = fOne;
+        fMax = fOne;
     }
     D_004A940C[0] = fMax;
 }
@@ -1173,9 +1189,13 @@ void nmlModelSetTexOffset(void *pName, float u, float v)
 }
 
 /* Register a material-offset target by name with an offset vector */
+typedef struct {
+    char a[32];
+} NAMEBUF;
+
 void nmlModelSetMatOffset(void *pName, void *pOffset)
 {
-    memcpy(s_aMatName, pName, 32);
+    *(NAMEBUF *)s_aMatName = *(NAMEBUF *)pName;
     s_aMatName[31] = 0;
     s_inMatOffset.q = ((VEC4 *)pOffset)->q;
 }
@@ -1183,9 +1203,9 @@ void nmlModelSetMatOffset(void *pName, void *pOffset)
 /* Set the texture-map mode flags, alpha (clamped to [0,128]) and Z */
 void nmlModelSetTexMap(int nFlag, int nAlpha, float fZ)
 {
+    s_inLayout.nTexMapAlpha = nAlpha;
     s_inLayout.uTexMap.n = nFlag;
     s_inLayout.fTexMapZ = fZ;
-    s_inLayout.nTexMapAlpha = nAlpha;
     if (nAlpha < 0) {
         s_inLayout.nTexMapAlpha = 0;
     }
@@ -1230,12 +1250,14 @@ void nmlModelInit(void)
 void nmlModelInitPartsVisible(void *pData, int nVisible)
 {
     int i;
+    int *pTop;
     int *pOfs;
     char *q;
 
     if (nmlModelLexDataCheck(pData) == 0) {
         i = 0;
-        pOfs = (int *)((char *)pData + 0xB0);
+        pTop = (int *)((char *)pData + 0xB0);
+        pOfs = pTop;
         while (i < *(int *)((char *)pData + 0x44)) {
             q = (char *)pData + *pOfs++;
             if (nVisible != 0) {
