@@ -1859,3 +1859,7 @@ xglRotTransPersN = 0x00229AB0, 0xB8; // xglMatrix.c
 xglLightIntensityParallel = 0x0022ACF8, 0x24; // xglLight.c
 xglLightAngle = 0x0022AD60, 0x80; // xglLight.c
 xglMpeg2Close = 0x002226D0, 0x78; // xglMovie.c
+MenuListMake = 0x00291028, 0xC8; // Menu
+MenuSelectMove = 0x00274E08, 0xC4; // Menu
+MenuCharLeaderMask = 0x00291860, 0xD0; // Menu
+MenuTecListMake01 = 0x002B3138, 0x120; // Menu

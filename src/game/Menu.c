@@ -1480,8 +1480,13 @@ void MenuModelAlphaDraw(ALPHAOBJ *p)
     }
 }
 
-/* Count how many of a character's six technique slots hold the given technique */
-int MenuTecEquipCheck(unsigned short nChr, unsigned short nTec)
+/* Count how many of a character's six technique slots hold the given technique.
+   K&R-style definition on purpose: the original's callers pass the char/tec
+   bytes unnarrowed (raw lb/lh), which needs an unprototyped call; the callee
+   narrows both args itself (andi) exactly as the retail build does. */
+int MenuTecEquipCheck(nChr, nTec)
+unsigned short nChr;
+unsigned short nTec;
 {
     short *p;
     int nCount;
@@ -2094,17 +2099,17 @@ typedef struct {
 } MENUTECLISTENT;
 extern MWLIST *MenuListMake(int nIdx, int nType);
 
-/* TODO: near-miss (LENGTH, 38 orig vs 42 built) - the original calls
-   MenuTecEquipCheck without caller-side argument narrowing (lb/lh passed
-   raw), which needs an unprototyped (K&R) call; with the ANSI definition
-   in this TU the caller masks both args. Parked. */
+/* TODO: near-miss (REGISTER, 8 renames) - a clean $s0<->$s1 swap (p vs n).
+   The K&R MenuTecEquipCheck definition fixed the old LENGTH mismatch (callers
+   now pass lb/lh raw). The remaining swap survives declaration reorder and a
+   temp-copy of n; same irreducible allocator class as MenuTecWaitUp. */
 /* Build the technique list: per entry, count how often it is equipped */
 void MenuTecListMake00(void)
 {
+    int n;
     MENUTECLISTENT *p;
     int *pSort;
     MENUTECWORK *w;
-    int n;
     short nTec;
     int v;
 
@@ -2602,15 +2607,18 @@ loop:
             }
         }
         if (i != n) {
-            return 0;
+            goto ret0;
         }
-        return 1;
+        goto ret1;
     }
     p = func_A11108(nChr, buf1, buf2);
     if (p->h36 == p->h2) {
-        return 1;
+        goto ret1;
     }
+ret0:
     return 0;
+ret1:
+    return 1;
 }
 
 /* ================= Wave 3: mid-size Menu functions ================= */
@@ -2650,7 +2658,6 @@ MWLIST *MenuListMake(int nIdx, int nType)
     MWLIST *pList;
     int *pSort;
     void (*pFunc)(void *, int);
-    int v;
 
     pList = &mw_list[nIdx];
     p = (MENUTECLISTENT *)pList;
@@ -2660,17 +2667,15 @@ MWLIST *MenuListMake(int nIdx, int nType)
     } else {
         pFunc = subListMake00;
     }
-    v = *pSort;
-    while (v != 0) {
-        pFunc(p, v);
+    while (*pSort != 0) {
+        pFunc(p, *pSort);
         p++;
         pSort++;
-        v = *pSort;
     }
     p->f4 = -1;
     p->f0 = (int)msg_12;
-    p[1].f0 = 0;
     p->b8 = 0;
+    p[1].f0 = 0;
     return pList;
 }
 
@@ -2735,15 +2740,13 @@ void MenuSortChange(int nRow, int nType)
         } while (v != 0);
     }
     last = count - 1;
-    if (count == 0) {
-        return;
-    }
-    if (last <= 0) {
-        return;
-    }
-    for (i = 0; i < last; i++) {
-        for (j = i + 1; j < count; j++) {
-            pFunc(&base[i], &base[j]);
+    if (count != 0) {
+        if (last > 0) {
+            for (i = 0; i < last; i++) {
+                for (j = i + 1; j < count; j++) {
+                    pFunc(&base[i], &base[j]);
+                }
+            }
         }
     }
 }
@@ -2754,20 +2757,20 @@ int MenuParaNextPointGet(int nBase, int nType, int nNum)
     int base;
     int rate;
     int now;
-    int t;
     unsigned short total;
 
     base = MenuParaPtBaseGet(nBase, nType);
     rate = MenuParaPtRateGet(nBase, nType);
     now = MenuParaPtNowGet(nBase, nType);
-    if (nType == 0) {
-        t = now + nNum * 10;
-    } else if (nType == 1) {
-        t = now + nNum * 2;
+    if (nType != 0) {
+        if (nType != 1) {
+            total = now + nNum;
+        } else {
+            total = now + nNum * 2;
+        }
     } else {
-        t = now + nNum;
+        total = now + nNum * 10;
     }
-    total = t;
     if (nType != 0) {
         return base + rate * total / 99;
     }
@@ -2784,7 +2787,9 @@ void MenuTecTLevUp(int nId, int nLev)
     int nextPoint;
     unsigned char *q;
     int *pPt;
+    unsigned short *pSh;
     int v;
+    int m;
 
     idx = nId & 0xFFFF;
     pSave = (unsigned char *)MenuTecSaveDataGet(idx);
@@ -2794,10 +2799,12 @@ void MenuTecTLevUp(int nId, int nLev)
     }
     nextPoint = MenuTecNextTLevPointGet(nId, nLev);
     pPt = &p->fC;
+    pSh = (unsigned short *)(nLev * 12 + (int)pPt + 64);
     q = pSave + nLev;
     v = *q + 1;
     *q = v;
-    *(unsigned short *)(nLev * 12 + (int)pPt + 64) = (v & 0xFF) * 3 - 3;
+    m = v & 0xFF;
+    *pSh = m * 3 - 3;
     *pPt -= nextPoint;
 }
 
@@ -2829,56 +2836,71 @@ loop:
             }
         }
         if (i != n) {
-            return 0;
+            goto ret0;
         }
-        return 1;
+        goto ret1;
     }
     func_A191C0_2(nChr);
     p = func_A11108(nChr, buf1, buf2);
     if (p->h34 == p->h0) {
-        return 1;
+        goto ret1;
     }
+ret0:
     return 0;
+ret1:
+    return 1;
 }
 
 /* Move a selection index up/down from the pad, wrapping at the list bounds */
 int MenuSelectMove(int nSel, int nMax, int nFlag)
 {
+    MENUPADWORK *pad;
     int nMove;
 
     nMove = 0;
     if (nMax < 2) {
         return nSel;
     }
-    if (PadData.trig == 0x1000) {
+    pad = &PadData;
+    if (pad->trig == 0x1000) {
         if (nSel != 0) {
-            nMove = -1;
-        } else if (nFlag != 0) {
-            nMove = -1;
-        } else if (PadData.h32 == PadData.trig) {
-            nMove = -1;
+            goto up;
         }
+        if (nFlag != 0) {
+            goto up;
+        }
+        if (pad->h32 != pad->trig) {
+            goto second;
+        }
+up:
+        nMove = -1;
     }
-    if (PadData.trig == 0x4000) {
+second:
+    pad = &PadData;
+    if (pad->trig == 0x4000) {
         if (nSel != nMax - 1) {
-            nMove = 1;
-        } else if (nFlag != 0) {
-            nMove = 1;
-        } else if (PadData.h32 == PadData.trig) {
-            nMove = 1;
+            goto down;
         }
+        if (nFlag != 0) {
+            goto down;
+        }
+        if (pad->h32 != pad->trig) {
+            goto move;
+        }
+down:
+        nMove = 1;
     }
-    if (nMove == 0) {
-        return nSel;
+move:
+    if (nMove != 0) {
+        nSel = nSel + nMove;
+        if (nSel < 0) {
+            nSel = nMax - 1;
+        }
+        if (nMax - 1 < nSel) {
+            nSel = 0;
+        }
+        xglSoundEffectNormalID(3, 0);
     }
-    nSel = nSel + nMove;
-    if (nSel < 0) {
-        nSel = nMax - 1;
-    }
-    if (nMax - 1 < nSel) {
-        nSel = 0;
-    }
-    xglSoundEffectNormalID(3, 0);
     return nSel;
 }
 
@@ -2924,8 +2946,9 @@ int MenuCharLeaderMask(int nId)
     if (PartyAttackerCheck(nChr) == 0) {
         return 2;
     }
+    v = PartyLeaderCheck(nChr);
     nRet = 3;
-    if (PartyLeaderCheck(nChr) == 0) {
+    if (v == 0) {
         nRet = 0;
     }
     return nRet;
@@ -2941,6 +2964,12 @@ typedef struct {
 } TECRANGETBL;
 extern TECRANGETBL D_004D92E8;
 
+/* TODO: near-miss (LENGTH, 66 orig vs 67 built) - the original materializes
+   &MenuWork into caller-saved $a1 AFTER the table block copy and then does
+   `move s2,a1` entering the loop (a live-range split); ours constant-props
+   the address straight into $s2 and the scheduler hoists it above the copy.
+   Tried single-pointer, w2=w split, and direct-global precheck forms; the
+   split move appears unreachable while the address is a foldable constant. */
 /* Rebuild sort chain 0 from the current character's technique id range */
 void MenuTecSortSet00(void)
 {
@@ -2971,13 +3000,26 @@ void MenuTecSortSet00(void)
 extern unsigned char D_0036DC58[];
 extern unsigned char D_0036DC60[];
 
+/* TODO: near-miss (LENGTH, 68 orig vs ~70 built) - the retail build keeps the
+   precheck's &MenuWork in caller-saved $v0 and copies it into $s4 at loop
+   entry (move s4,v0), with matching loop-entry copies move s2,s0 (sort
+   walker) and move s3,a0 (counter, n itself living in $a0). Every form tried
+   (single pointer, split w/w2, direct-global precheck, repurposed-ptr like
+   MenuTecListMake01) either constant-props &MenuWork straight into the
+   callee-saved register or hoists it above the guard. The repurposed-ptr
+   lever fails here because phase 1 must NOT cross a call (in 01 it does).
+   Also: the per-iteration table addiu pair (a1/a2 from lui halves s8/s7)
+   gets fully hoisted in ours. Parked. */
 /* Refresh the per-entry enable byte of tec list 0 from type/trigger checks */
 void MenuTecListMake00_2(void)
 {
     MENUTECLISTENT *p;
     int *pSort;
+    int *pS;
     MENUTECWORK *w;
+    unsigned char *q;
     int n;
+    int cnt;
     int nFlag;
     int v;
     unsigned char t;
@@ -2985,66 +3027,75 @@ void MenuTecListMake00_2(void)
     p = (MENUTECLISTENT *)MenuListGet(0);
     pSort = MenuSortAddrGet(0);
     n = MenuSortCheck(0);
-    w = &MenuWork;
-    nFlag = w->b31 < 2;
+    nFlag = MenuWork.b31 < 2;
     if (n > 0) {
+        w = &MenuWork;
+        q = (unsigned char *)p + 8;
+        pS = pSort;
+        cnt = n;
         do {
-            v = MenuTecTypeCheck(w->bChr, *pSort);
+            v = MenuTecTypeCheck(w->bChr, *pS);
             if (v != nFlag && v != 1) {
-                p->b8 = 1;
+                *q = 1;
             } else {
                 t = (w->bChr != 7 ? D_0036DC58 : D_0036DC60)[w->b31];
-                if (t != MenuTecTrgCheck(*pSort)) {
-                    p->b8 = 1;
+                if (t != MenuTecTrgCheck(*pS)) {
+                    *q = 1;
                 } else {
-                    p->b8 = 0;
+                    *q = 0;
                 }
             }
-            n--;
-            p++;
-            pSort++;
-        } while (n != 0);
+            cnt--;
+            q += 12;
+            pS++;
+        } while (cnt != 0);
     }
 }
 
-/* Build tec list 0's equip counts and up-check enable bytes */
+/* Build tec list 0's equip counts and up-check enable bytes.
+   `ptr` deliberately starts as the MenuWork pointer and is repurposed as the
+   list walker at loop entry: the retail build reuses one register ($s0) for
+   both roles, with the loop's MenuWork pointer split off via a real copy. */
 void MenuTecListMake01(void)
 {
-    MENUTECWORK *w;
-    MENUTECLISTENT *p;
+    void *ptr;
+    MENUTECWORK *w2;
+    MENUTECLISTENT *p0;
     int *pSort;
     int n;
     signed char nKeepSel;
     signed char nKeep43;
     unsigned char c;
 
-    w = &MenuWork;
-    p = (MENUTECLISTENT *)MenuListGet(0);
+    ptr = &MenuWork;
+    p0 = (MENUTECLISTENT *)MenuListGet(0);
     pSort = MenuSortAddrGet(0);
     n = MenuSortCheck(0);
-    nKeep43 = w->b43;
-    nKeepSel = w->bSel;
+    nKeep43 = ((MENUTECWORK *)ptr)->b43;
+    nKeepSel = ((MENUTECWORK *)ptr)->bSel;
     MenuListMake(0, 0);
     if (n > 0) {
+        w2 = (MENUTECWORK *)ptr;
+        ptr = p0;
         do {
-            p->f4 = MenuTecEquipCheck(w->bChr, *(short *)pSort);
+            ((MENUTECLISTENT *)ptr)->f4 = MenuTecEquipCheck(w2->bChr, *(short *)pSort);
             c = *(unsigned char *)pSort;
             pSort++;
-            w->b43 = c;
-            w->bSel = BitToTecNo((signed char)c);
+            w2->b43 = c;
+            w2->bSel = BitToTecNo((signed char)c);
             if (MenuTecCharTLevUpCheck() != 0) {
-                p->b8 = 0;
+                ((MENUTECLISTENT *)ptr)->b8 = 0;
             } else if (MenuTecCharWaitUpCheck() != 0) {
-                p->b8 = 0;
-            } else if (MenuTecCharSpeedUpCheck() == 0) {
-                p->b8 = 1;
+                ((MENUTECLISTENT *)ptr)->b8 = 0;
+            } else if (MenuTecCharSpeedUpCheck() != 0) {
+                ((MENUTECLISTENT *)ptr)->b8 = 0;
             } else {
-                p->b8 = 0;
+                ((MENUTECLISTENT *)ptr)->b8 = 1;
             }
             n--;
-            p++;
+            ptr = (MENUTECLISTENT *)ptr + 1;
         } while (n != 0);
     }
-    w->bSel = nKeepSel;
-    w->b43 = nKeep43;
+    MenuWork.b43 = nKeep43;
+    MenuWork.bSel = nKeepSel;
 }
