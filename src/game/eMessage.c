@@ -730,6 +730,10 @@ void eMessageDraw()
 }
 
 void eMessageCat(const char* str);
+/* TODO: eMessageCat is 79d -- the original rotates the while loop
+ * (branch-to-test with an lb signed load at the body head) where our
+ * build emits a guarded straight-line form with lbu; needs loop
+ * restructuring, not operand tweaks. */
 void eMessageCpy(char* buf, const char* str)
 {
     MessageCpyEnd = buf;
