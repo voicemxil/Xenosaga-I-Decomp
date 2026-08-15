@@ -48,36 +48,46 @@ void subListMake01(SUB_LIST *list_, int id_)
     list->field_08 = 0;
 }
 
-/* TODO: near-match (2/13 words) - the child pointer is at data+8+index*4
-   (a 4-byte-stride pointer array, not index*20 as originally guessed; that
-   fix alone took this from 4 diffs to 2). Remaining 2 diffs are a pure
-   REGISTER tie-break (sll/addu land in $v0 vs $v1, in-place reuse in the
-   original vs a fresh reg here); pinning a fresh local to $2 regressed
-   the whole function (4 diffs, cascading register churn). Retried this
-   session with the pin+barrier idiom (PIN(unsigned int idx4, "$2") = index*4; asm("":"+r"(idx4));) on the index*4
-   sub-expression: this function is self-tail-recursive, and the barrier
-   defeated gcc's tail-call-to-loop transform entirely (9 diffs, shrank
-   to 0x2c bytes -- a structurally different, worse function). Reverted
-   immediately. Leave as-is; any fix here must not touch the recursive
-   call's argument evaluation. */
+/* The child pointer is at data+8+index*4 (a 4-byte-stride pointer array).
+   The last two diffs were a register tie-break: the original does the
+   sll/addu in place in $v0 and puts the index on the LEFT of the addu.
+   Both fall out of doing the address arithmetic in int, in steps, on one
+   reused variable -- writing it as pointer arithmetic makes gcc keep the
+   index in a fresh register and canonicalise the addu with the pointer
+   first. Do not reshape this back into `(char *)data + index * 4 + 8`, and
+   do not put a barrier on the index: this function is self-tail-recursive
+   and a barrier defeats gcc's tail-call-to-loop transform entirely. */
 void sub2JoutoYGet(void *data, float *result)
 {
-    unsigned short index = *(unsigned short *)((char *)data + 8);
+    int index = *(unsigned short *)((char *)data + 8);
 
     if (index != 0) {
-        sub2JoutoYGet(*(void **)((char *)data + index * 4 + 8), result);
+        index <<= 2;
+        index += (int)data;
+        sub2JoutoYGet(*(void **)(index + 8), result);
     } else {
         *result = *(float *)((char *)data + 0x24);
     }
 }
 
-/* TODO: near-match (LOGIC) - recovered count/entry predicate differs in
- * global/object representation and loop shape (8 instruction differences). */
+/* TODO: near-match (5 of 20 words, was 8). Pinning the loop bound to $a2 is
+ * what fixes the i/count role swap (gcc otherwise puts the counter in $a2
+ * and the bound in $a1, the mirror of the original). Do NOT also pin the
+ * counter to $a1: that regresses to 15.
+ * What is left: the original loads the byte into $a0, tests THAT for the
+ * loop guard, and only then copies it into $a2 (`move a2,a0`); we load
+ * straight into $a2, which frees a slot and lets the first `lw` float one
+ * instruction earlier. Tried: a separate n temp pinned to $a0 and copied
+ * into count (5, no change), LAUNDER or PASSTHRU between them (both grow
+ * the function to 22 words / 19 diffs), an explicit `if (n == 0) return 0;`
+ * guard ahead of the loop (25 words, 17 diffs) and the same with `<= 0`,
+ * and a while-loop shape (5, no change). */
 int subSeisanHissatuCheck00(void)
 {
+    PIN(int count, "$6");
     int i;
-    int count = (unsigned char)SeisanWork[6];
 
+    count = (unsigned char)SeisanWork[6];
     for (i = 0; i < count; i++) {
         if (*(int *)(SeisanResult + 0x38 + i * 0x3C) != 0) {
             return 0x50;
@@ -86,13 +96,24 @@ int subSeisanHissatuCheck00(void)
     return 0;
 }
 
-/* TODO: near-match (LOGIC) - recovered count/entry predicate differs in
- * global/object representation and loop shape (8 instruction differences). */
+/* TODO: near-match (5 of 20 words, was 8). Pinning the loop bound to $a2 is
+ * what fixes the i/count role swap (gcc otherwise puts the counter in $a2
+ * and the bound in $a1, the mirror of the original). Do NOT also pin the
+ * counter to $a1: that regresses to 15.
+ * What is left: the original loads the byte into $a0, tests THAT for the
+ * loop guard, and only then copies it into $a2 (`move a2,a0`); we load
+ * straight into $a2, which frees a slot and lets the first `lw` float one
+ * instruction earlier. Tried: a separate n temp pinned to $a0 and copied
+ * into count (5, no change), LAUNDER or PASSTHRU between them (both grow
+ * the function to 22 words / 19 diffs), an explicit `if (n == 0) return 0;`
+ * guard ahead of the loop (25 words, 17 diffs) and the same with `<= 0`,
+ * and a while-loop shape (5, no change). */
 int subSeisanHissatuCheck01(void)
 {
+    PIN(int count, "$6");
     int i;
-    int count = (unsigned char)SeisanWork[6];
 
+    count = (unsigned char)SeisanWork[6];
     for (i = 0; i < count; i++) {
         if (*(int *)(SeisanResult + 0x38 + i * 0x3C) >= 5) {
             return 0x58;

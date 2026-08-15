@@ -1,5 +1,7 @@
 /* Actor layer - creation, matrix/joint plumbing, motion update and draw passes */
 
+#include "matching.h"
+
 #include "game/actor.h"
 
 typedef struct {
@@ -306,23 +308,34 @@ int ACT_animCheckData(ACTOR *a)
 /* Advance the actor's motion and that of all of its children */
 void ACT_updateMotionCore(ACTOR *a, int nPause)
 {
-    /* TODO: near-miss - identical code, but $s1/$s2 (and the scratch $a0/$v0)
-       are swapped against the original */
+    /* TODO: near-miss, 3 of 54 words (was 17). Pinning the actor pointer to
+       $s1 is what carries the whole register assignment: without it gcc puts
+       the actor in $s2 and the loop counter in $s1, the mirror image of the
+       original, and every s-register reference differs. Do NOT also pin the
+       counter or pp -- pinning the counter to $s2 (which is where it lands
+       anyway) costs an extra instruction (55 words, 35 diffs), and pinning
+       pp to $v0 or $s0 wrecks the frame layout (49 diffs).
+       What is left: the &p->pChild base lives in $a0 for us and $v0 in the
+       original, so the two `move` copies out of it differ. Tried PASSTHRU
+       into a $v0-pinned alias (12 diffs), the reverse PASSTHRU (49),
+       declaring pp pinned to $v0 (49), and LAUNDER on pp (9). */
+    PIN(ACTOR *p, "$17");
     ACTOR **pp;
     int i;
 
-    if (a->pParent != 0) {
+    p = a;
+    if (p->pParent != 0) {
         return;
     }
-    ACT_updateMotionSub(a, nPause);
-    if (a->nChildNum > 0) {
-        pp = a->pChild;
-        if ((a->nFlags & 0x1000) == 0) {
-            for (i = 0; i < a->nChildNum; i++) {
+    ACT_updateMotionSub(p, nPause);
+    if (p->nChildNum > 0) {
+        pp = p->pChild;
+        if ((p->nFlags & 0x1000) == 0) {
+            for (i = 0; i < p->nChildNum; i++) {
                 ACT_updateMotionSub(pp[i], nPause);
             }
         } else {
-            for (i = 0; i < a->nChildNum; i++) {
+            for (i = 0; i < p->nChildNum; i++) {
                 pp[i]->nFlags |= 0x1000;
             }
         }
