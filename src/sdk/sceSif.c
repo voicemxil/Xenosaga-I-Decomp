@@ -1,68 +1,76 @@
 /* PS2 SDK sceSif (EE<->IOP SIF) low-level register/table accessors.
  *
- * These address a fixed low-memory SIF control block by raw numeric
- * constant (no ELF symbol backs it -- it is hardware/kernel-reserved
- * memory), so the base is materialized with lui+addiu. The modern
- * assembler's constant synthesis for a bare (int*)0x... cast always
- * picks lui+ori instead (verified: every C-level phrasing of the
- * constant did, including la-macro-shaped ones), so the body is
- * written as inline asm reproducing the exact original instructions,
- * the same technique kernel.c uses for the syscall stubs.
+ * These reach a fixed low-memory SIF control block. The block is named
+ * in config/symbol_addrs.txt (`soft_reg` at 0x00991A00 for the eight
+ * software registers, `_data_table_009918D8` for the command-buffer
+ * table), so referencing it by name gets the linker's ordinary %hi/%lo
+ * relocation and the original's lui+addiu -- where a numeric
+ * `(int *)0x00991A00` cast gets lui+ori. That is the whole reason these
+ * five used to be inline-asm bodies; see CONTRIBUTING.md, "Raw
+ * addresses".
  */
 
 #include "matching.h"
 
+extern int soft_reg[8];
+extern int _data_table_009918D8[16];
+
 int sceSifGetSreg(int idx)
 {
-    __asm__ __volatile__(
-        "lui $2,0x99\n\t"
-        "sll $4,$4,2\n\t"
-        "addiu $2,$2,0x1a00\n\t"
-        "addu $4,$4,$2\n\t"
-        "lw $2,0($4)"
-    );
+    return soft_reg[idx];
 }
 
+/* Two steering constructs here, both for instruction placement only:
+ *   - PIN+LAUNDER keeps the array base in v0. Left alone gcc picks v1,
+ *     because v0 is the return register and the return value is live;
+ *     the original lets the base occupy v0 and then overwrites it.
+ *   - PASSTHRU emits the `move v0,a1` (return value) BEFORE the store,
+ *     which is what leaves the store, not the move, in the jr delay
+ *     slot. Written as a plain `return val;` the two swap places. */
 int sceSifSetSreg(int idx, int val)
 {
-    __asm__ __volatile__(
-        "lui $2,0x99\n\t"
-        "sll $4,$4,2\n\t"
-        "addiu $2,$2,0x1a00\n\t"
-        "addu $4,$4,$2\n\t"
-        "daddu $2,$5,$0\n\t"
-        "sw $5,0($4)"
-    );
+    PIN(int *base, "$2");
+    int r;
+
+    base = soft_reg;
+    LAUNDER(base);
+    PASSTHRU(r, val);
+    base[idx] = val;
+    return r;
 }
 
+/* The SIF command-buffer table: entries 3/4 are the system command
+ * buffer and its size, 5/6 the user one. Both setters return the
+ * previous buffer.
+ *
+ * The two stores in each are written size-then-buffer to fake, under
+ * -fno-schedule-insns, the schedule the first scheduling pass gives for
+ * free -- exactly like sceSifAddCmdHandler below. If sceSif.c gets
+ * FILE_CFLAGS_OVERRIDE = "-O2 -G0", swap BOTH pairs back to
+ * buffer-then-size at the same time as AddCmdHandler's; those three
+ * swaps together take this file to 23 match / 0 not under the new flag
+ * (measured 2026-08-15). */
 void *sceSifSetSysCmdBuffer(void *buf, int size)
 {
-    __asm__ __volatile__(
-        "lui $3,0x99\n\t"
-        "addiu $3,$3,0x18d8\n\t"
-        "lw $2,12($3)\n\t"
-        "sw $5,16($3)\n\t"
-        "sw $4,12($3)"
-    );
+    void *old = (void *)_data_table_009918D8[3];
+
+    _data_table_009918D8[4] = size;
+    _data_table_009918D8[3] = (int)buf;
+    return old;
 }
 
 void *sceSifSetCmdBuffer(void *buf, int size)
 {
-    __asm__ __volatile__(
-        "lui $3,0x99\n\t"
-        "addiu $3,$3,0x18d8\n\t"
-        "lw $2,20($3)\n\t"
-        "sw $5,24($3)\n\t"
-        "sw $4,20($3)"
-    );
+    void *old = (void *)_data_table_009918D8[5];
+
+    _data_table_009918D8[6] = size;
+    _data_table_009918D8[5] = (int)buf;
+    return old;
 }
 
 void *sceSifGetDataTable(void)
 {
-    __asm__ __volatile__(
-        "lui $2,0x99\n\t"
-        "addiu $2,$2,0x18d8"
-    );
+    return _data_table_009918D8;
 }
 
 /* Thin dispatch wrappers around the underscore-prefixed internal SIF
@@ -171,8 +179,6 @@ int sceSifLoadElf(const char *path, void *dest)
  * sceSifSetCmdBuffer index into above) by the sign of the handler
  * index, then zero (Remove) or store (Add) the selected slot. */
 
-extern int _data_table_009918D8[8];
-
 void sceSifRemoveCmdHandler(int idx)
 {
     int off = idx << 3;
@@ -192,7 +198,8 @@ void sceSifRemoveCmdHandler(int idx)
  * ever gets FILE_CFLAGS_OVERRIDE = "-O2 -G0" (see sceCd.c's header for
  * the same request), swap them back to slot[0] then slot[1]: that one
  * change is the ONLY thing standing between this file and 23 match / 0
- * not at "-O2 -G0" (measured 2026-08-15), and the flag in turn is what
+ * not at "-O2 -G0" (measured 2026-08-15) TOGETHER WITH the two stores
+ * in sceSifSetSysCmdBuffer/sceSifSetCmdBuffer above, and the flag is what
  * sceSifSendCmd, sceSifRpcLoop, sceSifAllocIopHeap, sceSifAllocSysMemory,
  * sceSifFreeSysMemory, sceSifSearchModuleByName and
  * sceSifSearchModuleByAddress are all waiting on. */
