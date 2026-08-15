@@ -31,7 +31,7 @@ def portability_debt():
     """
     import glob as _glob
     import re as _re
-    steer = hw = raw = 0
+    steer = hw = raw = asmfn = 0
     steer_re = _re.compile(r'\b(PIN|LAUNDER|LAUNDER2|LAUNDER_V|PASSTHRU|PASSTHRU_V|SCHED_NOP)\s*\(')
     for path in _glob.glob("src/**/*.c", recursive=True):
         if "/libgcc/" in path:
@@ -40,7 +40,11 @@ def portability_debt():
         steer += len(steer_re.findall(text))
         hw += len(_re.findall(r'\bPS2_ASM\s*\(', text))
         raw += len(_re.findall(r'__asm__\s*(?:__volatile__|volatile)?\s*\(\s*"', text))
-    return steer, hw, raw
+        # Whole functions transcribed as file-scope asm (a .ent directive
+        # inside an __asm__ block). These match bytes but document no
+        # logic and must be rewritten wholesale by any port.
+        asmfn += len(_re.findall(r'\.ent\s', text))
+    return steer, hw, raw, asmfn
 
 
 def main():
@@ -107,10 +111,14 @@ def main():
 
 
 def _print_debt():
-    steer, hw, raw = portability_debt()
+    steer, hw, raw, asmfn = portability_debt()
     print(f"  Portability:    {steer} steering constructs (vanish in a "
           f"non-MATCHING build), {hw} PS2_ASM + {raw - hw} raw asm blocks "
           f"needing hand-porting")
+    if asmfn:
+        print(f"  Transcribed:    {asmfn} whole functions written as "
+              f"file-scope asm (bytes match, but they document no logic "
+              f"and a port must rewrite each one)")
 
 
 if __name__ == "__main__":
