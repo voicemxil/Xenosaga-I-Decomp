@@ -21,6 +21,18 @@ typedef struct {
 EWCOMP ewComponent[64];
 int ew_send_mode;
 
+void frame_init(void *pFrame)
+{
+    *(short *)pFrame = 0;
+    *((unsigned char *)pFrame + 2) = 0x60;
+}
+
+void sprt_init(void *pSprite)
+{
+    *(short *)pSprite = 0;
+    *((unsigned char *)pSprite + 2) = 0x80;
+}
+
 extern void EW_drawComoponent(void *pPacket, EWCOMP *pComp);
 extern void EW_setDrawEnv(void *pPacket);
 extern void EW_sendPacket(void *pPacket);

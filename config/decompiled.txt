@@ -2000,3 +2000,5 @@ unit_resume = 0x00304758, 0x14; // Java_Unit.c
 FLUSH_ALPHA_GROUP = 0x0022E450, 0xC; // nmlModel.c
 FLUSH_PARENT_BUF = 0x0022E508, 0x8; // nmlModel.c
 FLUSH_BACK_BUFFER = 0x0022E4D8, 0xC; // nmlModel.c
+frame_init = 0x0026BFE8, 0x10; // EW.c
+sprt_init = 0x0026BFF8, 0x10; // EW.c
