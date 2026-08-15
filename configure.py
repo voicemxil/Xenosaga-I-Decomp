@@ -209,6 +209,10 @@ FILE_FIX_FLAGS = {
     # MenuShopModelDisp: filled-branch site 6 (beqz to $L907) -- gcc
     # hoists the target block's l.s gp-load into the slot, the original
     # hoisted the move $4,$16 that follows it.
+    # tskUmnSimulationInfo wants an argument-setup addu hoisted above
+    # the lui/mtc1 pair for a float constant -- a 3-element rotation,
+    # which --swap-adjacent structurally cannot express.
+    "tskUmn.c": "--rotate tskUmnSimulationInfo:100",
     "Menu.c": ("--barrier-return-store MenuRWeaponCheck2 "
                "--branch-likely MenuFaceEpidGet:3,MenuSkillEquip:2 "
                "--swap-adjacent MenuAgwsListMake_Gun:30,"

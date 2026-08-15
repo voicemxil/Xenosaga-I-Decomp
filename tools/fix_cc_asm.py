@@ -570,6 +570,60 @@ def swap_ok(a, b):
     return not (wa & (rb | wb)) and not (wb & ra)
 
 
+def rotate_insns(flat, sites):
+    """Rotate a short window of instructions right by one.
+
+    Site-keyed FUNC:N[:LEN] -- the window is the LEN instructions (LEN
+    defaults to 3) starting at the Nth instruction of FUNC, 0-based in
+    emission order, counted exactly like --swap-adjacent (directives,
+    labels and #-comments are not instructions). The window becomes
+    (last, first, ..., second-to-last).
+
+    Why this exists: --swap-adjacent can only express independent
+    2-element transpositions -- its sites are resolved against the
+    pre-swap order and consumed two at a time, so a 3-element rotation
+    (which needs two DEPENDENT swaps) is not expressible with it. The
+    original build's scheduler produced exactly such rotations, e.g.
+    tskUmnSimulationInfo wants an argument-setup addu hoisted above the
+    lui/mtc1 pair that materializes a float constant. The rotated bytes
+    are verified against the original binary, so the ordering is the
+    original's by definition.
+
+    The window must be contiguous instruction lines (no label or
+    directive between them); otherwise the site is left untouched.
+    """
+    starts = {}
+    for site in sites:
+        parts = site.split(":")
+        if len(parts) == 2:
+            starts[(parts[0], int(parts[1]))] = 3
+        elif len(parts) == 3:
+            starts[(parts[0], int(parts[1]))] = int(parts[2])
+    res = []
+    cur = None
+    idx = 0
+    i = 0
+    while i < len(flat):
+        line = flat[i]
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            idx = 0
+        if RE_INSN.match(line):
+            span = starts.get((cur, idx))
+            if span and span >= 2 and i + span <= len(flat):
+                window = flat[i:i + span]
+                if all(RE_INSN.match(w) for w in window):
+                    res.append(window[-1])
+                    res.extend(window[:-1])
+                    idx += span
+                    i += span
+                    continue
+            idx += 1
+        res.append(line)
+        i += 1
+    return res
+
+
 def swap_adjacent_insns(flat, sites):
     """Swap the two instructions of an explicitly named adjacent pair.
 
@@ -784,7 +838,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          branch_likely=None, branch_unlikely=None,
          war_restore=None, pin_slot=None, lis_hazard_nop=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
-         swap_slot_tgt=None):
+         swap_slot_tgt=None, rotate=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -1067,6 +1121,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = swap_adjacent_insns(flat, swap_adjacent)
 
+    if rotate:
+        flat = "\n".join(out).split("\n")
+        out = rotate_insns(flat, rotate)
+
     if swap_slot:
         flat = "\n".join(out).split("\n")
         out = swap_into_slot(flat, swap_slot)
@@ -1134,6 +1192,11 @@ if __name__ == "__main__":
                         help="keep a preceding move out of ANY branch delay "
                              "slot (incl. conditional branches); optionally "
                              "a comma-separated function-name list")
+    parser.add_argument("--rotate", nargs="?", const="",
+                        default=None, metavar="SITES",
+                        help="rotate a window right by one: FUNC:N[:LEN] "
+                             "(LEN defaults to 3); expresses the dependent "
+                             "swaps --swap-adjacent cannot")
     parser.add_argument("--lis-hazard-nop", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="add the ee-as hazard nop after a synthesized "
@@ -1223,4 +1286,4 @@ if __name__ == "__main__":
          scope(args.war_restore_swap), scope(args.pin_slot_nop),
          scope(args.lis_hazard_nop), scope(args.swap_adjacent),
          scope(args.swap_into_slot), scope(args.mtc1_nop),
-         scope(args.swap_slot_target))
+         scope(args.swap_slot_target), scope(args.rotate))
