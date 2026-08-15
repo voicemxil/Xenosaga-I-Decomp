@@ -782,30 +782,67 @@ void Java_xeno_util_Runtime_getPartyData__I(JThread *thread, JValue *args, JValu
     unsigned int id;
     int type;
     char *p;
+    int v;
 
     id = args[0].u;
     type = (int)(id >> 24);
     p = getPartyDataOfs(id);
-    switch (type) {
-    case 1:
-        ret->i = *(short *)p;
-        break;
-    case 2:
-        ret->i = *(int *)p;
-        break;
-    case 3:
-        ret->u = *(unsigned int *)p;
-        break;
-    default:
-        ret->i = *(unsigned char *)p;
-        break;
+    /* Not a switch, and not a plain if-chain either.  gcc's expand_case
+       roots its decision tree at 2 and reorders every arm; a plain
+       `if (type == 1) goto t1;` gets the t1 block inlined at the branch
+       instead of laid out after the chain.  Routing the first test
+       through its inverted form plus an explicit `goto t1` keeps the
+       original's layout: all four bodies after the tests, one shared
+       store, and the ==3 arm folded into its own branch-likely delay
+       slot (reorg moves its single load and deletes the block, which is
+       what lets the ==2 arm fall straight through to the store). */
+    if (type != 1) {
+        goto n1;
     }
+    goto t1;
+n1:
+    if (type < 2) {
+        goto def;
+    }
+    if (type == 2) {
+        goto t2;
+    }
+    if (type == 3) {
+        goto t3;
+    }
+def:
+    v = *(unsigned char *)p;
+    goto done;
+t1:
+    v = *(short *)p;
+    goto done;
+t2:
+    v = *(int *)p;
+    goto done;
+t3:
+    v = *(unsigned int *)p;
+done:
+    ret->i = v;
 }
 
 /* Write one party-data field, sized by the key's type tag */
 /* TODO: near-miss - the switch tree and everything up to the reload now match; the
    tail keeps the actor pointer in $s1 and the saved slot in $s0 where the original
    has them the other way round, costing one extra instruction in the epilogue. */
+/* TODO: near-miss (60 built vs 61 original words).  The four-way store
+   switch is byte-exact -- note it keeps an explicit `case 0:` so gcc roots
+   its decision tree at 1, which is exactly the shape getPartyData above
+   has to be hand-written to reach.  The single missing word is in the
+   reload guard: the original allocates chr to $s0 and the saved field to
+   $s1, keeping $s1's `args` value dead but not reusing it, and its
+   equal-case exit is a plain `beq` with the nSave load in the delay slot.
+   gcc reuses $s1 for chr, which frees $s0 for nSave and lets it fold the
+   exit into a branch-likely with an epilogue load annulled instead.
+   --swap-regs cannot fix it: $s1 also carries `args` through the whole
+   first half, so a whole-function 16-17 rename breaks the prologue.
+   Five source shapes were swept (chr before/after nId, the id inlined
+   into the compare, both guards as early returns, and an else-return
+   before the tail call) -- all give the same 22 diffs. */
 void Java_xeno_util_Runtime_setPartyData__II(JThread *thread, JValue *args, JValue *ret)
 {
     char *chr;
