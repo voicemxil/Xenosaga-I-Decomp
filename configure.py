@@ -220,6 +220,9 @@ FILE_FIX_FLAGS = {
     "TMENU.c": "--swap-adjacent TMENU_addItem:4",
     # xgl delay-slot shapes found by the xgl subagent (all verified):
     "xglTimer.c": "--barrier-return-store xglTimer0Reset",
+    # xglCameraTravelProc: one branch-likely annul bit at site 3 (xgl
+    # wave-4 subagent, full-match verified).
+    "xglCamera.c": "--branch-likely xglCameraTravelProc:3",
     # PauseMenu: jal site 3 (GameSnapShotSaveFile) -- the original fills
     # the delay slot with move $5,$16 and keeps move $6,$2 above the
     # jal; gcc fills it the other way round.
