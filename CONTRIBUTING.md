@@ -66,6 +66,22 @@ To find all hardware-dependent functions:
 grep -r "PS2_HARDWARE" src/
 ```
 
+## Build freshness (read this before trusting a diff)
+
+`verify.py` and `checkfile.py --built` both read the objects in
+`build/`; they do not compile. After editing a source file you must run
+`ninja` before either of them means anything -- otherwise you are
+reading the previous build and it looks like your change had no effect.
+Two safe habits:
+
+- While iterating on one function, run plain `python3 tools/checkfile.py
+  src/<dir>/<file>.c` (no `--built`). It compiles fresh through the real
+  pipeline into a temp dir, so it is always authoritative.
+- Before committing, run `tools/rebuild.sh -q`, which touches every
+  source, runs `ninja`, then `verify.py`. The touch defeats the mtime
+  skew between the host (where edits land) and the container (where the
+  build runs), which can otherwise make ninja skip a changed file.
+
 ## Conventions
 
 ### Source files
