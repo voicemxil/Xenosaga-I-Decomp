@@ -5,6 +5,11 @@
 
 #include "common.h"
 
+void eRibbonModeChange(void *pRibbon, unsigned char nMode)
+{
+    *(unsigned char *)((char *)pRibbon + 0xC) = nMode;
+}
+
 void eNumberNumberChange(void)
 {
 }

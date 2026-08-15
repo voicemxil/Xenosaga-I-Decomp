@@ -91,6 +91,11 @@ float RUN_THRESHOLD_F;
 float VECTOR_RATE;
 float D_004D7C0C;
 
+int getScriptFlag(void *pScript)
+{
+    return *(int *)((char *)pScript + 0x124);
+}
+
 extern void xglSoundSendEffect(int a, int b, int c);
 extern void GameCameraStateSave(void);
 extern void GameCameraStateRestore(void);

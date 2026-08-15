@@ -19,6 +19,12 @@ int numPrimitive;
 PRIM *primitive;
 int numClass;
 JCLASS *classes;
+extern int tokenType;
+
+int STR_tokenGetType(void)
+{
+    return tokenType;
+}
 
 extern void *RSRC_alloc(int hRsrc, int nSize, int nFlags);
 

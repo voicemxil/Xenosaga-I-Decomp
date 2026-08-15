@@ -142,12 +142,21 @@ void INIT_BACK_BUFFER(void);
 void nmlModelFogPara(float *pPara, float fNear, float fFar, float fMin, float fMax);
 void INIT_FADE_CONTROL(void *pFade);
 void CLEAR_LAYOUT_MODEL(void *pLayout);
-void CLEAR_PROREAL(void *pProReal);
-void CLEAR_MAP_HANDLE(void *pMapHandle);
+void CLEAR_PROREAL(void *pProReal)
+{
+    *(int *)((char *)pProReal + 0x1C0) = 0;
+}
+void CLEAR_MAP_HANDLE(void *pMapHandle)
+{
+    *(int *)pMapHandle = 0;
+}
 void CLEAR_MODEL_ENTRY(void);
 void FLUSH_MODELSYSTEM(void);
 void FLUSH_ALPHA_GROUP(void);
-void FLUSH_MAP_HANDLE(void *pMapHandle);
+void FLUSH_MAP_HANDLE(void *pMapHandle)
+{
+    *(int *)((char *)pMapHandle + 4) = 0;
+}
 void FLUSH_PARENT_BUF(void);
 void FLUSH_BACK_BUFFER(void);
 
