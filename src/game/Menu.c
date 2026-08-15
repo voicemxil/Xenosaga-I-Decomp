@@ -1308,6 +1308,7 @@ void MenuCfTaikiPop(void)
         LAUNDER(cont);
         *dst = v;
         dst++;
+        LAUNDER(dst);
     } while (cont != 0);
 }
 
@@ -1748,7 +1749,7 @@ typedef struct {
     signed char b30;           /* 0x30: read back with lb */
     signed char b31;           /* 0x31: read back with lb */
     signed char b32;           /* 0x32: read back with lb */
-    unsigned char b33;         /* 0x33: radar display option */
+    signed char b33;           /* 0x33: radar display option */
     char pad34;
     unsigned char b35;         /* 0x35: HDD activate result */
     char pad36[0x40 - 0x36];
@@ -5120,7 +5121,7 @@ typedef struct {
     int nColor;                /* 0x004 */
     short nW;                  /* 0x008 */
     short nH;                  /* 0x00A */
-    char pad00C[4];
+    char *pTitle;              /* 0x00C */
     signed char nState;        /* 0x010 */
     char pad011[3];
     void (*pFunc)(void);       /* 0x014: draw callback */
@@ -6312,6 +6313,124 @@ void MenuSkillInfoMain(void)
         w->msg.pText = pText;
         MoveSlide(&w->win.nY, &nTarget, 3.0f);
         WindowDXMain(&w->win);
+        break;
+    default:
+        return;
+    }
+}
+
+/* ================= Wave 6: top-menu select windows ================= */
+
+/* The list object a MenuSelectWindow frame draws: a newline-separated
+   caption block plus the cursor row */
+typedef struct {
+    char pad00[2];
+    short nRow;                /* 0x02 */
+    int nSel;                  /* 0x04 */
+    char *apText[2];           /* 0x08 */
+} MENUSELECTDX;
+
+extern void MenuSelectWindow(void);
+
+/* TODO: near-miss (34 diffs, length exact at 144) - both windows, both
+   select lists, the page tests and the draw loop are recovered. What is
+   left is one instruction's placement and the register permutation that
+   follows it: gcc hoists the `move $a0,$s0` that sets up the second
+   WindowDXMain eleven slots early, which pushes the whole setup block down
+   one and rotates the three window-geometry constants across $v0/$v1/$a1
+   (retail: 192/193/78 in $v0/$a1/$v1). A --rotate on the hoisted move
+   fixes the position but not the rename. */
+/* Tec screen top menu: the command list and the confirm list, each a
+   WindowDX that slides in from the right edge when its page is up */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    char pad001[3];
+    int nColor;                /* 0x004 */
+    WINDOWDX win[2];           /* 0x008, 0x19C */
+    MENUSELECTDX sel0;         /* 0x330 */
+    char pad340[0x928 - 0x340];
+    MENUSELECTDX sel1;         /* 0x928 */
+} MENU_TEC_MENU_WORK;
+
+extern MENU_TEC_MENU_WORK *MenuTecMenu;
+
+void MenuTecMenuMain(void)
+{
+    static char *msg00[] = { "Set\nUse T.Pts\nCancel" };
+    static char *msg01[] = { "Yes\nNo", " Is this okay?" };
+    MENU_TEC_MENU_WORK *w;
+    short nTarget[2];
+    unsigned char bArm;
+    int nOne;
+    int i;
+
+    w = MenuTecMenu;
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win[0]);
+        w->win[0].nX = 528;
+        w->win[0].pTitle = "Menu";
+        w->win[0].nY = 192;
+        w->win[0].nW = 193;
+        w->win[0].nH = 78;
+        w->win[0].pMsg = &w->sel0;
+        w->sel0.apText[0] = msg00[0];
+        w->win[0].nState = 1;
+        w->win[0].nColor = w->nColor;
+        w->win[0].pFunc = MenuSelectWindow;
+        w->sel0.nSel = 0;
+        w->sel0.nRow = 0;
+        WindowDXMain(&w->win[0]);
+        w->win[0].nState = 3;
+        WindowDXSet(&w->win[1]);
+        w->win[1].nX = 528;
+        w->win[1].pTitle = "Select";
+        w->sel1.apText[0] = msg01[0];
+        w->win[1].nY = 240;
+        w->win[1].nColor = w->nColor;
+        w->sel1.apText[1] = msg01[1];
+        w->win[1].nW = 169;
+        w->win[1].nH = 102;
+        w->win[1].pFunc = MenuSelectWindow;
+        w->win[1].pMsg = &w->sel1;
+        /* launder: the retail build materialises the second window's "1"
+           separately from the first's, and shares it with the row index. */
+        nOne = 1;
+        LAUNDER(nOne);
+        w->win[1].nState = nOne;
+        w->sel1.nSel = 0;
+        w->sel1.nRow = nOne;
+        WindowDXMain(&w->win[1]);
+        w->win[1].nState = 3;
+        w->nState = 2;
+    case 2:
+        nTarget[1] = 528;
+        nTarget[0] = 528;
+        switch (MenuWork.state) {
+        case 32:
+            bArm = MenuWork.b20 & 1;
+            if (bArm != 0) {
+                w->win[0].nX = 528;
+                w->sel0.nSel = 0;
+            }
+            nTarget[0] = 288;
+            w->sel0.nSel = MenuWork.b30;
+            break;
+        case 84:
+            bArm = MenuWork.b20 & 1;
+            if (bArm != 0) {
+                w->win[1].nX = 528;
+                w->sel1.nSel = 0;
+            }
+            nTarget[1] = 288;
+            w->sel1.nSel = MenuWork.b33;
+            break;
+        }
+        for (i = 0; i < 2; i++) {
+            MoveSlide(&w->win[i].nX, &nTarget[i], 3.0f);
+            WindowDXMain(&w->win[i]);
+        }
         break;
     default:
         return;

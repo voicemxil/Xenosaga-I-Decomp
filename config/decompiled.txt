@@ -2310,3 +2310,5 @@ Java_xeno_Camera_transCNS__Ljava_lang_Object_FFF = 0x002FB800, 0x100; // Java_Ca
 sceMcGetSlotMax = 0x0020EC88, 0xC0; // sceMc.c
 Get_MiddlePoint = 0x002D72C0, 0xD0; // Get.c
 Java_xeno_util_Runtime_getPartyData__I = 0x002F7C50, 0x7C; // Java_util.c
+MenuModelUnitDispose = 0x0027FF88, 0x90; // Menu.c
+sceGsSyncV = 0x00209CE0, 0x94; // sceGs.c

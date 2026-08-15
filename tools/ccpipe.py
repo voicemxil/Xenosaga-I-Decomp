@@ -48,7 +48,46 @@ def file_settings(basename):
         asflags = configure.asflags_for(basename)
     except Exception:
         pass
+    fix = _merge_extra_fix(basename, fix)
     return cc, cflags, fix, asflags
+
+
+def _merge_extra_fix(basename, fix):
+    """Fold $XENO_EXTRA_FIX_FLAGS into a file's fixer flags, in memory only.
+
+    Format: "FILE.c=--flag SITE[,SITE...]", several groups separated by ';'.
+    Sites are merged INTO an existing same-named flag rather than appended
+    as a second copy, because fix_cc_asm.py stores (does not append) its
+    site lists and errors on a duplicate flag.
+
+    This exists so that sweeping a site-indexed flag never has to write
+    configure.py. A sweep runs for minutes; a tool that snapshots
+    configure.py and restores it at the end silently discards whatever
+    another agent added in the meantime, which regressed this tree several
+    times before this hook existed. Nothing here affects the ninja build --
+    configure.py stays the single source of truth for that.
+    """
+    spec = os.environ.get("XENO_EXTRA_FIX_FLAGS", "")
+    if not spec:
+        return fix
+    fix = list(fix)
+    for group in spec.split(";"):
+        name, sep, rest = group.partition("=")
+        if not sep or name.strip() != basename:
+            continue
+        parts = rest.split()
+        if len(parts) < 2:
+            continue
+        flag, sites = parts[0], parts[1]
+        if flag in fix:
+            i = fix.index(flag)
+            if i + 1 < len(fix):
+                fix[i + 1] = fix[i + 1] + "," + sites
+            else:
+                fix.append(sites)
+        else:
+            fix += [flag, sites]
+    return fix
 
 
 def compile_c(src, obj, cc=CC96, cflags=CFLAGS96, fixflags=(), keep_asm=None,
