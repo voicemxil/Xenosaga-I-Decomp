@@ -350,3 +350,52 @@ int xglHddMcCheckYourSaves(void *pBuf)
     }
     return -3;
 }
+
+void xglSleep(void);
+void xglFontPrint(int x, int y, int nColor, char *pStr);
+void xglSoundEffectNormalDirect(int nNo);
+void xglDmaDirectNormal(unsigned int nCh, unsigned int nAddr, unsigned int nQwc);
+
+typedef struct {
+    char pad00[0x2A];
+    unsigned short nPress;   /* 0x2A */
+    char pad2C[0x68 - 0x2C];
+} XGLHDDPADDATA;
+extern XGLHDDPADDATA PadData[2];
+
+typedef struct {
+    char pad00[0x58];
+    unsigned char nUnk58;    /* 0x58 */
+} XGLHDDRENDER;
+extern XGLHDDRENDER sRender;
+
+/* Show the HDD error screen: clear + message every frame for at least
+ * 30 frames, then wait for the confirm button */
+int xglHddErrorScreen(void)
+{
+    static unsigned long TestEnv[12] __attribute__((aligned(16))) = {
+        0x0000000000000000, 0x5000000500000000,
+        0x4003400000008001, 0x000000000000551E,
+        0x0000000000030000, 0x0000000000000047,
+        0x4000000000000000, 0x8000000000000000,
+        0x000071F700006FF8, 0x0000000000FFFFF0,
+        0x00008DF700008FF8, 0x0000000000FFFFF0,
+    };
+    int i;
+    register XGLHDDRENDER *pRender __asm__("$2");
+
+    sRender.nUnk58 = 1;
+    for (i = 30; ; ) {
+        xglDmaDirectNormal(2, (unsigned int)TestEnv, 6);
+        xglFontPrint(48, 64, 0xFFFFFF, "\013\016\001\001\000\000\000\015\003\245\317\241\274\245\311\245\307\245\243\245\271\245\257\245\311\245\351\245\244\245\326\244\313\244\242\244\353\245\274\245\316\245\265\241\274\245\254\244\316\012\012\245\242\245\327\245\352\245\261\241\274\245\267\245\347\245\363\245\307\241\274\245\277\244\254\306\311\244\337\271\376\244\341\244\336\244\273\244\363\241\243\012\012\244\263\244\354\260\312\271\337\244\317\243\304\243\326\243\304\244\253\244\351\306\311\244\337\271\376\244\337\244\362\271\324\244\244\244\336\244\271\241\243\012\012\012\012\014\200\040\040\241\373\014\200\200\200\245\334\245\277\245\363\241\247\302\263\271\324");
+        if (i > 0) {
+            i--;
+        } else if ((PadData[0].nPress & 0x20) != 0) {
+            break;
+        }
+        xglSleep();
+    }
+    xglSoundEffectNormalDirect(1);
+    __asm__("" : "=r"(pRender) : "0"(&sRender));
+    pRender->nUnk58 = 0;
+}

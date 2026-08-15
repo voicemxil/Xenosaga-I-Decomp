@@ -1980,6 +1980,7 @@ xglCdStreamReadRing = 0x0021EA60, 0x78; // xglCd.c
 xglPlaneParameter = 0x00229960, 0x90; // xglMatrix.c
 xglQuaternionInterpolateLinear = 0x0022A9D0, 0xA8; // xglMatrix.c
 xglPrimAddGifTagDirect = 0x00222BD0, 0xB4; // xglPrim.c
+xglHddErrorScreen = 0x00227320, 0xC0; // xglHdd.c
 // tskUmnSimulationPas = 0x00A0BAF8, 0x210; // tskUmn.c -- WIP: registered mid-diagnosis before the body matched; re-enable when 0d
 // tskUmnPluginPas = 0x00A0DE20, 0x214; // tskUmn.c -- WIP: registered mid-diagnosis before the body matched; re-enable when 0d
 // tskUmnDataBasePas = 0x00A09818, 0x254; // tskUmn.c -- WIP: registered mid-diagnosis before the body matched; re-enable when 0d
