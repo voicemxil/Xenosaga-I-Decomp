@@ -288,8 +288,10 @@ void sceVif1PkAlign(Vif1Packet *pkt, unsigned int padding, unsigned int boundary
        loop-body cse that rewrote `next = cur + 1` into `addiu v1,v1,4` is
        fixed by pinning cur to $5 and next to $3, so the addiu now reads
        cur exactly as the original does.  8 -> 4 words.
-       Remaining 4 (2 of them with --swap-adjacent sceVif1PkAlign:6, which
-       is not wired since the function does not yet match): the peeled
+       Remaining: with --swap-adjacent sceVif1PkAlign:6 this reaches TWO
+       words (not wired, since the convention is to flag only functions
+       that actually match -- add it the moment the last pair falls).
+       Those last two are the loop-body pair at words 23/24: the peeled
        entry and the loop body each emit the store BEFORE the pointer
        increment where the original emits it after.  Ruled out: LAUNDER
        and LAUNDER_V on either cur or next at that point (all regress to

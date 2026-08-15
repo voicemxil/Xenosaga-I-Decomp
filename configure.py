@@ -173,8 +173,7 @@ FILE_FIX_FLAGS = {
     # swap flag", which --swap-adjacent now is. NOTE all sites for one
     # pass must be a single comma-separated value (argparse stores, not
     # appends; fix_cc_asm.py rejects duplicates).
-    "sceVif1Pk.c": ("--swap-adjacent sceVif1PkCnt:9,sceVif1PkEnd:9,"
-                    "sceVif1PkAddUpkData128:10,sceVif1PkAddUpkData128:15!"),
+    "sceVif1Pk.c": "--swap-adjacent sceVif1PkCnt:9,sceVif1PkEnd:9",
     # an lwc1 in a jal delay slot followed by mov.s trips a bogus hazard nop
     "MAP.c": "--omit-hazard mov.s",
     # many util natives do lwc1->cvt.s.w with no hazard nop in the original
@@ -236,7 +235,7 @@ FILE_FIX_FLAGS = {
     # appends, so a repeated flag silently drops the earlier sites --
     # that regressed three matched functions before fix_cc_asm.py
     # grew a duplicate-flag guard. Comma-separate every site.
-    "Menu.c": '--barrier-return-store MenuRWeaponCheck2 --branch-likely MenuFaceEpidGet:3,MenuSkillEquip:2,MenuItemInfoMain:13 --swap-adjacent MenuAgwsListMake_Gun:30,MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30,MenuModelUnitDispose:15,MenuCfTaikiPush:6 --rotate MenuTecL1R1Main:43:-4,MenuEtherL1R1Main:43:-4,MenuSkillL1R1Main:43:-4,MenuSystemInfoMain:60:5,MenuModelUnitDispose:22:5,MenuCfTaikiPop:12:-3 --swap-slot-target MenuShopModelDisp:6',
+    "Menu.c": '--barrier-return-store MenuRWeaponCheck2 --branch-likely MenuFaceEpidGet:3,MenuSkillEquip:2,MenuItemInfoMain:13 --swap-adjacent MenuAgwsListMake_Gun:30,MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30,MenuModelUnitDispose:15,MenuCfTaikiPush:6 --rotate MenuTecL1R1Main:43:-4,MenuEtherL1R1Main:43:-4,MenuSkillL1R1Main:43:-4,MenuSystemInfoMain:60:5,MenuModelUnitDispose:22:5,MenuCfTaikiPop:10:2 --swap-slot-target MenuShopModelDisp:6',
     "TMENU.c": "--swap-adjacent TMENU_addItem:4",
     # xgl delay-slot shapes found by the xgl subagent (all verified):
     "xglTimer.c": "--barrier-return-store xglTimer0Reset",
