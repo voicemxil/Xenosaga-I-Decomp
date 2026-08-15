@@ -214,3 +214,120 @@ press_check:
     }
 done:;
 }
+
+/* TODO: near-miss (53/54 words). TI-cast copies give the lq/sq pairs
+ * (plain XGLCAMVEC assignment degrades to ld/sd), per-copy src/dst
+ * empty-asm passthroughs stop gcc addressing the adjacent statics as
+ * one-symbol+16*n and folding the sq destination offsets. Residue: one
+ * word short and the head scheduling (orig hoists the first static's
+ * lui/addiu above the f0/f1 stores); register alternation a2/v1/a1
+ * unpinned. Data verified from 0x4A8C40. */
+/* Reset the full travel block: focus scalars, the default rig vectors,
+ * the manual-mode mirrors of the twist/height fields, and the chase
+ * reference/interpolation positions */
+void xglCameraTravelInit(void *pCamera)
+{
+    static XGLCAMVEC sShootAngleR = {{ 0.0f, 0.0f, 0.0f, 1.0f }};
+    static XGLCAMVEC sShootAngleV = {{ 0.0f, 0.0f, 0.0f, 1.0f }};
+    static XGLCAMVEC sShootAngleA2 = {{ 0.0f, 0.0f, 0.0f, 1.0f }};
+    static XGLCAMVEC sShootPlaceR = {{ 0.0f, 1.0f, 4.0f, 1.0f }};
+    static XGLCAMVEC sShootPlaceV = {{ 0.0f, 0.0f, 0.0f, 1.0f }};
+    static XGLCAMVEC sShootPlaceA2 = {{ 0.0f, 0.0f, 0.0f, 1.0f }};
+    static XGLCAMVEC sChaseRefPos = {{ 0.0f, 1.0f, 0.0f, 1.0f }};
+    static XGLCAMVEC sChaseIntPos = {{ 0.0f, 1.0f, 0.0f, 1.0f }};
+    char *pBase = (char *)pCamera;
+    register float *pTravel __asm__("$7");
+    XGLCAMVEC *pSrc;
+    char *pDst;
+
+    __asm__("" : "=r"(pTravel) : "0"((float *)(pBase + 0x90)));
+    pTravel[0] = 5.0f;
+    pTravel[1] = 0.69813174f;
+    ((int *)pTravel)[2] = 0;
+    ((int *)pTravel)[3] = 0;
+    __asm__("" : "=r"(pSrc) : "0"(&sShootAngleR));
+    __asm__("" : "=r"(pDst) : "0"(pBase + 0xA0));
+    *(TI *)pDst = *(TI *)pSrc;
+    __asm__("" : "=r"(pSrc) : "0"(&sShootAngleV));
+    __asm__("" : "=r"(pDst) : "0"(pBase + 0xB0));
+    *(TI *)pDst = *(TI *)pSrc;
+    __asm__("" : "=r"(pSrc) : "0"(&sShootAngleA2));
+    __asm__("" : "=r"(pDst) : "0"(pBase + 0xC0));
+    *(TI *)pDst = *(TI *)pSrc;
+    __asm__("" : "=r"(pSrc) : "0"(&sShootPlaceR));
+    __asm__("" : "=r"(pDst) : "0"(pBase + 0xD0));
+    *(TI *)pDst = *(TI *)pSrc;
+    __asm__("" : "=r"(pSrc) : "0"(&sShootPlaceV));
+    __asm__("" : "=r"(pDst) : "0"(pBase + 0xE0));
+    *(TI *)pDst = *(TI *)pSrc;
+    __asm__("" : "=r"(pSrc) : "0"(&sShootPlaceA2));
+    __asm__("" : "=r"(pDst) : "0"(pBase + 0xF0));
+    *(TI *)pDst = *(TI *)pSrc;
+    pTravel[28] = pTravel[5];
+    pTravel[29] = pTravel[18];
+    __asm__("" : "=r"(pSrc) : "0"(&sChaseRefPos));
+    __asm__("" : "=r"(pDst) : "0"(pBase + 0x110));
+    *(TI *)pDst = *(TI *)pSrc;
+    __asm__("" : "=r"(pSrc) : "0"(&sChaseIntPos));
+    __asm__("" : "=r"(pDst) : "0"(pBase + 0x120));
+    *(TI *)pDst = *(TI *)pSrc;
+}
+
+/* TODO: near-miss (12 words). Natural C matches the whole shape except
+ * (a) the four upper-clamp slt/movz pairs come out in x0-first order
+ * against the original's x1-first (source reordering shifts which cond
+ * lands in $a2 but not the emission order), and (b) $5-$8-pinned cond
+ * passthroughs fix the cond registers but then gcc rewrites the entry
+ * corner-swaps as conditional moves from the original args (shorter by
+ * two words). Pinning x0/y0/x1/y1 to $10/$11/$12/$9 keeps the arg
+ * copies but loses the 3-move rotate. */
+/* Set a camera's clip window: order the corners, clamp them to the
+ * current display size and store them as floats in the screen block */
+void xglCameraSetWindow(void *pCamera, int nX0, int nY0, int nX1, int nY1)
+{
+    char *pScreen;
+    int n;
+
+    if (pCamera == 0) {
+        return;
+    }
+    pScreen = (char *)pCamera + 0x10;
+    if (nX1 < nX0) {
+        n = nX1;
+        nX1 = nX0;
+        nX0 = n;
+    }
+    if (nY1 < nY0) {
+        n = nY1;
+        nY1 = nY0;
+        nY0 = n;
+    }
+    if (nX0 < 0) {
+        nX0 = 0;
+    }
+    if (nY0 < 0) {
+        nY0 = 0;
+    }
+    if (nX1 < 0) {
+        nX1 = 0;
+    }
+    if (nY1 < 0) {
+        nY1 = 0;
+    }
+    if (!(nX1 < sRender.nWidth)) {
+        nX1 = sRender.nWidth - 1;
+    }
+    if (!(nY1 < sRender.nHeight)) {
+        nY1 = sRender.nHeight - 1;
+    }
+    if (!(nX0 < sRender.nWidth)) {
+        nX0 = sRender.nWidth - 1;
+    }
+    if (!(nY0 < sRender.nHeight)) {
+        nY0 = sRender.nHeight - 1;
+    }
+    *(float *)(pScreen + 0x50) = nX0;
+    *(float *)(pScreen + 0x54) = nY0;
+    *(float *)(pScreen + 0x58) = nX1;
+    *(float *)(pScreen + 0x5C) = nY1;
+}

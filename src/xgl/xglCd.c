@@ -4,7 +4,11 @@ typedef unsigned int u_int;
 typedef unsigned char u_char;
 
 typedef struct {
-    u_char aPad00[0x30];
+    int nFd;             /* 0x00 */
+    u_char aPad04[4];
+    int nUnk08;          /* 0x08 */
+    int nUnk0C;          /* 0x0C */
+    u_char aPad10[0x20];
     char nStatus;
     u_char aPad31[3];
     char nPowerOff;      /* 0x34 */
@@ -146,6 +150,74 @@ int xglCdGetFileSize(char *pName)
 int xglCdReadFile(char *pName, u_int nAddr, int nOfs, int nSize)
 {
     return xglCdReadFilePart(pName, nAddr, nOfs, nSize, 0, -1);
+}
+
+int sceCdBreak(void);
+int sceCdPause(void);
+int sceClose(int nFd);
+
+/* TODO: near-miss (2 words, SCHEDULING): only the epilogue restore pair
+ * is swapped -- orig `ld $17,8/ld $16,0`, ours `ld $16,0/ld $17,8`
+ * (the original sched2's WAR delay after `addiu $2,$17,%lo(LW)`).
+ * Exactly the --war-restore-swap class, but (a) xglCd.c has no
+ * FILE_FIX_FLAGS entry to extend, (b) RE_WAR_ALU lacks addiu, and
+ * (c) the reader addiu is separated from the ld pair by the $L36 label
+ * and the pinned passthrough's #APP/#NO_APP markers, so the pass's
+ * 3-line adjacency never fires (verified with a .scratch-xgl2 fixer
+ * copy). Everything else matches: goto-shared break/close blocks,
+ * $5/$16/$2 pinned passthroughs, memory-clobber on the nUnk3E copy to
+ * keep the lbu above the status lb. */
+void xglCdReadCancel(void)
+{
+    register XGLCDWORK *pLW __asm__("$5");
+    register XGLCDWORK *pFd __asm__("$16");
+    register XGLCDWORK *pEnd __asm__("$2");
+    register int nTmp __asm__("$2");
+    int n;
+
+    __asm__("" : "=r"(pLW) : "0"(&LW));
+    __asm__("" : "=r"(nTmp) : "0"(pLW->nUnk3E) : "memory");
+    pLW->nUnk3F = nTmp;
+    if (pLW->nStatus == 1) {
+        n = pLW->nUnk0C;
+        if (n == 0) {
+            goto do_break;
+        }
+        if (n >= 0) {
+            if (n < 3) {
+                pLW->nUnk08 = 0;
+            }
+        }
+        goto done;
+    } else if (pLW->nStatus == 2) {
+        n = pLW->nUnk0C;
+        if (n == 0) {
+            goto do_break;
+        }
+        if (n >= 0) {
+            if (n < 3) {
+                goto do_close;
+            }
+        }
+        goto done;
+    }
+    goto done;
+
+do_break:
+    sceCdBreak();
+    sceCdPause();
+    goto done;
+
+do_close:
+    __asm__("" : "=r"(pFd) : "0"(&LW));
+    if (pFd->nFd >= 0) {
+        sceClose(pFd->nFd);
+        pFd->nFd = -1;
+    }
+
+done:
+    __asm__("" : "=r"(pEnd) : "0"(&LW));
+    pEnd->nStatus = 0;
 }
 
 /* Return whether a read request is still in progress */

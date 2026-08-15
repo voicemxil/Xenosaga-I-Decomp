@@ -428,3 +428,38 @@ void xglRenderDrawFlip(void)
     FlushCache(0);
     xglDmaDirectNormal(2, 0x70000000, 3);
 }
+
+typedef struct { u_char a[8]; } PK8;
+typedef struct { u_char a[24]; } PK24;
+extern PK8 asDispReso[];
+extern PK24 asVramBase[];
+void xglRenderDrawEnvInit(void);
+void xglRenderDispEnvInit(void);
+void xglRenderClearEnvInit(void);
+void xglStudioInit(void);
+void xglStudioMainCameraInit(void);
+
+/* TODO: near-miss (18 words). Block copies via packed PK8/PK24 structs
+ * reproduce the ldl/ldr+sdl/sdr macro shape with symbol+offset(idx)
+ * operands (per-element PK8 copies CSE the addresses into pointers
+ * instead); a memory barrier keeps the fbp mirror reads below the
+ * copies. Residue: 8 of the words are gas expanding the address macros
+ * with daddu $at where the original build used addu (needs ldl/ldr
+ * support in fix_cc_asm's --expand-sym-loads or a gas-level fix -- an
+ * xglRender.c FILE_FIX_FLAGS entry does not exist to extend), plus
+ * head/tail scheduling around the barrier. */
+void xglRenderSetReso(int nReso)
+{
+    char *p = (char *)&sRender;
+
+    *(PK8 *)p = asDispReso[nReso];
+    *(PK24 *)(p + 8) = asVramBase[nReso];
+    __asm__ __volatile__("" : : : "memory");
+    sRender.nFrontFbp = sRender.nDispFbp;
+    sRender.nUnk22 = sRender.nUnk12;
+    xglRenderDrawEnvInit();
+    xglRenderDispEnvInit();
+    xglRenderClearEnvInit();
+    xglStudioInit();
+    xglStudioMainCameraInit();
+}

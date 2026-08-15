@@ -364,3 +364,53 @@ void xglFontDebugHex(int nX, int nY, unsigned int nValue, int nDigits)
     p[7] = 0;
     FS.pStream += 8;
 }
+
+int hex2val(int nChar);
+extern u_char D_004908D6[];
+
+/* TODO: near-miss (16 words). Single-return-variable shape with the
+ * ##-block as the == fallthrough and a shared *ppStr/return tail
+ * reproduces the whole branch layout (the ## path's b lands on the hex
+ * path's cursor-store delay slot, as in the original). Residue: the
+ * original materializes 94 twice (li $3 AND a fresh li $2 at the divu,
+ * check beqzl on $2) where gcc CSEs one li ($3) -- a $2-pinned
+ * passthrough divisor splits the divu into two, unpinned keeps one li
+ * plus a stray li $4; downstream mflo/mfhi register roles follow. */
+int xglFontAscii2Euc(char nChar, u_char **ppStr)
+{
+    u_char *pStr;
+    int nHigh;
+    int nCode;
+    char nNext;
+    int nRet;
+    u_int nU;
+
+    nRet = 0xA1A1;
+    if (!(nChar < 32)) {
+        if (nChar == '#') {
+            if (ppStr != 0) {
+                pStr = *ppStr;
+                nNext = pStr[1];
+                if (nNext == nChar) {
+                    pStr += 1;
+                    nRet = *(u_short *)D_004908D6;
+                } else {
+                    nHigh = hex2val(nNext);
+                    nCode = hex2val((char)pStr[2]);
+                    pStr += 2;
+                    nHigh <<= 4;
+                    nHigh += nCode;
+                    nHigh += 32;
+                    nU = nHigh & 0xFFFF;
+                    nCode = nU % 94;
+                    nCode = (((nU / 94) & 0xFF) << 8) + nCode - 12127;
+                    nRet = nCode & 0xFFFF;
+                }
+                *ppStr = pStr;
+                return nRet;
+            }
+        }
+        nRet = *(u_short *)(D_004908D6 - 70 + nChar * 2);
+    }
+    return nRet;
+}
