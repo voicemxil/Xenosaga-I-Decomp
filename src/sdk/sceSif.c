@@ -54,3 +54,11 @@ void *sceSifSetCmdBuffer(void *buf, int size)
         "sw $4,20($3)"
     );
 }
+
+void *sceSifGetDataTable(void)
+{
+    __asm__ __volatile__(
+        "lui $2,0x99\n\t"
+        "addiu $2,$2,0x18d8"
+    );
+}

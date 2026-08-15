@@ -2193,3 +2193,6 @@ sefLerpVectorA = 0x002E17C8, 0x2C; // sef.c
 sefGetVecMatrix = 0x002E2908, 0x2C; // sef.c
 sefInitEffectCf = 0x002E6C78, 0x40; // sef.c
 sefLoadEffectCfName = 0x002E7780, 0x40; // sef.c
+sceGsGetGParam = 0x002095A0, 0xC; // sceGs.c
+sceResetttyinit = 0x002009A0, 0xC; // sceTty.c
+sceSifGetDataTable = 0x00202790, 0xC; // sceSif.c
