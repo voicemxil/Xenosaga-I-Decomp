@@ -94,32 +94,57 @@ int JNI_getRegister(int nReg)
     return VMRegister[nReg & 0x1F];
 }
 
-/* TODO: near-miss, 2 attempts tried (37 orig words vs 36/34 built) -- loop is
- * indexed-array in original (recompute base+i*4 each iter) but gcc 2.96
- * strength-reduces our do-while to a walking pointer; final branch shape
- * (bgezl-based fallthrough) also doesn't reproduce from an early-return
- * restructure. Needs a permute.py pass or different loop idiom. */
+/* Allocate or fetch a class-DB slot.  nIndex < 0 means "find the first
+ * free slot in classDB[0..7]"; the resulting index (or an index the
+ * caller passed in) then selects the operation: an index below 256
+ * STORES pClass and returns it, an index of 256 or more is a LOOKUP of
+ * classDB[nIndex & 0xff].  (The store/load senses are the opposite way
+ * round from what they look like -- confirmed against the original's
+ * `slti v0,a0,256` / `bnez v0` pair, whose taken edge is the store.) */
+/* Allocate or fetch a class-DB slot.
+ *
+ * nIndex < 0 asks for the first free slot in classDB[0..7]; if all eight
+ * are taken nIndex stays negative and the call returns 0.  The (possibly
+ * just-chosen) index then selects the operation, and the senses are the
+ * opposite way round from what they look like: an index BELOW 256 stores
+ * pClass, an index of 256 or more is a lookup of classDB[nIndex & 0xff].
+ * Confirmed from the original's `slti v0,a0,256` / `bnez v0` pair --
+ * the taken edge is the store block.
+ *
+ * Three shape notes, all needed for the byte match:
+ *  - the search must be goto-form, not do/while or for.  Any structured
+ *    loop lets gcc 2.96 strength-reduce classDB[i] to a walking pointer
+ *    and hoist the %lo out of the loop; the original re-derives
+ *    base + i*4 every iteration.
+ *  - the "slot 0 is free" case assigns nIndex = 0 and jumps, rather than
+ *    sharing the `nIndex = i` store.  gcc emits the original's separate
+ *    `move a0,zero` + `b` only when the constant is written out.
+ *  - the two tail arms converge on ONE `return pClass`, with the lookup
+ *    arm assigning into pClass.  Two separate returns cost four words. */
 void *JNI_loadClassDB(int nIndex, void *pClass)
 {
     int i;
 
     if (nIndex < 0) {
         i = 0;
-        if (classDB[0] != 0) {
-            do {
-                i++;
-            } while (i < 8 && classDB[i] != 0);
+        if (classDB[0] == 0) {
+            nIndex = 0;
+            goto searched;
         }
-        if (i < 8) {
-            nIndex = i;
-        }
+next:
+        i++;
+        if (i >= 8)
+            goto searched;
+        if (classDB[i] != 0)
+            goto next;
+        nIndex = i;
     }
-    if (nIndex >= 0) {
-        if (nIndex < 256) {
-            return classDB[nIndex & 0xff];
-        }
+searched:
+    if (nIndex < 0)
+        return 0;
+    if (nIndex >= 256)
+        pClass = classDB[nIndex & 0xff];
+    else
         classDB[nIndex] = pClass;
-        return pClass;
-    }
-    return 0;
+    return pClass;
 }

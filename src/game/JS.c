@@ -39,6 +39,35 @@ void JS_init(int hRsrc, int nPrimitives, int nClasses)
     classes = RSRC_alloc(hRsrc, nClasses * sizeof(JCLASS), 0);
 }
 
+/* FLAG/TOOL REQUEST (verified). Source is exhaustively tuned: 24 shapes
+ * of the two bump-allocations and the four stores were swept, and the
+ * one below is the unique minimum at 9 diffs. Those 9 are a pure sched2
+ * permutation with an identical instruction multiset -- the original
+ * issues `lw primitive` three slots later and `numPrimitive++` six slots
+ * later than gcc 2.96 does here.
+ *
+ * The permutation is exactly two "move one instruction down" edits, and
+ * --rotate with a negative LEN already IS that edit. What blocks it is
+ * that the two windows OVERLAP (10..13 and 12..18), and rotate_insns
+ * resolves every site against one left-to-right scan, so only the first
+ * of two overlapping sites can fire. Applying the same two sites as two
+ * SEQUENTIAL fix_cc_asm invocations (the .s is rewritten in place, so
+ * chaining is exact) gives a byte-perfect match:
+ *
+ *   pass 1:  --rotate JS_loadClass:12:-7      (numPrimitive++ to the end)
+ *   pass 2:  --rotate JS_loadClass:10:-4      (lw primitive down three)
+ *
+ * Verified: JS.c goes 6 match/1 not -> 7 match/0 not, and the function is
+ * byte-identical over all 27 words. Individually the sites give 7 diffs
+ * (site 10 alone) and 4 diffs (site 12 alone); both in one pass gives 7,
+ * i.e. the second site is silently dropped.
+ *
+ * The ask is therefore a tools/fix_cc_asm.py change, not a per-file flag:
+ * let --rotate apply its sites one at a time, re-resolving indices after
+ * each (or let a pass list be split into ordered groups). Once that
+ * exists, wire the two sites above for JS.c and register:
+ *   JS_loadClass = 0x0026B1A0, 0x6C; // JS.c
+ */
 /* Register a class: one class slot plus a type-7 primitive referencing it */
 JCLASS *JS_loadClass(int nName)
 {
