@@ -1,5 +1,7 @@
 /* Battle scene visual-effect scheduler functions (sv* family) */
 
+#include "matching.h"
+
 extern char _imageMapper[];
 void *svGetTypeList(int idx) { return _imageMapper + idx * 0x241C; }
 
@@ -30,10 +32,16 @@ void svDrawAlters(void) {
 
 extern int _scMslCate;
 extern void MEfObjExec2nd(int a);
+/* PIN to $a0: gcc otherwise copies the parameter into $v1 for the compare
+ * and leaves $a0 for the tail call; the original compares against $a0
+ * directly. The pin sticks because n is also the call argument. */
 void svDrawMissile(int a) {
+    PIN(int n, "$4");
+
+    n = a;
     if (_draw3D == 0) {
-        if (_scMslCate == a) {
-            MEfObjExec2nd(a);
+        if (_scMslCate == n) {
+            MEfObjExec2nd(n);
         }
     }
 }

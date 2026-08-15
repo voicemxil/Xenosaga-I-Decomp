@@ -181,9 +181,17 @@ void DefocusMainType06(GAME_DEFOCUS *p, void *pkt)
 
 int ScanLineInterpolate;
 
-/* TODO near-match (10 diffs): the two 64-bit DispEnv stores come out in
-   the opposite order and the two `and`s with -2 swap registers; no source
-   ordering of the three statements reaches it (permuter: 6/6 tried). */
+/* TODO near-match (9 diffs, was 10): the two 64-bit DispEnv stores come out
+   in the opposite order and the two `and`s with -2 swap registers.
+   The crux is that the original emits the two `and $x,-2` back to back and
+   only then the `or`, which leaves the nPMode value ready last and puts its
+   sd in the jr delay slot; we emit nPMode's and, then the or, then
+   aUnk08's and, so aUnk08's store lands in the delay slot instead.
+   Tried (all 6 source orderings of the three statements, previous session)
+   plus this session: a masked-nPMode temp (9), masked temps for both fields
+   (12), loads hoisted into temps with the masking left inline (10), loads
+   plus explicit separate &=/|= steps (9), and additionally hoisting
+   p->nParam into a temp (9). None reorders the two `and`s. Parked. */
 /* Type 9 teardown: drop the interlace bit and reset the scanline filter */
 void DefocusMainType09Final(GAME_DEFOCUS *p)
 {

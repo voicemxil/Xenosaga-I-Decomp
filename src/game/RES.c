@@ -1,5 +1,7 @@
 /* RES - resource table lookups: enemy SE banks, motion base IDs, foot step data */
 
+#include "matching.h"
+
 typedef struct {
     unsigned short nId;             /* 0x00 */
     unsigned char nType;            /* 0x02 */
@@ -151,23 +153,27 @@ char *RES_GetMotBaseName(unsigned short nId)
     return cfMtnList[0].pName;
 }
 
-/* TODO near-match (20 diffs, correct length/structure): the original keeps
-   the destination in $a3 and reuses the table-pointer register $a2 for the
-   foot_name pointer; ours allocates them the other way round. */
+/* Pins carry the original's register roles: the destination walks in $a3
+   and BOTH the se-table entry and the foot_name pointer live in $a2 (the
+   original reuses the one register for the two successive pointers).
+   Pinning only the destination, or the two source pointers to different
+   registers, both leave 12-13 diffs. */
 /* Build "XX_" + the current foot step name for the party leader */
 void RES_GetLeaderSeName(char *pName)
 {
-    char *p;
-    char *q;
+    PIN(char *pDst, "$7");
+    PIN(char *p, "$6");
+    PIN(char *q, "$6");
 
+    pDst = pName;
     p = RES_leader_se_table[D_004A1854[0]];
-    pName[0] = p[0];
-    pName[1] = p[1];
-    pName[2] = '_';
-    pName += 3;
+    pDst[0] = p[0];
+    pDst[1] = p[1];
+    pDst[2] = '_';
+    pDst += 3;
     q = foot_name;
-    while ((*pName = *q) != 0) {
+    while ((*pDst = *q) != 0) {
         q++;
-        pName++;
+        pDst++;
     }
 }

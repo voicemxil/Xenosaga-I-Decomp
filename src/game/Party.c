@@ -194,18 +194,25 @@ void PartyTakeAgwsOff(int nNo)
     }
 }
 
-/* TODO: Matches except an irreducible pointer/mask register tie-break (a0 vs a1). */
+/* Four pins carry the original's register roles: pData lands in $a0 (gcc
+ * otherwise leaves it in $a1), the shift constant 1 gets its own $v0 (gcc
+ * otherwise shifts the mask in place in $v1), and the range test reuses
+ * nShift's own $s0 -- which is why the test is written as an assignment
+ * back into nShift rather than as a plain `if (nShift >= 0x10)`. */
 /* Ask whether an AGWS slot is currently taken */
 int PartyTakeAgwsCheck(int nNo)
 {
-    PARTY_DATA *pData;
-    unsigned int nShift;
-    unsigned int nMask;
+    PIN(PARTY_DATA *pData, "$4");
+    PIN(unsigned int nMask, "$3");
+    PIN(unsigned int nShift, "$16");
+    PIN(unsigned int nOne, "$2");
 
     pData = PartyDataGet();
     nShift = nNo - 0x11;
-    nMask = 1 << nShift;
-    if (nShift >= 0x10) {
+    nOne = 1;
+    nMask = nOne << nShift;
+    nShift = (nShift < 0x10);
+    if (nShift == 0) {
         return 0;
     }
     return (pData->nTakeAgws & nMask) != 0;
