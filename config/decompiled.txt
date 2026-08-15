@@ -2196,3 +2196,6 @@ sefLoadEffectCfName = 0x002E7780, 0x40; // sef.c
 sceGsGetGParam = 0x002095A0, 0xC; // sceGs.c
 sceResetttyinit = 0x002009A0, 0xC; // sceTty.c
 sceSifGetDataTable = 0x00202790, 0xC; // sceSif.c
+JNT_getRootTrans = 0x00313D28, 0x18; // JNT
+JNT_getRootRotate = 0x00313D40, 0x18; // JNT
+JNT_getRootScale = 0x00313D58, 0x18; // JNT

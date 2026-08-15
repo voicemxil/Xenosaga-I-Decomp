@@ -213,6 +213,13 @@ FILE_FIX_FLAGS = {
     # the lui/mtc1 pair for a float constant -- a 3-element rotation,
     # which --swap-adjacent structurally cannot express.
     "tskUmn.c": "--rotate tskUmnSimulationInfo:100",
+    # JNT root accessors: TI-mode quadword copies whose allocator
+    # tie-break lands the pair backwards (JVM subagent, verified).
+    "JNT.c": ("--hoist-return-store JNT_getRootTrans,JNT_getRootRotate,"
+              "JNT_getRootScale "
+              "--swap-regs JNT_getRootTrans:2-3 "
+              "--swap-regs JNT_getRootRotate:2-3 "
+              "--swap-regs JNT_getRootScale:2-3"),
     "Menu.c": ("--barrier-return-store MenuRWeaponCheck2 "
                "--branch-likely MenuFaceEpidGet:3,MenuSkillEquip:2 "
                "--swap-adjacent MenuAgwsListMake_Gun:30,"
