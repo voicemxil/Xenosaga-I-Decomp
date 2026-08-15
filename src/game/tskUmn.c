@@ -99,6 +99,10 @@ extern void eMessageMain(void *pMsg);
 extern void endPrintExtFunc(int nColor, int nMode, void *pBox);
 
 extern char *UmnPluginTextGet(signed char nNo);
+extern char *ListText[];
+extern char *strcpy(char *pDst, const char *pSrc);
+extern void *memcpy(void *pDst, const void *pSrc, unsigned int nSize);
+extern char *strcat(char *pDst, const char *pSrc);
 
 /* --- info-window work object (bottom help window of each screen) --- */
 typedef struct {
@@ -109,7 +113,10 @@ typedef struct {
     WINDOWDX win;                       /* 0x0C */
     MSGDX msg;                          /* 0x1A0 */
     char pad1E4[0x350 - 0x1E4];
-    char szText[0x10];                  /* 0x350 (simulation) */
+    union {
+        char szText[0x10];              /* 0x350 (simulation) */
+        long long nAlign;
+    } u;
 } UMN_INFO;
 
 /* Database screen: bottom info window; the caption follows the database
@@ -496,5 +503,97 @@ void tskUmnDataBasePas(TSK_TASK *pTask, UMN_PAS_L *w)
             endPrintExtFunc(w->nColor, 102, 0);
         }
         break;
+    }
+}
+
+/* TODO: near-miss (SCHEDULING, 3) -- the slide-tail rotation: original
+   emits addiu a0,s1,14 BEFORE the 3.0f lui/mtc1 pair, ours after. Every
+   creation-order lever tried (float local, pinned $f12/$4 pair, laundered
+   pY pointer) leaves the pair glued first. One 3-insn rotation; a
+   site-indexed swap pass or the permuter would finish it. Not registered. */
+/* Simulation screen: bottom info window; on the list pages the caption is
+ * built from the selected script name */
+void tskUmnSimulationInfo(TSK_TASK *pTask, UMN_INFO *w)
+{
+    short nTarget;
+
+    if (UmnWork.nScene != 3) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nColor = 0xFF0000;
+        strcpy(w->u.szText, "");
+        w->bReady = 0;
+        w->nMode = 0;
+        WindowDXSet(&w->win);
+        w->win.nX = -16;
+        *(volatile char *)&w->win.nState = 0;
+        w->win.nY = 480;
+        w->win.nW = 544;
+        w->win.nH = 54;
+        w->win.nColor = w->nColor;
+        w->win.pFunc = MenuInfoWindow;
+        w->win.pMsg = &w->msg;
+        w->msg.nX = 0;
+        w->win.nState = 1;
+        w->msg.nY = 0;
+        w->msg.pText = 0;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        break;
+    case 2: {
+        int nPage;
+        char *pText;
+
+        nTarget = 386;
+        if (w->nMode != 0) {
+            if (w->nMode != 2) {
+                goto textonly;
+            }
+        } else {
+            w->nMode = 2;
+            w->bReady = 1;
+        }
+        nPage = UmnWork.nPage;
+        if (nPage < 18) {
+            if (nPage < 16) {
+                goto park16;
+            }
+            if (UmnWork.u.nSimulationScript >= 0) {
+                {
+                    char *pLit = "\xa5\xb7\xa5\xca\xa5\xea\xa5\xaa\x20";
+                    register long long nHead __asm__("$5");
+                    register unsigned short nTail __asm__("$3");
+
+                    nTail = *(unsigned short *)(pLit + 8);
+                    nHead = *(long long *)pLit;
+                    *(long long *)w->u.szText = nHead;
+                    *(short *)(w->u.szText + 8) = nTail;
+                }
+                pText = w->u.szText;
+                strcat(pText, ListText[UmnWork.u.nSimulationScript]);
+                strcat(pText, "\xa4\xce\xb7\xeb\xb2\xcc");
+                w->msg.pText = pText;
+                goto slide;
+            }
+            goto textonly;
+        }
+park16:
+        nTarget = 512;
+        pText = w->u.szText;
+        w->msg.pText = pText;
+        goto slide;
+        if (0) {
+textonly:
+            pText = w->u.szText;
+            w->msg.pText = pText;
+        }
+slide:
+        MoveSlide(&w->win.nY, &nTarget, 3.0f);
+        WindowDXMain(&w->win);
+        break;
+    }
     }
 }
