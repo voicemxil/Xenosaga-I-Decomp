@@ -1,6 +1,8 @@
 /* Assorted accessor helpers - map unit signals, ladder/arrival tables and
    enemy actor lookups */
 
+#include "matching.h"
+
 typedef struct {
     char pad0[0x1A4];
     signed char nSignal;        /* 0x1A4 */
@@ -152,18 +154,28 @@ void GetMdlFileName(void)
 {
 }
 
-/* TODO: near-match (LENGTH) - gcc schedules the range subtraction relative to
- * the xglSRand call differently than the original; every variant tried
- * (combined vs split subtraction/increment) is one instruction short. */
+/* TODO: near-match (SCHEDULING, 2) - was LENGTH -1 word; separate max/min
+ * locals + LAUNDER on each plus LAUNDER_V on range now reproduce the full
+ * 19-word instruction multiset (the redundant move-then-subtract the
+ * original uses to keep max/min live across the xglSRand call). Only the
+ * ra-save-vs-subu tie-break is left: original emits `subu s0,s0,s1` before
+ * `sd ra,16(sp)`, built emits them in the opposite order. Tried PIN(range,
+ * "$16") and SCHED_NOP at the boundary; both regressed. */
 /* Return a random integer in the inclusive range */
 int Get_Rnd(int minimum, int maximum)
 {
-    int range = maximum - minimum;
+    int max = maximum;
+    int min = minimum;
+    int range;
     int random;
 
+    LAUNDER(max);
+    LAUNDER(min);
+    range = max - min;
+    LAUNDER_V(range);
     random = xglSRand();
     range++;
-    return minimum + random % range;
+    return min + random % range;
 }
 
 /* Return the sector containing an angle, or -1 outside every sector. */

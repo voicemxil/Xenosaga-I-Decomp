@@ -31,6 +31,30 @@ typedef struct {
 extern ENEPC enepc[];
 extern void BSpline_Init(void *pSpline, void *pPath, float speed);
 
+/* Raw EE kernel syscall stub (see src/sdk/kernel.c); declared here with an
+   int return so the syscall's v0 result flows straight back out. */
+extern int _SetTLBEntry(int nIndex);
+
+/* TODO: near-match (LOGIC, 8/12) - byte-identical length (0x30) to the
+ * original, and the compare/branch-vs-call skeleton is right, but two
+ * details differ: (1) original's branch polarity takes the *success* path
+ * (bnez -> jal) and falls through to a shared "b -> li v0,-1" tail that
+ * lands on the common epilogue, where ours computes the same test but
+ * schedules it before the sp/ra setup and doesn't share the epilogue with
+ * the -1 path; (2) tried both `if(in_range) return call()` and the
+ * inverted `if(!in_range) return -1` forms plus an explicit nRet local for
+ * a shared-tail goto shape -- the local grew the function to 0x38 bytes
+ * (duplicate epilogue got worse, not better) and the inverted form also
+ * regressed. Kept the smallest (8-diff, exact-length) variant. */
+/* Install a TLB entry for indices 13..47 (the mappable range), else -1 */
+int SetTLBEntry(int nIndex)
+{
+    if ((unsigned int)(nIndex - 13) < 35) {
+        return _SetTLBEntry(nIndex);
+    }
+    return -1;
+}
+
 /* Arm (or clear) the on-screen enemy mark timer for a unit's enepc slot */
 void Set_EnemyMark(SPLINE_UNIT *pUnit, short nTimer)
 {

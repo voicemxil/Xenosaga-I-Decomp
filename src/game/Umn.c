@@ -1,5 +1,7 @@
 /* Menu (Umn) subsystem - mail box, encyclopedia flags and the mail screen driver */
 
+#include "matching.h"
+
 typedef unsigned short u_short;
 
 typedef struct {
@@ -136,24 +138,26 @@ void *UmnEventTextInit(void *pRaw)
     return (char *)pAligned + 0x2000;
 }
 
-/* TODO: near-miss (LOGIC, 6 diffs) -- the bounds-check compare and the
-   base-pointer load interleave differently: original does
-   sltiu v1,a0,0x80 / lw a1,(v0) / beqz v1 while ours computes the sltiu
-   in-place on a0 and branches on a different test. Tried collapsing to
-   a ternary return (regressed to 9 diffs / grew by 4 bytes, reverted).
-   Not registered. */
 /* Look up a history-tree slot by index; NULL if out of range */
 int *UmnHistoryTreeGet(int nNo)
 {
+    int *pBase = UmnHistoryTreeBuf[0];
     int *pRet = 0;
     if ((unsigned int)nNo < 128) {
-        pRet = &UmnHistoryTreeBuf[0][nNo];
+        pRet = pBase + nNo;
     }
     return pRet;
 }
 
-/* TODO: near-miss (LOGIC, register-alloc/scheduling) -- not registered. */
-/* Look up a plugin text slot by index; clamps to the base slot when out of range */
+/* TODO: near-miss (LOGIC) -- the original loads pBase and computes the
+   nNo*128 offset unconditionally before the range branch (register a1
+   holds pBase across both paths, reused as the default return value in
+   the branch-taken delay slot). Every source shape tried here (plain
+   if, precomputed offset local, ternary, LAUNDER-pinned offset) gets
+   optimized into either a lazily-hoisted load inside the branch (8
+   words, 1 short) or a movn/mult conditional-move idiom (7 words) --
+   neither matches the original's 9-word unconditional-then-branch
+   shape. Not registered. */
 char *UmnPluginTextGet(int nNo)
 {
     char *pBase = umn_text[0];

@@ -25,9 +25,14 @@ float UnduGet(float x, float z)
     return UnduGet2(0, x, z);
 }
 
-/* TODO: near-match (LENGTH) - all recovered fields/constants are present,
- * but GCC reorders/coalesces zero stores (21 original vs 22 built words).
- * Recover the original initialization expression/dependency shape. */
+/* TODO: near-match (SCHEDULING, 15) - same 21-instruction multiset as the
+ * original (field_28 is correctly left uninitialized), but the two
+ * constant loads for field_38 (li v0,1) and field_1C (lui v1,0x7000) swap
+ * with respect to their stores: the original loads v1 before v0 yet
+ * stores v0 (field_38) before v1 (field_1C). Tried reordering the source
+ * statements both ways; each reorder also moved the *store* order and
+ * traded this tie-break for a real LOGIC diff instead. Needs a scheduling
+ * lever (temp + LAUNDER at the load site?) rather than a source reorder. */
 void UnduParamInit(UNDU_PARAM *param)
 {
     param->field_0D = 0x10;
@@ -42,7 +47,8 @@ void UnduParamInit(UNDU_PARAM *param)
     param->field_0C = 0x10;
     param->field_18 = 0;
     param->field_20 = 0;
-    param->field_28 = 0;
+    /* field_28 is left uninitialized by the original -- only field_20 and
+       field_30 get zeroed here. */
     param->field_30 = 0;
 }
 

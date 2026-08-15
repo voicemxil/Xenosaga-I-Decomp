@@ -2243,3 +2243,4 @@ sceCdCallback = 0x0020C9A8, 0x54; // sceCd.c
 sceSifSyncIop = 0x00208630, 0x38; // sceSif.c
 sceIpuSync = 0x002104A8, 0x68; // sceIpu.c
 JNT_getStaticVal2 = 0x00310C10, 0xF8; // JNT.c
+UmnHistoryTreeGet = 0x00A0F128, 0x24; // Umn.c
