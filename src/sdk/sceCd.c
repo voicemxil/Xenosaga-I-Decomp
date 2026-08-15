@@ -300,3 +300,68 @@ __asm__(
     ".set reorder\n"
     ".end sceCdInitEeCB\n"
 );
+
+/* ------------------------------------------------------------------
+ * Synchronous command waiting.
+ * ------------------------------------------------------------------ */
+
+typedef struct sceSemaParam {
+    int currentCount;
+    int maxCount;
+    int initCount;
+    int numWaitThreads;
+    int attr;
+    int option;
+} sceSemaParam;
+
+extern int CreateSema(sceSemaParam *param);
+extern int DeleteSema(int sid);
+extern int WaitSema(int sid);
+extern int SetAlarm(unsigned short time, void *handler, void *arg);
+extern void CB_DelayTh(void);
+extern int scePrintf(const char *fmt, ...);
+extern int sceSifCheckStatRpc(void *rd);
+extern int SCE_CD_debug;
+/* libcdvd's SIF-RPC client-data block for the "S" (synchronous)
+ * command channel, 0x004AD448. */
+extern int _sceCd_cd_scmd;
+
+/* NEAR-MISS, not registered: matches byte for byte at "-O2 -G0" (26
+ * words) but is 7 positions out of order under -fno-schedule-insns.
+ * One more instance of the flag request at the top of this file --
+ * there is nothing wrong with the C.
+ *
+ * Sleep the calling thread for `usec` microseconds by parking on a
+ * fresh semaphore that the alarm callback signals. */
+void sceCdDelayThread(unsigned short usec)
+{
+    sceSemaParam sp;
+    int sid;
+
+    sp.maxCount = 1;
+    sp.initCount = 0;
+    sp.option = 0;
+    sid = CreateSema(&sp);
+    SetAlarm(usec, (void *)CB_DelayTh, (void *)sid);
+    WaitSema(sid);
+    DeleteSema(sid);
+}
+
+/* sceCdSyncS: mode 0 blocks until the drive's RPC finishes, polling
+ * every 60us; any other mode just reports whether it is still busy.
+ *
+ * Testing `mode == 0` (not `mode != 0`) is load-bearing: it keeps the
+ * blocking path as the fall-through, which is the branch polarity the
+ * original has. Inverted, gcc lays the one-shot poll out first and the
+ * function is a word longer. */
+int sceCdSyncS(int mode)
+{
+    if (mode == 0) {
+        if (SCE_CD_debug > 0)
+            scePrintf("S cmd wait\n");
+        while (sceSifCheckStatRpc(&_sceCd_cd_scmd) != 0)
+            sceCdDelayThread(60);
+        return 0;
+    }
+    return sceSifCheckStatRpc(&_sceCd_cd_scmd);
+}

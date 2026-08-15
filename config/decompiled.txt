@@ -2307,3 +2307,4 @@ sub2JoutoYGet = 0x002BA470, 0x34; // sub.c
 scePrintf = 0x002026C8, 0x60; // scePrintf.c
 sceCdSyncS = 0x0020D4E8, 0x6C; // sceCd.c
 Java_xeno_Camera_transCNS__Ljava_lang_Object_FFF = 0x002FB800, 0x100; // Java_Camera.c
+sceMcGetSlotMax = 0x0020EC88, 0xC0; // sceMc.c
