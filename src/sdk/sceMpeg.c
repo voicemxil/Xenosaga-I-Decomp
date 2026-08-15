@@ -125,3 +125,29 @@ int sceSetPtm(SCEMPEGHANDLE *mp, long long ptm)
     mp->pCtx->nUnk0F0 = ptm;
     return 1;
 }
+
+extern int sceMpegDemuxPssRing(int a0, int a1, int a2, int a3, int a4);
+
+int sceMpegDemuxPss(int a0, int a1, int a2)
+{
+    return sceMpegDemuxPssRing(a0, a1, a2, 0, -1);
+}
+
+int sceMpegAddCallback(SCEMPEGHANDLE *mp, int idx, int a2, int a3)
+{
+    char *ctx;
+    int off;
+    char *p1;
+    char *p0;
+    int old;
+
+    ctx = (char *)mp->pCtx;
+    off = idx << 3;
+    p1 = ctx + 12;
+    p0 = ctx + off;
+    p1 = p1 + off;
+    *(int *)(p0 + 16) = a3;
+    old = *(int *)p1;
+    *(int *)p1 = a2;
+    return old;
+}
