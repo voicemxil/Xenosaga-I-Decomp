@@ -33,6 +33,20 @@ void sprt_init(void *pSprite)
     *((unsigned char *)pSprite + 2) = 0x80;
 }
 
+void mask_init(int *pMask)
+{
+    pMask[0] = 0x60;
+    pMask[1] = 0x8000;
+}
+
+void container_init(EWCONTAINER *pContainer)
+{
+    *(int *)((char *)pContainer + 12) = 0;
+    pContainer->ppItems = 0;
+    pContainer->nNum = 0;
+    *(int *)((char *)pContainer + 8) = 0;
+}
+
 extern void EW_drawComoponent(void *pPacket, EWCOMP *pComp);
 extern void EW_setDrawEnv(void *pPacket);
 extern void EW_sendPacket(void *pPacket);
