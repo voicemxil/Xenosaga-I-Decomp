@@ -2157,3 +2157,6 @@ ProbeTLBEntry = 0x00208A10, 0x10; // kernel
 iProbeTLBEntry = 0x00208A20, 0x10; // kernel
 ExpandScratchPad = 0x00208A30, 0x10; // kernel
 FindAddress = 0x002090C0, 0x10; // kernel
+eMessageNextGyou = 0x0027ACC8, 0xE8; // eMessage
+eMessageNextWaitKeySearch = 0x0027AE10, 0xC4; // eMessage
+tskUmnSimulationInfo = 0x00A0BD08, 0x1DC; // tskUmn

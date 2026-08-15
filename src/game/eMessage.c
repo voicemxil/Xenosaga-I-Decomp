@@ -104,7 +104,7 @@ const char* eMessageNextGyou(const char* str)
     {
         if (*it > 0 && *it < 0x1A)
         {
-            it += xglFontGetSPcodeSize(*it, it) + 1;
+            it += xglFontGetSPcodeSize((u8)*it, it) + 1;
         }
         else if (*it == 0x1e)
         {
@@ -134,6 +134,10 @@ const char* eMessageNextGyou(const char* str)
     return it;
 }
 
+/* TODO: near-miss (SCHEDULING, 5 diffs) - orig prologue saves s0/move
+   s0,zero/s1/li s1,0x1f/ra in that order; every C shape tried (do-while,
+   for(;;), decl-order swap) produces identical -O2 output with `sd ra`
+   hoisted to the front instead. Parked. */
 s32 eMessageNextGyouMaxGet(const char* str)
 {
     s32 ret = 0;
@@ -172,7 +176,7 @@ const char* eMessageNextWaitKeySearch(const char* str)
 
         if (*it > 0 && *it < 0x1A)
         {
-            it += xglFontGetSPcodeSize(*it, it) + 1;
+            it += xglFontGetSPcodeSize((u8)*it, it) + 1;
         }
         else if (*it == 0x1e)
         {
@@ -730,10 +734,11 @@ void eMessageDraw()
 }
 
 void eMessageCat(const char* str);
-/* TODO: eMessageCat is 79d -- the original rotates the while loop
- * (branch-to-test with an lb signed load at the body head) where our
- * build emits a guarded straight-line form with lbu; needs loop
- * restructuring, not operand tweaks. */
+/* TODO: eMessageCat is 79d (down from 82 after the (u8) SPcodeSize-arg
+ * cast picked up in eMessageNextGyou/eMessageNextWaitKeySearch) -- the
+ * original rotates the while loop (branch-to-test with an lb signed load
+ * at the body head) where our build emits a guarded straight-line form
+ * with lbu; needs loop restructuring, not operand tweaks. */
 void eMessageCpy(char* buf, const char* str)
 {
     MessageCpyEnd = buf;
@@ -757,7 +762,7 @@ void eMessageCat(const char* str)
     {
         if (*it >= 1 && *it <= 0x19)
         {
-            pcode_size = xglFontGetSPcodeSize(*it, it) + 1;
+            pcode_size = xglFontGetSPcodeSize((u8)*it, it) + 1;
 
             for (i = 0; i < pcode_size; i++)
             {
