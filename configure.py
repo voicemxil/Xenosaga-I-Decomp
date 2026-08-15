@@ -173,7 +173,8 @@ FILE_FIX_FLAGS = {
     # swap flag", which --swap-adjacent now is. NOTE all sites for one
     # pass must be a single comma-separated value (argparse stores, not
     # appends; fix_cc_asm.py rejects duplicates).
-    "sceVif1Pk.c": "--swap-adjacent sceVif1PkCnt:9,sceVif1PkEnd:9",
+    "sceVif1Pk.c": ("--swap-adjacent sceVif1PkCnt:9,sceVif1PkEnd:9,"
+                    "sceVif1PkAddUpkData128:10,sceVif1PkAddUpkData128:15!"),
     # an lwc1 in a jal delay slot followed by mov.s trips a bogus hazard nop
     "MAP.c": "--omit-hazard mov.s",
     # many util natives do lwc1->cvt.s.w with no hazard nop in the original
