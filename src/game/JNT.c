@@ -130,6 +130,10 @@ void CUR_MATRIX_Get(void *pMtx);
 void CUR_MATRIX_Txyz4s(void *pVec);
 void CUR_MATRIX_Rzyx4s(void *pAngle);
 void JNT_readAttribute(void *pWork, void *pBlock);
+JNT_ELEMENT *JNT_setMDLMatrix(JNT_WORK *pWork, JNT_ELEMENT *pElement);
+
+/* A producer callback: (work area, root element, registered argument). */
+typedef void (*JNT_CONSUMER)(JNT_WORK *, JNT_ELEMENT *, void *);
 
 /* Element count of the model currently loaded in the work area */
 int JNT_hairID(JNT_WORK *pWork)
@@ -521,4 +525,111 @@ void JNT_onSmoothHair(void)
 void JNT_offSmoothHair(void)
 {
     flagSmoothHair = 0;
+}
+
+
+/* Register (or re-register) a consumer callback on a producer.  An
+   existing entry with the same key is overwritten in place; otherwise a
+   new slot is appended.  Always returns 0. */
+int JNT_addConsumer(JNT_PRODUCER *pProducer, void *pKey, void *pFunc,
+                    void *pArg)
+{
+    int nNum;
+    int i;
+    int nIndex;
+
+    nNum = pProducer->nNum;
+    nIndex = -1;
+    for (i = 0; i < nNum; i++) {
+        if (pProducer->aKey[i] == pKey) {
+            nIndex = i;
+            break;
+        }
+    }
+    if (nIndex < 0) {
+        nIndex = nNum;
+        pProducer->nNum = nNum + 1;
+    }
+    pProducer->aKey[nIndex] = pKey;
+    pProducer->aFunc[nIndex] = pFunc;
+    pProducer->aArg[nIndex] = pArg;
+    return 0;
+}
+
+
+/* Rebuild the whole matrix palette for the model currently loaded in the
+   work area: first every element and sub-element, then whatever joints are
+   left over.  Both passes drive JNT_setMDLMatrix from the element cursor
+   it returns, and both reset the palette counter first. */
+void JNT_setModelMatrix(void)
+{
+    JNT_ELEMENT *pRoot;
+    JNT_ELEMENT *pElement;
+    JNT_MODEL *pModel;
+    int nIndex;
+    int nTotal;
+
+    pRoot = JNT->pRoot;
+    if (pRoot == 0) {
+        return;
+    }
+    pElement = pRoot;
+    pModel = JNT->pModel;
+    JNT->nIndex = 0;
+    nTotal = pModel->nElementNum + pModel->nSubNum;
+    JNT->nMatrixNum = 0;
+    nIndex = 0;
+    if (nTotal != 0) {
+        do {
+            pElement = JNT_setMDLMatrix(JNT, pElement);
+            nIndex = JNT->nIndex;
+        } while (nIndex < nTotal);
+        pModel = JNT->pModel;
+    }
+    nTotal = pModel->nJointNum;
+    JNT->nMatrixNum = 0;
+    if (nIndex < nTotal) {
+        do {
+            pElement = JNT_setMDLMatrix(JNT, pElement);
+        } while (JNT->nIndex < nTotal);
+    }
+}
+
+/* Begin one production pass: reset the per-frame cursor state, publish the
+   producer/unit/frame into the work area and, unless the animation is
+   suppressed, hand control to the producer's first consumer.  The consumer
+   pointer is sanity-checked against the text segment and for alignment
+   before it is called. */
+int JNT_startProduction(JNT_PRODUCER *pProducer, void *pUnit, float fFrame)
+{
+    JNT_CONSUMER pFunc;
+    JNT_ELEMENT *pRoot;
+    void *pArg;
+
+    JNT->nInterrupt = 0;
+    JNT->nIndex = 0;
+    pProducer->nUnk70 = 0;
+    JNT->fFrame = fFrame;
+    JNT->pUnit = pUnit;
+    JNT->pProducer = pProducer;
+    /* Read while the 0x70000000 base is still CSEd in one register: the
+       original folds this load into the delay slot of the test below. */
+    pRoot = JNT->pRoot;
+    if ((JNT->nAnimFlags & 0x08000000) != 0) {
+        pProducer->nFlags = 0;
+        return 0;
+    }
+    if (pProducer->nNum > 0) {
+        pFunc = (JNT_CONSUMER)pProducer->aFunc[0];
+        pArg = pProducer->aArg[0];
+        if ((unsigned int)((int)pFunc - 0x1F0000) <= 0x1E0FFFF
+            && ((int)pFunc & 3) == 0) {
+            pFunc(JNT, pRoot, pArg);
+            if (pUnit != 0) {
+                *(void **)((char *)pUnit + 0xA60) = JNT->pMatrix;
+            }
+        }
+    }
+    pProducer->nFlags = JNT->nFlags;
+    return 0;
 }

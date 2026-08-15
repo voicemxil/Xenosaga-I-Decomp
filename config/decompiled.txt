@@ -2283,3 +2283,4 @@ Vibration_Set_Strong = 0x002D6CA8, 0x40; // Vib.c
 JNT_addConsumer = 0x00313D70, 0x9C; // JNT.c
 JNT_startProduction = 0x00313E58, 0xCC; // JNT.c
 MenuItemInfoMain = 0x0028A368, 0x348; // Menu.c
+JNT_setModelMatrix = 0x00313A90, 0xC0; // JNT.c
