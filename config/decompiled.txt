@@ -2004,3 +2004,4 @@ frame_init = 0x0026BFE8, 0x10; // EW.c
 sprt_init = 0x0026BFF8, 0x10; // EW.c
 mask_init = 0x0026C008, 0x14; // EW.c
 xglCameraTravelProc = 0x0022B910, 0xA4; // xglCamera
+// xglPacketInterpolate = 0x0022C398, 0xB4; // xglPacket.c -- WIP: 20d, registered by a wave-5 agent before the body matched; re-enable at 0d
