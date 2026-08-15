@@ -2269,3 +2269,7 @@ Java_xeno_Chr_setPointLightPos__IFFF = 0x00300600, 0xE0; // Java_Chr.c
 PartyTimeUpDate = 0x002B68E8, 0x94; // Party.c
 JTHREAD_defaultScene = 0x00305638, 0x60; // JTHREAD.c
 tskUmnMailPas = 0x00A05738, 0x348; // tskUmn.c
+MATRIX_convert4MulMatrix = 0x0026E1E0, 0x9C; // MATRIX.c
+MATRIX_convert4MulMatrixRev = 0x0026E280, 0x8C; // MATRIX.c
+JTHREAD_defaultChr = 0x00305510, 0xC4; // JTHREAD.c
+JTHREAD_defaultUnit = 0x00305448, 0xC4; // JTHREAD.c
