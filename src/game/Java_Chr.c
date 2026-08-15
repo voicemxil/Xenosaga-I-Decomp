@@ -152,7 +152,7 @@ void ACT_filterStealth(void);
  * file, but a few natives need the union view: reading an index through
  * the union gives it the union's alias set, which stops gcc 2.96's TBAA
  * from CSEing that index across the float stores that follow. */
-typedef union JVAL { int i; float f; void *p; } JVAL;
+typedef union JVAL { int i; float f; void *p; unsigned short h; } JVAL;
 
 /* Byte offset of a named field within a xeno.Chr script object */
 #define CHR_FIELD(name) \
@@ -490,7 +490,7 @@ void Java_xeno_Chr_getScale__(void *env, int *args, int *ret)
     p->y = chr->fScale[1];
     p->z = chr->fScale[2];
     p->w = chr->fScale[3];
-    ret[0] = (int)p;
+    ((JVAL *)ret)[0].i = (int)p;
 }
 
 /* Chr.sclX(float, float, boolean) */
@@ -967,21 +967,35 @@ void Java_xeno_Chr_look_point__FFF(void *env, int *args, int *ret)
     char *obj = (char *)args[0];
     CHR *chr = CHR_PEER(obj);
 
-    chr->fLookPoint[0] = *(float *)&args[1];
-    chr->fLookPoint[1] = *(float *)&args[2];
-    chr->fLookPoint[2] = *(float *)&args[3];
     chr->nLookMode = 3;
+    chr->fLookPoint[0] = ((JVAL *)args)[1].f;
+    chr->fLookPoint[1] = ((JVAL *)args)[2].f;
+    chr->fLookPoint[2] = ((JVAL *)args)[3].f;
 }
 
 /* Point the character's eyes at explicit yaw/pitch angles */
 /* TODO: not matching - the eye-control store schedules before the first float store */
+/* FLAG REQUEST (verified).  Source is exact -- every one of the 40 words
+   matches except a single missing hazard nop between the synthesized
+   `lui at,0x4334 / mtc1 at,$f2` (180.0f) and the `mul.s` that follows.
+   --lis-hazard-nop, which exists for exactly this shape, does not fire
+   here (19 diffs); --mtc1-nop does.  Verified MATCH, all 40 words, with:
+       --mtc1-nop Java_xeno_Chr_look_eye_set__FF:0
+   (Java_Chr.c 83 match/7 not -> 84 match/6 not.)  Java_Chr.c has no
+   FILE_FIX_FLAGS entry yet, so this would be its first.  Once wired:
+       Java_xeno_Chr_look_eye_set__FF = 0x00300CB8, 0xA0; // Java_Chr.c
+
+   Note the statement order matters as much as the flag: the control-word
+   store has to stay LAST (the original interleaves it between the second
+   multiply and its divide), and the two angle reads have to go through
+   the JVAL union or gcc sinks them below it. */
 void Java_xeno_Chr_look_eye_set__FF(void *env, int *args, int *ret)
 {
     char *obj = (char *)args[0];
     CHR *chr = CHR_PEER(obj);
 
-    chr->fLookEye[0] = *(float *)&args[1] * D_004D841C / 180.0f;
-    chr->fLookEye[1] = *(float *)&args[2] * D_004D841C / 180.0f;
+    chr->fLookEye[0] = ((JVAL *)args)[1].f * D_004D841C / 180.0f;
+    chr->fLookEye[1] = ((JVAL *)args)[2].f * D_004D841C / 180.0f;
     chr->nLookEyeControl = 0xE;
 }
 
@@ -1070,9 +1084,9 @@ void Java_xeno_Chr_pixelAlphaParts__II(void *env, int *args, int *ret)
     int nNum = chr->nPixelAlphaPartsNum;
 
     if (nNum < 4) {
-        chr->alphaParts[nNum * 2] = *(unsigned short *)&args[2];
+        chr->alphaParts[nNum * 2] = ((JVAL *)args)[2].h;
+        chr->alphaParts[nNum * 2 + 1] = ((JVAL *)args)[1].h;
         chr->nPixelAlphaPartsNum = nNum + 1;
-        chr->alphaParts[nNum * 2 + 1] = *(unsigned short *)&args[1];
     }
 }
 
