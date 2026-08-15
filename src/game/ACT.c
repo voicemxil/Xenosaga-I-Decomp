@@ -219,14 +219,16 @@ int ACT_jointGetAccessories(ACTOR *a, unsigned int nJoint)
        branch delay slot instead of the sltiu. Tried: chained assignment
        `pAcc = a->pAccessories = JNT_getAccessories(...)` (no change), a
        memory barrier between the store and the reload (regressed to 16
-       diffs), register-pinning a fresh pAcc2 to $5 (no change). Pure
-       scheduler tie-break, not reachable from C so far. */
+       diffs), register-pinning a fresh pAcc2 to $5 (no change), swapping
+       local-then-field-store order (no change, but source register for the
+       store flips v0->a1). Pure scheduler tie-break, not reachable from C
+       so far. */
     int nResult = -1;
     int *pAcc = a->pAccessories;
 
     if (pAcc == 0) {
-        a->pAccessories = JNT_getAccessories(a->pJoint);
-        pAcc = a->pAccessories;
+        pAcc = JNT_getAccessories(a->pJoint);
+        a->pAccessories = pAcc;
     }
     if (pAcc != 0) {
         if (nJoint < 0x29) {
@@ -492,9 +494,13 @@ ACTOR *ACT_createChr(int nId, int nArg)
     ACTOR *a = ACT_create(nId, nArg);
     ACT_SEQUENCE *p;
 
-    /* TODO: near-miss - the nFlags/nSignal/nVMObject stores and the
-       pUpdate/fScale[3] stores are transposed against the original; no
-       permutation of the source statements reproduces the original order */
+    /* TODO: near-miss (5 diffs, SCHEDULING) - the nFlags/nSignal/nVMObject
+       stores and the pUpdate/fScale[3] stores are transposed against the
+       original; no permutation of the source statements reproduces the
+       original order. Retried this session with p->f00 interleaved between
+       fScale[0] and nUnk088 (matching the disassembly's literal store
+       order) -- regressed to 10 diffs, worse than leaving statements in
+       field-grouped order. Revert any interleaving attempt here. */
     if (a != 0) {
         p = &actSequence[a->nSerial];
         a->nShadowSize = 0x50;
