@@ -696,8 +696,19 @@ def swap_adjacent_insns(flat, sites):
             cur = line.split("\t")[-1]
             idx = 0
         if RE_INSN.match(line):
-            if (f"{cur}:{idx}" in sites and i + 1 < len(flat)
-                    and swap_ok(line, flat[i + 1])):
+            # A site may be written FUNC:N! to force the swap past
+            # swap_ok's independence check. The only use so far is two
+            # adjacent stores, which swap_ok conservatively refuses
+            # because it cannot prove they do not alias. Forcing is
+            # defensible precisely there: the order being produced is
+            # the ORIGINAL compiler's, so if the two stores could alias,
+            # the original order is the correct one and ours is the
+            # deviation. tools/audit_swaps.py still checks the result is
+            # a pure reorder of the same instruction multiset.
+            forced = f"{cur}:{idx}!" in sites
+            if (forced or f"{cur}:{idx}" in sites) and i + 1 < len(flat) \
+                    and (forced or swap_ok(line, flat[i + 1])) \
+                    and RE_INSN.match(flat[i + 1]):
                 res.append(flat[i + 1])
                 res.append(line)
                 idx += 2

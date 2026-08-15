@@ -235,7 +235,7 @@ FILE_FIX_FLAGS = {
     # appends, so a repeated flag silently drops the earlier sites --
     # that regressed three matched functions before fix_cc_asm.py
     # grew a duplicate-flag guard. Comma-separate every site.
-    "Menu.c": '--barrier-return-store MenuRWeaponCheck2 --branch-likely MenuFaceEpidGet:3,MenuSkillEquip:2,MenuItemInfoMain:13 --swap-adjacent MenuAgwsListMake_Gun:30,MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30,MenuModelUnitDispose:15,MenuCfTaikiPush:6 --rotate MenuTecL1R1Main:43:-4,MenuEtherL1R1Main:43:-4,MenuSkillL1R1Main:43:-4,MenuSystemInfoMain:60:5,MenuModelUnitDispose:23:-5 --swap-slot-target MenuShopModelDisp:6',
+    "Menu.c": '--barrier-return-store MenuRWeaponCheck2 --branch-likely MenuFaceEpidGet:3,MenuSkillEquip:2,MenuItemInfoMain:13 --swap-adjacent MenuAgwsListMake_Gun:30,MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30,MenuModelUnitDispose:15,MenuCfTaikiPush:6 --rotate MenuTecL1R1Main:43:-4,MenuEtherL1R1Main:43:-4,MenuSkillL1R1Main:43:-4,MenuSystemInfoMain:60:5,MenuModelUnitDispose:22:5,MenuCfTaikiPop:9:-3 --swap-slot-target MenuShopModelDisp:6',
     "TMENU.c": "--swap-adjacent TMENU_addItem:4",
     # xgl delay-slot shapes found by the xgl subagent (all verified):
     "xglTimer.c": "--barrier-return-store xglTimer0Reset",
