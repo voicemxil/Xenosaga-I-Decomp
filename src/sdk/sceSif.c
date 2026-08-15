@@ -186,6 +186,16 @@ void sceSifRemoveCmdHandler(int idx)
     *(int *)off = 0;
 }
 
+/* NOTE for the flag flip: the two stores below are written in reverse
+ * field order on purpose, to fake -- under -fno-schedule-insns -- the
+ * schedule the first scheduling pass produces for free.  If sceSif.c
+ * ever gets FILE_CFLAGS_OVERRIDE = "-O2 -G0" (see sceCd.c's header for
+ * the same request), swap them back to slot[0] then slot[1]: that one
+ * change is the ONLY thing standing between this file and 23 match / 0
+ * not at "-O2 -G0" (measured 2026-08-15), and the flag in turn is what
+ * sceSifSendCmd, sceSifRpcLoop, sceSifAllocIopHeap, sceSifAllocSysMemory,
+ * sceSifFreeSysMemory, sceSifSearchModuleByName and
+ * sceSifSearchModuleByAddress are all waiting on. */
 void sceSifAddCmdHandler(int idx, void (*handler)(void), void *arg)
 {
     int off = idx << 3;

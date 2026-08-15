@@ -204,10 +204,10 @@ void *sceCdCallback(void *func)
  *         if (cb_thid == 0) {
  *             my_thid = GetThreadId();
  *             ReferThreadStatus(my_thid, &my_th_info);
- *             cb_tp.entry = (void *)_Cdvd_cbLoop;
- *             cb_tp.stack = stack;
  *             cb_tp.stackSize = stackSize;
  *             cb_tp.gpReg = &_gp;
+ *             cb_tp.entry = (void *)_Cdvd_cbLoop;
+ *             cb_tp.stack = stack;
  *             cb_tp.initPriority = prio;
  *             cb_thid = CreateThread(&cb_tp);
  *             StartThread(cb_thid, 0);
@@ -225,11 +225,22 @@ void *sceCdCallback(void *func)
  * `_gp = cod_LIT4_START + 0x7FF0`, which is what identified the struct
  * as a stock sceThreadParam.
  *
- * `int r = 1;` is load-bearing and flag-independent: written as
- * `return 1;` / `return 0;` in the two arms, gcc materialises the
- * constants at the returns and drops a callee-saved register, giving a
- * 48-word function against the original's 53.  Under
- * -fno-schedule-insns this is 52 words vs 53 -- the scheduler is what
+ * Two things are load-bearing and were found by measurement:
+ *
+ *   - `int r = 1;` with `r = 0;` in the else arm.  Written as
+ *     `return 1;` / `return 0;` gcc materialises the constants at the
+ *     returns and drops a callee-saved register: 48 words vs 53.
+ *   - the store ORDER above (stackSize, gpReg, entry, stack,
+ *     initPriority), which is not the struct's field order.  It decides
+ *     which argument is born first and so which callee-saved register
+ *     each one gets; the natural field order is 11 registers out, and
+ *     stack-before-stackSize is 11 out as well.
+ *
+ * With FILE_CFLAGS_OVERRIDE["sceCd.c"] = "-O2 -G0" and exactly the C
+ * above, this is a verified byte-for-byte match at 53 words -- checked
+ * 2026-08-15, whole file 10 match / 0 not with both asm bodies deleted
+ * and the four LAUNDER_V(mode) lines removed.  Under
+ * -fno-schedule-insns it is 52 words vs 53: the scheduler is what
  * groups the three lui/addiu pairs for cb_tp/_gp/_Cdvd_cbLoop and keeps
  * the cb_tp base in v1 with a separate `move a0,v1` for the call. */
 
