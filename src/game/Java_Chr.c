@@ -148,6 +148,12 @@ void ACT_resetArms(CHR *, CHR *, int);
 void ACT_filterGuno(void);
 void ACT_filterStealth(void);
 
+/* A script-VM argument slot. args[] is passed as int * throughout this
+ * file, but a few natives need the union view: reading an index through
+ * the union gives it the union's alias set, which stops gcc 2.96's TBAA
+ * from CSEing that index across the float stores that follow. */
+typedef union JVAL { int i; float f; void *p; } JVAL;
+
 /* Byte offset of a named field within a xeno.Chr script object */
 #define CHR_FIELD(name) \
     (lookupClassField(classJava_xeno_Chr, loadConstString(name, -1), 0)->nOffset)
@@ -724,42 +730,72 @@ void Java_xeno_Chr_setFilter__I(void *env, int *args, int *ret)
 }
 
 /* Set one of the character's point light colours */
-/* TODO: not matching - the original reloads args[1] per component (aliasing) instead of CSEing it */
+/* MATCHED -- same three levers as setPointLightPos above (this one has
+ * only a single peer lookup, so it needs the JVAL alias view and the
+ * deferred nFlags2 store, but no dead CHR_FIELD). */
 void Java_xeno_Chr_setPointLightCol__IFFF(void *env, int *args, int *ret)
 {
     char *obj = (char *)args[0];
     CHR *chr = CHR_PEER(obj);
+    int nF2;
 
     if ((unsigned int)args[1] < 3) {
         chr->nFlags |= 0x800;
-        chr->nFlags2 |= 0x20;
-        *(float *)((char *)chr + args[1] * 16 + 0x970) = *(float *)&args[2];
-        *(float *)((char *)chr + args[1] * 16 + 0x974) = *(float *)&args[3];
-        *(float *)((char *)chr + args[1] * 16 + 0x978) = *(float *)&args[4];
+        nF2 = chr->nFlags2 | 0x20;
+        *(float *)((char *)chr + ((JVAL *)args)[1].i * 16 + 0x970) = ((JVAL *)args)[2].f;
+        *(float *)((char *)chr + ((JVAL *)args)[1].i * 16 + 0x974) = ((JVAL *)args)[3].f;
+        *(float *)((char *)chr + ((JVAL *)args)[1].i * 16 + 0x978) = ((JVAL *)args)[4].f;
+        chr->nFlags2 = nF2;
     }
 }
 
 /* Set one of the character's point light positions */
-/* TODO: not matching - the original resolves the CHR peer field TWICE (two
- * independent loadConstString+lookupClassField call pairs, the first one's
- * result unused before obj is even loaded) before ever dereferencing it;
- * a single CHR_PEER(obj) local does not reproduce that shape. Needs the
- * exact source expression that causes gcc to redo the field lookup. Also:
- * struct offsets 0x904-0x970 reshaped to fit a lightPos[3] array ahead of
- * light[3] (col) at 0x970 -- aChild shrunk from 27 to 15 entries to make
- * room; childGetPeer__II (which reads aChild) is itself still unverified,
- * so this is not yet cross-checked against a passing test. */
+/* MATCHED. Three separate gcc 2.96 behaviours had to be undone here, and
+ * all three recur across the Java_* natives:
+ *
+ * 1. The original really does resolve the peer field TWICE -- two
+ *    loadConstString+lookupClassField pairs, the first pair's result
+ *    dead.  gcc never deletes a call, but it does delete the dead LOAD
+ *    that consumed it, which is exactly what a discarded CHR_FIELD()
+ *    evaluation before the real CHR_PEER() leaves behind.  Hence nDead.
+ *
+ * 2. args[1] is reloaded before every component.  With plain `int *args`
+ *    that cannot happen: gcc 2.96 runs -fstrict-aliasing at -O2, so a
+ *    `float` store provably cannot clobber an `int` load and the index is
+ *    CSEd across all three stores (six words short).  Reading the index
+ *    through the JVAL union view gives it the union's alias set, which
+ *    aliases everything, and the reloads come back.  Reading the VALUES
+ *    through the union too is what stops the first `lwc1` being hoisted
+ *    above the nFlags store.
+ *
+ * 3. nFlags2's read-modify-write must be split -- `|` into a local up
+ *    front, plain store at the very end -- or its `sw` lands next to the
+ *    nFlags store instead of sinking into the third component's address
+ *    arithmetic.  (Same lever as loadConstString's g_StrCount.)
+ *
+ * Struct-offset note kept from the earlier analysis: offsets 0x904-0x970
+ * are reshaped to fit lightPos[3] ahead of light[3] (col) at 0x970, with
+ * aChild shrunk from 27 to 15 entries to make room.  childGetPeer__II
+ * reads aChild and is still unmatched, so that split is not yet
+ * cross-checked from the other side. */
 void Java_xeno_Chr_setPointLightPos__IFFF(void *env, int *args, int *ret)
 {
-    char *obj = (char *)args[0];
-    CHR *chr = CHR_PEER(obj);
+    char *obj;
+    CHR *chr;
+    int nDead;
+    int nF2;
+
+    nDead = CHR_FIELD(D_004DC190);
+    obj = (char *)args[0];
+    chr = CHR_PEER(obj);
 
     if ((unsigned int)args[1] < 3) {
         chr->nFlags |= 0x800;
-        chr->nFlags2 |= 0x20;
-        *(float *)((char *)chr + args[1] * 16 + 0x940) = *(float *)&args[2];
-        *(float *)((char *)chr + args[1] * 16 + 0x944) = *(float *)&args[3];
-        *(float *)((char *)chr + args[1] * 16 + 0x948) = *(float *)&args[4];
+        nF2 = chr->nFlags2 | 0x20;
+        *(float *)((char *)chr + ((JVAL *)args)[1].i * 16 + 0x940) = ((JVAL *)args)[2].f;
+        *(float *)((char *)chr + ((JVAL *)args)[1].i * 16 + 0x944) = ((JVAL *)args)[3].f;
+        *(float *)((char *)chr + ((JVAL *)args)[1].i * 16 + 0x948) = ((JVAL *)args)[4].f;
+        chr->nFlags2 = nF2;
     }
 }
 
