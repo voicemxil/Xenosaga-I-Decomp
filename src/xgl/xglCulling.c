@@ -141,3 +141,57 @@ void xglCullingIgnoreOff(void)
 void xglCullingMapDebug(void)
 {
 }
+
+extern float s_aCullingBase[9];
+void culling_matrix(float *pMtx);
+
+/* Append a culling cell built from the current 3x3 base matrix (rows
+ * padded to vec4, w=1 on rows 0 and 2) and derive its planes */
+void xglCullingMapCreate(void)
+{
+    float *pDst;
+    float *pSrc = s_aCullingBase;
+    register float *pArg __asm__("$4");
+    int n;
+
+    n = s_inCulling.nCount;
+    pDst = (float *)&s_inCulling.aCell[n];
+    if (n < 10) {
+        register float fXY __asm__("$f0");
+        register float fYY __asm__("$f1");
+        register float fZY __asm__("$f2");
+        register float fXZ __asm__("$f3");
+        register float fYZ __asm__("$f4");
+        register float fXX __asm__("$f5");
+        register float fYX __asm__("$f6");
+        register float fZX __asm__("$f7");
+        register float fOne __asm__("$f8");
+        register float fZZ __asm__("$f9");
+
+        __asm__ __volatile__("" : "=f"(fZZ) : "0"(pSrc[8]));
+        __asm__ __volatile__("" : "=r"(pArg) : "0"(pDst));
+        __asm__ __volatile__("" : "=f"(fXX) : "0"(pSrc[0]));
+        __asm__ __volatile__("" : "=f"(fYX) : "0"(pSrc[1]));
+        __asm__ __volatile__("" : "=f"(fZX) : "0"(pSrc[2]));
+        __asm__ __volatile__("" : "=f"(fXY) : "0"(pSrc[3]));
+        __asm__ __volatile__("" : "=f"(fYY) : "0"(pSrc[4]));
+        __asm__ __volatile__("" : "=f"(fZY) : "0"(pSrc[5]));
+        __asm__ __volatile__("" : "=f"(fXZ) : "0"(pSrc[6]));
+        __asm__ __volatile__("" : "=f"(fYZ) : "0"(pSrc[7]));
+        __asm__ __volatile__("" : "=f"(fOne) : "0"(1.0f));
+
+        pDst[1] = fYX;
+        pDst[2] = fZX;
+        pDst[4] = fXY;
+        pDst[5] = fYY;
+        pDst[6] = fZY;
+        pDst[8] = fXZ;
+        pDst[9] = fYZ;
+        pDst[10] = fZZ;
+        pDst[3] = fOne;
+        pDst[11] = fOne;
+        pDst[0] = fXX;
+        culling_matrix(pArg);
+        s_inCulling.nCount++;
+    }
+}

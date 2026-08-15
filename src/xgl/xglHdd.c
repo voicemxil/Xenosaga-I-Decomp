@@ -318,7 +318,7 @@ int xglHddMcCheck(int *pFree)
 extern char yoursaves[];
 int sceDopen(char *pName, void *pBuf);
 int Judge_MakeNewFolder(int nFd);
-int Judge_MakeNewSavedata(int nFd);
+int Judge_MakeNewSavedata(void);
 
 /* TODO: near-miss (25/28 words). Original spills pBuf into $s0 across
  * the sceDopen call (unused afterward) instead of just moving it into
@@ -334,18 +334,17 @@ int Judge_MakeNewSavedata(int nFd);
 int xglHddMcCheckYourSaves(void *pBuf)
 {
     register void *p __asm__("$16") = pBuf;
-    char *pDir = yoursaves;
     int nFd;
 
     __asm__("" : "+r"(p));
-    nFd = sceDopen(pDir, p);
+    nFd = sceDopen(yoursaves, p);
     if (nFd < 0) {
         if (Judge_MakeNewFolder(nFd) == 1) {
             return 1;
         }
         return -2;
     }
-    if (Judge_MakeNewSavedata(nFd) == 1) {
+    if (Judge_MakeNewSavedata() == 1) {
         return 0;
     }
     return -3;
