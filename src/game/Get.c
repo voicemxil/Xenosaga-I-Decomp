@@ -200,22 +200,27 @@ signed char Get_LocaterType_Angle(float angle)
  * the original uses a different temporary floating-register allocation and
  * store schedule. Find the original local-variable/source-expression shape. */
 /* Interpolate a position between two points; the output always has w = 1. */
+/* Store order matters: the `result->w = 1.0f` store must be written LAST in
+   both branches, not third. gcc 2.9x emits it earlier than written, so the
+   source order that reproduces the original is not the original's emission
+   order. (Same lever fixed GetCenter's store block; found by exhausting all
+   24 orderings per branch.) */
 void Get_MiddlePoint(VECTOR *from, VECTOR *to, short current, short total,
     VECTOR *result)
 {
     if (current == total) {
         result->x = to->x;
         result->y = to->y;
-        result->w = 1.0f;
         result->z = to->z;
+        result->w = 1.0f;
     } else {
         float current_float = (float)current;
         float total_float = (float)total;
 
         result->x = from->x + (to->x - from->x) * current_float / total_float;
         result->y = from->y + (to->y - from->y) * current_float / total_float;
-        result->w = 1.0f;
         result->z = from->z + (to->z - from->z) * current_float / total_float;
+        result->w = 1.0f;
     }
 }
 
@@ -320,9 +325,15 @@ extern float D_00347D08;
  * pushing everything downstream by one slot (still 12 diffs, 9 opcode).
  * LAUNDER_V(extra) right after the initializer to pin it out of the delay
  * slot regressed to LENGTH (28 vs 25 words) -- it also blocked the
- * address-computation code motion the original relies on. Need a way to
- * hint gcc that &D_004DC9D0 is the preferred delay-slot filler; not found
- * this session. */
+ * address-computation code motion the original relies on.
+ * Later session: 12 -> 6 by writing the w store LAST (exhaustive over all
+ * 24 orderings of the four output stores; the original emits w's swc1 near
+ * the end, not third). The remaining 6 are still exactly the delay-slot
+ * preference described above. Also tried hoisting &D_004DC9D0 into a local
+ * VECTOR * before the if, in four forms (plain, after the extra load, with
+ * LAUNDER, and pinned to $v0): all regress to 22-23 diffs, because gcc then
+ * keeps the base in a register across the branch instead of rematerialising
+ * the lui in the delay slot, which is the whole point. */
 /* Compute an object's on-screen center point, biasing Y by a type-dependent offset */
 void GetCenter(VECTOR *out, CENTEROBJ *p)
 {
@@ -333,8 +344,8 @@ void GetCenter(VECTOR *out, CENTEROBJ *p)
     }
     out->x = D_004DC9D0.x + p->fX;
     out->y = D_004DC9D0.y + p->fY + extra;
-    out->w = 1.0f;
     out->z = D_004DC9D0.z + p->fZ;
+    out->w = 1.0f;
 }
 
 /* TODO: near-miss (LOGIC) - register/control-flow shape differs substantially
