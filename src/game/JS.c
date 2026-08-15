@@ -120,3 +120,126 @@ int *JS_classLight_getPeer(int nHandle)
     }
     return 0;
 }
+
+/* A script parse-tree node as the built-in Light class methods see it.
+   The three value slots are ints for setColor (0..255 channels, scaled to
+   0..1 on the way in) and floats for setDirection2. */
+/* Reading the node's value slots through a union gives those reads the
+   union's alias set, which aliases everything.  That is what keeps the
+   float stores below from being hoisted past them: with plain `int`
+   slots, gcc 2.96's -fstrict-aliasing proves a float store cannot touch
+   an int load and reorders the whole block. */
+typedef union JSVALUE
+{
+    int   i;
+    float f;
+} JSVALUE;
+
+typedef struct JSNODE
+{
+    char    pad000[0x0C];
+    int     nMode;      /* 0x0C */
+    char    pad010[0x18];
+    int     nIndex;     /* 0x28 - 1..3 select the directional lights */
+    JSVALUE aValue[3];  /* 0x2C */
+} JSNODE;
+
+extern void xglStudioGetLight(void **ppLight);
+extern void initLight2(void);
+
+/* TOOL REQUEST (verified, with numbers).  Source is at its minimum here:
+   sixteen shapes were swept (index local vs inlined, separate range
+   temp, pre-computed offset, `<<5` vs `*32`, a float* source cursor, an
+   array for the studio pointer, an early `nRet = 1`, a trailing
+   `bad: return 1` block, one shared float temp, two alternating float
+   temps in both declaration orders, reversed store order, and an
+   int-typed copy).  Reusing nIndex for its own scaled offset -- the form
+   below -- is the best at 8 diffs, down from 10.  One shared float temp
+   reaches 4 but pins all three copies to $f0, which the whole-function
+   FP rename below cannot then split, so it is the wrong base to build
+   on; the trailing-`bad` block that setColor needs makes this one worse
+   (10 diffs), because here the guard is the function's first branch.
+
+   (Numbers below re-measured after the JSVALUE union landed; the union
+   is what fixes setColor's whole FP body, but it does not change this
+   function's register parity.)
+
+   Six of those eight are a floating-point register-numbering tie-break:
+   the original alternates $f0/$f1/$f0 across the three copies and gcc
+   2.96 alternates $f1/$f0/$f1.  --swap-regs cannot express it, because
+   its `\$%d\b` pattern never matches an `$fN` token.  Teaching it FP
+   tokens (or adding --swap-fpregs FUNC:A-B) is the ask; I prototyped that
+   rename as a post-pass and measured it:
+     FP swap alone                                8 diffs -> 2 diffs
+     FP swap + --swap-adjacent
+         JS_classLight_setDirection2:6            MATCH, all 26 words
+         (JS.c 6 match/1 not -> 7 match/0 not)
+   The last two diffs are the `li v0,1` / `lw a0,nIndex` pair issuing in
+   the other order, which is what that swap-adjacent site fixes.
+   Once both exist, register:
+     JS_classLight_setDirection2 = 0x0026BF18, 0x68; // JS.c
+
+   Light.setDirection2(x, y, z) -- write one directional light's vector
+   straight into the current studio's light block. */
+int JS_classLight_setDirection2(JSNODE *pNode)
+{
+    void *pLight;
+    int nIndex;
+    float *pDir;
+
+    xglStudioGetLight(&pLight);
+    nIndex = pNode->nIndex;
+    if ((unsigned int)(nIndex - 1) >= 3) {
+        return 1;
+    }
+    nIndex = nIndex * 32;
+    pDir = (float *)((char *)pLight + nIndex);
+    pDir[0] = pNode->aValue[0].f;
+    pDir[1] = pNode->aValue[1].f;
+    pDir[2] = pNode->aValue[2].f;
+    initLight2();
+    return 0;
+}
+
+
+/* Light.setColor(r, g, b) -- slot 0 is the ambient colour at the head of
+   the light block, slots 1..3 are the directional colours 16 bytes into
+   each 32-byte light record.  Node mode 3 carries 0..255 integers that are
+   scaled to 0..1; any other mode carries floats already. */
+int JS_classLight_setColor(JSNODE *pNode)
+{
+    void *pLight;
+    int nIndex;
+    float *pDst;
+    float fScale;
+
+    xglStudioGetLight(&pLight);
+    nIndex = pNode->nIndex;
+    if (nIndex == 0) {
+        pDst = (float *)pLight;
+    } else {
+        if ((unsigned int)(nIndex - 1) >= 3) {
+            goto bad;
+        }
+        pDst = (float *)((char *)pLight + nIndex * 32 - 16);
+    }
+    if (pNode->nMode == 3) {
+        fScale = 255.0f;
+        pDst[0] = (float)pNode->aValue[0].i / fScale;
+        pDst[1] = (float)pNode->aValue[1].i / fScale;
+        pDst[2] = (float)pNode->aValue[2].i / fScale;
+    } else {
+        pDst[0] = pNode->aValue[0].f;
+        pDst[1] = pNode->aValue[1].f;
+        pDst[2] = pNode->aValue[2].f;
+    }
+    initLight2();
+    return 0;
+
+    /* The bad-index exit has to be its own trailing block: written as a
+       plain `return 1` inside the guard, gcc hoists the constant above the
+       branch and fills the delay slot with an epilogue load instead, which
+       costs that word plus an alignment nop. */
+bad:
+    return 1;
+}
