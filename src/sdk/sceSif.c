@@ -10,6 +10,8 @@
  * the same technique kernel.c uses for the syscall stubs.
  */
 
+#include "matching.h"
+
 int sceSifGetSreg(int idx)
 {
     __asm__ __volatile__(
@@ -105,21 +107,16 @@ int sceSifLoadModule(int a0, int a1, int a2)
     return _sceSifLoadModule(a0, a1, a2, (int)&local, 0);
 }
 
-/* sceSifExitCmd/sceSifExitRpc: teardown that mixes calls to kernel
- * primitives with a fixed low-memory control-block store, so (as with
- * the raw-address accessors above) the body is written as inline asm.
- *
- * Unlike the leaf accessors above, these already end with their own
- * jr/delay-slot epilogue, so they cannot be a normal C function body:
- * GCC always appends its own trailing "j $31" epilogue after a
- * fall-off-the-end asm block (there's no `return` for it to see),
- * producing a dead but byte-real duplicate jr. Written as file-scope
- * __asm__ (a bare .ent/.end block, no enclosing C function) so GCC's
- * epilogue synthesis never runs; ".set noreorder" stops the assembler
- * from auto-filling jal delay slots by re-scheduling the following
- * instruction (its default "reorder" mode moved a later `lw` into an
- * earlier jal's delay slot instead of the `li` actually written there,
- * scrambling the order). */
+/* sceSifExitCmd: tears down the SIF cmd layer -- disables the DMA
+ * channel, removes its handler, and clears the init-check flag.
+ * `sif0_handleid` and `_cmd_init_check` are named fixed addresses from
+ * config/symbol_addrs.txt (defeating the lui+ori/lui+addiu problem: a
+ * plain `return`-less fall-off-the-end C body also gets GCC's own
+ * synthesized epilogue here, matching the original's ld ra/jr ra), but
+ * the allocator picks v0 for both address temps where the original
+ * used v1 throughout -- a pure tie-break (PIN doesn't stick on a plain
+ * dereference; see the sceCdCallback comment in sceCd.c for the same
+ * wall). Parked as inline asm pending a lever for that tie-break. */
 
 __asm__(
     ".text\n"
@@ -204,181 +201,109 @@ __asm__(
     ".end sceSifLoadElf\n"
 );
 
-/* sceSifRemoveCmdHandler: picks one of two SIF command-table pointers
- * out of the fixed low-memory _data_table block (base 0x9918D8, same
- * block sceSifSetSysCmdBuffer/sceSifSetCmdBuffer index into above) by
- * the sign of the handler index, then zeroes the selected slot. Written
- * as inline asm both for the raw-address loads (lui+addiu house issue)
- * and to reproduce the exact branch/label layout -- C control flow for
- * this shape reliably compiled 2 words longer (a macro-expanded lw of
- * the 32-bit address plus branch-target alignment padding). */
+/* sceSifRemoveCmdHandler / sceSifAddCmdHandler: pick one of two SIF
+ * command-table pointers out of the fixed low-memory _data_table block
+ * (base 0x9918D8, named `_data_table_009918D8` in
+ * config/symbol_addrs.txt, same block sceSifSetSysCmdBuffer/
+ * sceSifSetCmdBuffer index into above) by the sign of the handler
+ * index, then zero (Remove) or store (Add) the selected slot. */
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl sceSifRemoveCmdHandler\n"
-    ".ent sceSifRemoveCmdHandler\n"
-    "sceSifRemoveCmdHandler:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "bgez $4,1f\n"
-    "sll $3,$4,3\n"
-    "lui $2,0x99\n"
-    "b 2f\n"
-    "lw $4,6372($2)\n"
-    "1:\n"
-    "lui $2,0x99\n"
-    "lw $4,6380($2)\n"
-    "2:\n"
-    "addu $3,$3,$4\n"
-    "jr $31\n"
-    "sw $0,0($3)\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end sceSifRemoveCmdHandler\n"
-);
+extern int _data_table_009918D8[8];
 
-/* sceSifAddCmdHandler: same table-select shape as sceSifRemoveCmdHandler
- * above, storing the handler function (a1) and its argument (a2) into
- * the selected slot instead of zeroing it. */
+void sceSifRemoveCmdHandler(int idx)
+{
+    int off = idx << 3;
+    PIN(int base, "$4");
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl sceSifAddCmdHandler\n"
-    ".ent sceSifAddCmdHandler\n"
-    "sceSifAddCmdHandler:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "bgez $4,1f\n"
-    "sll $3,$4,3\n"
-    "lui $2,0x99\n"
-    "b 2f\n"
-    "lw $4,6372($2)\n"
-    "1:\n"
-    "lui $2,0x99\n"
-    "lw $4,6380($2)\n"
-    "2:\n"
-    "addu $3,$3,$4\n"
-    "sw $6,4($3)\n"
-    "jr $31\n"
-    "sw $5,0($3)\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end sceSifAddCmdHandler\n"
-);
+    if (idx < 0)
+        base = _data_table_009918D8[3];
+    else
+        base = _data_table_009918D8[5];
+    off = off + base;
+    *(int *)off = 0;
+}
+
+void sceSifAddCmdHandler(int idx, void (*handler)(void), void *arg)
+{
+    int off = idx << 3;
+    PIN(int base, "$4");
+    int *slot;
+
+    if (idx < 0)
+        base = _data_table_009918D8[3];
+    else
+        base = _data_table_009918D8[5];
+    off = off + base;
+    slot = (int *)off;
+    slot[1] = (int)arg;
+    slot[0] = (int)handler;
+}
 
 /* sceSifSyncIop: reads sceSifGetReg(4) (an IOP sync/status register),
  * and if bit 0x40000 is set, re-inits the debug tty and always returns
- * 1; otherwise returns 0. File-scope inline asm because the body ends
- * in its own jr+delay-slot epilogue after a jal (see sceSifExitCmd
- * above for why a plain C function body can't reproduce this). */
+ * 1; otherwise returns 0. A plain C if/return body gets GCC's own
+ * synthesized epilogue, which already matches (see sceSifExitCmd's
+ * comment for why that works once the function is a straight
+ * fall-off-the-end/return shape rather than a shared-epilogue branch),
+ * so this compiles as real C. */
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl sceSifSyncIop\n"
-    ".ent sceSifSyncIop\n"
-    "sceSifSyncIop:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "addiu $sp,$sp,-16\n"
-    "sd $31,0($sp)\n"
-    "jal sceSifGetReg\n"
-    "li $4,4\n"
-    "lui $3,0x4\n"
-    "and $2,$2,$3\n"
-    "beqz $2,1f\n"
-    "daddu $2,$0,$0\n"
-    "jal sceResetttyinit\n"
-    "nop\n"
-    "li $2,1\n"
-    "1:\n"
-    "ld $31,0($sp)\n"
-    "jr $31\n"
-    "addiu $sp,$sp,16\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end sceSifSyncIop\n"
-);
+extern int sceSifGetReg(int a0);
+extern void sceResetttyinit(void);
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl sceSifExitRpc\n"
-    ".ent sceSifExitRpc\n"
-    "sceSifExitRpc:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "addiu $sp,$sp,-16\n"
-    "sd $31,0($sp)\n"
-    "jal sceSifExitCmd\n"
-    "nop\n"
-    "lui $2,0x4b\n"
-    "ld $31,0($sp)\n"
-    "sw $0,-23884($2)\n"
-    "jr $31\n"
-    "addiu $sp,$sp,16\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end sceSifExitRpc\n"
-);
+int sceSifSyncIop(void)
+{
+    if (sceSifGetReg(4) & 0x40000) {
+        sceResetttyinit();
+        return 1;
+    }
+    return 0;
+}
+
+/* sceSifExitRpc: tears down the SIF cmd layer via sceSifExitCmd, then
+ * clears the RPC init-check flag `_sceSifInitCheck`, a named fixed
+ * address from config/symbol_addrs.txt -- so this compiles as real C
+ * (same reasoning as sceSifExitCmd/sceSifSyncIop above). */
+
+void sceSifExitCmd(void);
+extern int _sceSifInitCheck;
+
+void sceSifExitRpc(void)
+{
+    sceSifExitCmd();
+    _sceSifInitCheck = 0;
+}
 
 /* sceSifUnloadModule: version-checks the loadfile linkage (_lf_bind /
  * _lf_version), then dispatches an "unload" opcode through the same
  * SIF-RPC boilerplate as the scePad RPC family in scePad.c (fixed
- * low-memory payload block, base 0x994840, and client-data block, base
- * 0x994A40), returning the reply on success or a fixed error code
- * otherwise. File-scope inline asm for the raw addresses and the
- * jal-delay-slot-exact calls. */
+ * low-memory payload block, named `_senddata` in
+ * config/symbol_addrs.txt, base 0x994840, and client-data block, named
+ * `cd_00994A40`, base 0x994A40), returning the reply on success or a
+ * fixed error code otherwise. */
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl sceSifUnloadModule\n"
-    ".ent sceSifUnloadModule\n"
-    "sceSifUnloadModule:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "addiu $sp,$sp,-64\n"
-    "sd $17,32($sp)\n"
-    "sd $31,48($sp)\n"
-    "daddu $17,$4,$0\n"
-    "jal _lf_bind\n"
-    "sd $16,16($sp)\n"
-    "bltz $2,1f\n"
-    "lui $2,0xffff\n"
-    "jal _lf_version\n"
-    "nop\n"
-    "beqz $2,2f\n"
-    "lui $16,0x99\n"
-    "lui $2,0xfffe\n"
-    "b 1f\n"
-    "ori $2,$2,0xfffc\n"
-    "2:\n"
-    "lui $4,0x99\n"
-    "addiu $7,$16,18496\n"
-    "sw $17,18496($16)\n"
-    "addiu $4,$4,19008\n"
-    "sw $0,0($sp)\n"
-    "li $5,8\n"
-    "daddu $6,$0,$0\n"
-    "li $8,4\n"
-    "daddu $9,$7,$0\n"
-    "li $10,4\n"
-    "jal sceSifCallRpc\n"
-    "daddu $11,$0,$0\n"
-    "bgezl $2,1f\n"
-    "lw $2,18496($16)\n"
-    "lui $2,0xfffe\n"
-    "ori $2,$2,0xffff\n"
-    "1:\n"
-    "ld $31,48($sp)\n"
-    "ld $17,32($sp)\n"
-    "ld $16,16($sp)\n"
-    "jr $31\n"
-    "addiu $sp,$sp,64\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end sceSifUnloadModule\n"
-);
+extern int _lf_bind(int a0);
+extern int _lf_version(void);
+extern int sceSifCallRpc(void *pCd, unsigned int nFno, int nMode,
+                          void *pSend, int nSSize, void *pRecv, int nRSize,
+                          void *pEndFunc, void *pEndArg);
+extern int cd_00994A40;
+extern int _senddata;
+
+int sceSifUnloadModule(int modId)
+{
+    PIN(int id, "$17") = modId;
+
+    if (_lf_bind(id) < 0)
+        return (int)0xffff0000;
+    if (_lf_version() != 0)
+        return (int)0xfffefffc;
+    _senddata = id;
+    {
+        void *pCd = &cd_00994A40;
+
+        LAUNDER_V(pCd);
+        if (sceSifCallRpc(pCd, 8, 0, &_senddata, 4, &_senddata, 4, 0, 0) < 0)
+            return (int)0xfffeffff;
+    }
+    return _senddata;
+}
