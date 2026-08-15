@@ -462,11 +462,24 @@ void sceVif1PkOpenUpkCode(Vif1Packet *pkt, unsigned int a1, unsigned int a2, uns
        scheduling: the original defers `sw` of the second word and of
        pkt->current to the end of the block (after the mult/movn group) and
        materialises the 256 constant early into its own register, copying it
-       twice (`move t4,t2` / `move t3,t2`) - we fold one copy away, so we are
-       one instruction short.  Inverting the `lo < hi` test does not help. */
+       twice (`move t4,t2` / `move t3,t2`) - we folded one copy away, so we
+       were one instruction short.  FIXED by pinning lo/hi/k256 to $11/$12/
+       $10 and laundering k256: the length now matches exactly (36 words).
+       Remaining 29 words are a whole-block scheduling and allocation
+       divergence, not a tie-break -- every instruction is present but the
+       order and register roles differ throughout.  Ruled out: pinning
+       `current` to $9/$13/$8 (all leave 29), -fno-strength-reduce and
+       -fno-unroll-loops (both regress the sibling *N functions).  This one
+       needs the block rebuilt against the disassembly rather than nudged. */
     unsigned int *current = pkt->current;
     unsigned int vl, vn;
-    unsigned int size, lo, hi, code, c0;
+    unsigned int size, code, c0;
+    /* The original keeps 256 in $t2 (which mult later reuses) and copies
+       it into both $t3 and $t4, so BOTH copies are forced; folding either
+       one away leaves the function an instruction short. */
+    PIN(unsigned int lo, "$11");
+    PIN(unsigned int hi, "$12");
+    PIN(unsigned int k256, "$10");
 
     c0 = a3 | 0x1000000;
     *current = (t0 << 8) | c0;
@@ -478,8 +491,10 @@ void sceVif1PkOpenUpkCode(Vif1Packet *pkt, unsigned int a1, unsigned int a2, uns
     pkt->openDirect = current;
 
     size = (0x20 >> vl) * (vn + 1);
-    lo = a3 ? a3 : 0x100;
-    hi = t0 ? t0 : 0x100;
+    k256 = 0x100;
+    LAUNDER(k256);
+    lo = a3 ? a3 : k256;
+    hi = t0 ? t0 : k256;
     if (lo < hi) {
         size = size * lo;
         code = hi << 16;
