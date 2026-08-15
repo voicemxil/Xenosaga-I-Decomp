@@ -323,3 +323,62 @@ __asm__(
     ".set reorder\n"
     ".end sceSifExitRpc\n"
 );
+
+/* sceSifUnloadModule: version-checks the loadfile linkage (_lf_bind /
+ * _lf_version), then dispatches an "unload" opcode through the same
+ * SIF-RPC boilerplate as the scePad RPC family in scePad.c (fixed
+ * low-memory payload block, base 0x994840, and client-data block, base
+ * 0x994A40), returning the reply on success or a fixed error code
+ * otherwise. File-scope inline asm for the raw addresses and the
+ * jal-delay-slot-exact calls. */
+
+__asm__(
+    ".text\n"
+    ".p2align 3\n"
+    ".globl sceSifUnloadModule\n"
+    ".ent sceSifUnloadModule\n"
+    "sceSifUnloadModule:\n"
+    ".set noreorder\n"
+    ".set nomacro\n"
+    "addiu $sp,$sp,-64\n"
+    "sd $17,32($sp)\n"
+    "sd $31,48($sp)\n"
+    "daddu $17,$4,$0\n"
+    "jal _lf_bind\n"
+    "sd $16,16($sp)\n"
+    "bltz $2,1f\n"
+    "lui $2,0xffff\n"
+    "jal _lf_version\n"
+    "nop\n"
+    "beqz $2,2f\n"
+    "lui $16,0x99\n"
+    "lui $2,0xfffe\n"
+    "b 1f\n"
+    "ori $2,$2,0xfffc\n"
+    "2:\n"
+    "lui $4,0x99\n"
+    "addiu $7,$16,18496\n"
+    "sw $17,18496($16)\n"
+    "addiu $4,$4,19008\n"
+    "sw $0,0($sp)\n"
+    "li $5,8\n"
+    "daddu $6,$0,$0\n"
+    "li $8,4\n"
+    "daddu $9,$7,$0\n"
+    "li $10,4\n"
+    "jal sceSifCallRpc\n"
+    "daddu $11,$0,$0\n"
+    "bgezl $2,1f\n"
+    "lw $2,18496($16)\n"
+    "lui $2,0xfffe\n"
+    "ori $2,$2,0xffff\n"
+    "1:\n"
+    "ld $31,48($sp)\n"
+    "ld $17,32($sp)\n"
+    "ld $16,16($sp)\n"
+    "jr $31\n"
+    "addiu $sp,$sp,64\n"
+    ".set macro\n"
+    ".set reorder\n"
+    ".end sceSifUnloadModule\n"
+);
