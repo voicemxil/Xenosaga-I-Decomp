@@ -7,6 +7,37 @@ int sceCdSearchFile(int a0, int a1)
     return sceCdLayerSearchFile(a0, a1, 0);
 }
 
+/* sceCdGetReadPos: if a fixed low-memory status flag reads 1 (streaming
+ * active), returns the value at a fixed KSEG1-mapped (uncached) address;
+ * otherwise returns 0. Raw addresses throughout, so file-scope inline
+ * asm (same house issue as sceSif.c). */
+
+__asm__(
+    ".text\n"
+    ".p2align 3\n"
+    ".globl sceCdGetReadPos\n"
+    ".ent sceCdGetReadPos\n"
+    "sceCdGetReadPos:\n"
+    ".set noreorder\n"
+    ".set nomacro\n"
+    "lui $2,0x4b\n"
+    "li $4,1\n"
+    "lw $3,-17836($2)\n"
+    "bne $3,$4,1f\n"
+    "lui $3,0x4b\n"
+    "lui $2,0x2000\n"
+    "addiu $3,$3,-13376\n"
+    "or $3,$3,$2\n"
+    "jr $31\n"
+    "lw $2,0($3)\n"
+    "1:\n"
+    "jr $31\n"
+    "daddu $2,$0,$0\n"
+    ".set macro\n"
+    ".set reorder\n"
+    ".end sceCdGetReadPos\n"
+);
+
 /* sceCdSt* streaming-control family: thin dispatchers into sceCdStream,
  * a 5-arg (a0-a3 + t0) internal entry point, each hard-coding a
  * different opcode in a3 and either forwarding or zeroing a0-a2. Some
