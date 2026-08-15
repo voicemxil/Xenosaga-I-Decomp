@@ -174,3 +174,47 @@ __asm__(
     ".set reorder\n"
     ".end sceCdStStop\n"
 );
+
+/* sceCdCallback: installs a new EE-side CD event callback and returns
+ * the previous one, guarding the swap with DIntr/EIntr and bailing out
+ * early (returning 0, no swap) if sceCdSync(1) reports the drive still
+ * busy. The callback slot is a fixed low-memory pointer (raw-address
+ * house issue, same block scePad's RPC family and sceCdInitEeCB share)
+ * loaded before EIntr and stored in EIntr's own jal delay slot, so this
+ * is file-scope inline asm both for the raw address and to reproduce
+ * that exact load/call/store interleaving. */
+
+__asm__(
+    ".text\n"
+    ".p2align 3\n"
+    ".globl sceCdCallback\n"
+    ".ent sceCdCallback\n"
+    "sceCdCallback:\n"
+    ".set noreorder\n"
+    ".set nomacro\n"
+    "addiu $sp,$sp,-48\n"
+    "sd $17,16($sp)\n"
+    "daddu $17,$4,$0\n"
+    "sd $31,32($sp)\n"
+    "sd $16,0($sp)\n"
+    "jal sceCdSync\n"
+    "li $4,1\n"
+    "bnez $2,1f\n"
+    "daddu $2,$0,$0\n"
+    "jal DIntr\n"
+    "nop\n"
+    "lui $3,0x99\n"
+    "lw $16,27776($3)\n"
+    "jal EIntr\n"
+    "sw $17,27776($3)\n"
+    "daddu $2,$16,$0\n"
+    "1:\n"
+    "ld $31,32($sp)\n"
+    "ld $17,16($sp)\n"
+    "ld $16,0($sp)\n"
+    "jr $31\n"
+    "addiu $sp,$sp,48\n"
+    ".set macro\n"
+    ".set reorder\n"
+    ".end sceCdCallback\n"
+);

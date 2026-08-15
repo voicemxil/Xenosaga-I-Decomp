@@ -20,7 +20,9 @@ typedef struct {
 
 typedef struct {
     unsigned short nType;       /* 0x00 */
-    char pad002[0x30];          /* 0x02 */
+    char pad002[0xC];           /* 0x02 */
+    unsigned short nMatrix;     /* 0x0E */
+    char pad010[0x22];          /* 0x10 */
     short nInterrupt;           /* 0x32 */
     char pad034[0xC];           /* 0x34 */
 } JNT_ELEMENT;
@@ -123,6 +125,11 @@ char flagSmoothHair;
 
 void FCV2_resetPack(void *pPack, void *pCurve);
 JNT_ELEMENT *JNT_getStaticVal2(JNT_WORK *pWork, JNT_ELEMENT *pElement);
+void CUR_MATRIX_Set(void *pMtx);
+void CUR_MATRIX_Get(void *pMtx);
+void CUR_MATRIX_Txyz4s(void *pVec);
+void CUR_MATRIX_Rzyx4s(void *pAngle);
+void JNT_readAttribute(void *pWork, void *pBlock);
 
 /* Element count of the model currently loaded in the work area */
 int JNT_hairID(JNT_WORK *pWork)
@@ -296,6 +303,90 @@ JNT_ELEMENT *JNT_getRootElement(JNT_MODEL *pModel)
 
     pBlock = &pModel->block;
     return (JNT_ELEMENT *)((char *)pBlock + pBlock->nSize);
+}
+
+/* FLAG REQUEST (verified, not yet wired into configure.py -- left
+ * UNREGISTERED below per the hard rule that only a fresh non---built
+ * checkfile.py MATCH may be registered). Source-only tuning gets this
+ * to a single diff: the nVersion>=2 test compiles to `bnezl` (branch
+ * likely) here but the original used the plain `bnez` form with the
+ * identical delay-slot fill (`addiu v0,a1,16`, safe on both paths
+ * either way) -- gcc 2.96's delayed-branch pass picked the other
+ * annul bit for this site with no reachable source-level lever (same
+ * class of nondeterminism as tools/fix_cc_asm.py's --branch-likely /
+ * --branch-unlikely doc comment describes). Verified MATCH (byte
+ * identical, all 32 words) with the existing JNT.c flags plus:
+ *   --branch-unlikely JNT_setModel:1
+ * (site index 1 = the second conditional branch emitted in the
+ * function, 0-based; site 0 is the `pModel == 0` check, which already
+ * comes out plain). Once wired, register:
+ *   JNT_setModel = 0x00313BB0, 0x80; // JNT.c
+ */
+
+/* Bind a model and its handle, and locate the root element. Version 0/1
+ * models have no attribute block so the block itself is the root; later
+ * versions parse the attribute block and skip past it. */
+void JNT_setModel(void *pHandle, JNT_MODEL *pModel)
+{
+    JNT_ATTRIBUTE_BLOCK *pBlock;
+    unsigned int nSize;
+    unsigned short nVersion;
+
+    JNT->pHandle = pHandle;
+    JNT->pModel = pModel;
+    JNT->nHash = 0;
+    if (pModel == 0) {
+        JNT->pRoot = 0;
+        return;
+    }
+    nVersion = pModel->nVersion;
+    if (nVersion >= 2) {
+        pBlock = &pModel->block;
+        JNT_readAttribute(JNT, pBlock);
+        nSize = pBlock->nSize;
+        JNT->pRoot = (JNT_ELEMENT *)((char *)pBlock + nSize);
+        return;
+    }
+    JNT->pRoot = (JNT_ELEMENT *)&pModel->block;
+}
+
+/* Apply the static (non-animated) transform for one element and advance
+ * the model's element cursor. Types 1-4 and 5 both drive the current
+ * matrix through the same T/R decode; type 0 (and anything above 5)
+ * only advances the cursor. */
+JNT_ELEMENT *JNT_getStaticVal2(JNT_WORK *pWork, JNT_ELEMENT *pElement)
+{
+    int nType;
+    void *pTrans;
+    void *pRotate;
+    JNT_ELEMENT *pNext;
+
+    nType = pElement->nType;
+    pTrans = (char *)pElement + 0x10;
+    pRotate = (char *)pElement + 0x20;
+    pNext = pElement + 1;
+    if (nType < 5) {
+        if (nType == 0) {
+            goto common;
+        }
+        goto transform;
+    } else if (nType == 5) {
+        CUR_MATRIX_Set((char *)pWork->pMatrix + (pElement->nMatrix << 6));
+        CUR_MATRIX_Txyz4s(pTrans);
+        CUR_MATRIX_Rzyx4s(pRotate);
+        CUR_MATRIX_Get((char *)pWork->pMatrix + (pWork->nIndex << 6));
+    }
+    goto common;
+
+transform:
+    CUR_MATRIX_Set((char *)pWork->pMatrix + (pElement->nMatrix << 6));
+    CUR_MATRIX_Txyz4s(pTrans);
+    CUR_MATRIX_Rzyx4s(pRotate);
+    CUR_MATRIX_Get((char *)pWork->pMatrix + (pWork->nIndex << 6));
+
+common:
+    pWork->nIndex++;
+    return pNext;
 }
 
 /* Arm the curve pack for a single-curve animation */

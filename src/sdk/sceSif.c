@@ -268,6 +268,40 @@ __asm__(
     ".end sceSifAddCmdHandler\n"
 );
 
+/* sceSifSyncIop: reads sceSifGetReg(4) (an IOP sync/status register),
+ * and if bit 0x40000 is set, re-inits the debug tty and always returns
+ * 1; otherwise returns 0. File-scope inline asm because the body ends
+ * in its own jr+delay-slot epilogue after a jal (see sceSifExitCmd
+ * above for why a plain C function body can't reproduce this). */
+
+__asm__(
+    ".text\n"
+    ".p2align 3\n"
+    ".globl sceSifSyncIop\n"
+    ".ent sceSifSyncIop\n"
+    "sceSifSyncIop:\n"
+    ".set noreorder\n"
+    ".set nomacro\n"
+    "addiu $sp,$sp,-16\n"
+    "sd $31,0($sp)\n"
+    "jal sceSifGetReg\n"
+    "li $4,4\n"
+    "lui $3,0x4\n"
+    "and $2,$2,$3\n"
+    "beqz $2,1f\n"
+    "daddu $2,$0,$0\n"
+    "jal sceResetttyinit\n"
+    "nop\n"
+    "li $2,1\n"
+    "1:\n"
+    "ld $31,0($sp)\n"
+    "jr $31\n"
+    "addiu $sp,$sp,16\n"
+    ".set macro\n"
+    ".set reorder\n"
+    ".end sceSifSyncIop\n"
+);
+
 __asm__(
     ".text\n"
     ".p2align 3\n"
