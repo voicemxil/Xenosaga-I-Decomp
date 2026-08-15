@@ -330,10 +330,61 @@ typedef struct {
 extern float _gravity;
 extern float _height;
 extern float _colision;
+/* Sign-extend a packed short[3] source (same ldl/ldr+pcgth/pextlh idiom
+ * as sefLerpIVectorA) into a float vector via vitof0, skipping the
+ * first 16 bits of the unaligned doubleword with dsrl -- inline asm. */
+void sefLerpVectorA(void *pSrc, void *pDst)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "ldl $9, 0x7(%0)\n"
+        "ldr $9, 0x0(%0)\n"
+        "dsrl $9, $9, 0x10\n"
+        "vmove.w $vf2w, $vf0w\n"
+        "pcgth $10, $0, $9\n"
+        "pextlh $10, $10, $9\n"
+        "qmtc2 $10, $vf1\n"
+        "vitof0.xyz $vf2, $vf1\n"
+        "sqc2 $vf2, 0x0(%1)\n"
+        ".set reorder" : : "r"(pSrc), "r"(pDst) : "$9", "$10", "memory");
+}
+
+/* out = pA - pB (a stack-temp quadword), then forward to
+ * sefGetDirMatrix(pObj, &out); pObj passes through untouched. */
+typedef struct { float x, y, z, w; } SEF_VEC4;
+extern void sefGetDirMatrix(void *pObj, void *pDir);
+void sefGetVecMatrix(void *pObj, SEF_VEC4 *pA, SEF_VEC4 *pB)
+{
+    SEF_VEC4 diff;
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%0)\n"
+        "lqc2 $vf2, 0x0(%1)\n"
+        "vsub.xyz $vf1, $vf1, $vf2\n"
+        "sqc2 $vf1, 0x0(%2)\n"
+        ".set reorder" : : "r"(pA), "r"(pB), "r"(&diff) : "memory");
+    sefGetDirMatrix(pObj, &diff);
+}
+
 extern void sefLerpVectorSC(void *a, void *b);
 extern void sefLerpIVector(void *a, void *b);
 extern void sefProgressInt(void *a, void *b);
-extern void sefGetPosition(void *a, void *b, int c);
+/* c is dead: only b's null-ness is examined, and the point-table lookup
+ * always writes the w=1.0 tail regardless of which branch is taken.
+ * TODO: near-miss (12 words, LENGTH 16 orig vs 15 built). The original
+ * computes the _zeroPos_004CBF00 address as `lui v0,hi; addiu a1,v0,lo`
+ * -- result lands in a1, scratch in v0 -- with an UNFILLED nop in the
+ * jal delay slot; this C form gets the arg computation folded straight
+ * into a1 with the addiu filling the delay slot (one word shorter).
+ * Not registered -- do not add without closing this. */
+extern void sefGetPoint(void *p, void *table);
+extern float _zeroPos_004CBF00[];
+void sefGetPosition(void *a, void *b, int c)
+{
+    if (b == 0) {
+        sefGetPoint(a, _zeroPos_004CBF00);
+    }
+    *(float *)((char *)a + 12) = 1.0f;
+}
+
 extern int sefExecLineGlobalData(void *a, int b);
 extern int sefExecLineLocalData(void *a, int b);
 
@@ -437,4 +488,61 @@ int sefExecLineData(SEF_LINE *p, int mode)
 void sefHitEffect(void)
 {
     _hitFlag = 1;
+}
+
+/* Release a "local data" slot's particle-allocator handle, if idx is in
+ * range: address calc has no side effects so it is hoisted above the
+ * range check, matching the original.
+ * TODO: near-miss (8 words, LOGIC). Original folds `idx*2 + 1536` into
+ * v0 first and combines with base in a single `addu s0,a0,v0` (a0
+ * stays live/untouched); this form (both left-assoc and explicitly
+ * `base + (idx*2+1536)`-grouped) instead accumulates into a0 in place
+ * (`addu a0,a0,v0`) before the +1536 add, and the sp-decrement prologue
+ * word moves relative to the sll/sltiu pair. Not registered. */
+extern void sevFreePtAllocator(int handle);
+void sefFreeLocalData(void *base, int idx)
+{
+    short *p = (short *)((char *)base + (idx * 2 + 1536));
+    if ((unsigned int)idx < 256) {
+        sevFreePtAllocator(*p);
+        *p = -1;
+    }
+}
+
+/* Re-init an effect Cf slot's file-load state and register its 2D-draw
+ * callback into the shared render struct (owned by xgl -- sRender);
+ * offsets 0x2C/0x38 only, referenced by address, not by xgl's real
+ * struct type */
+extern short _sefBattleMode;
+extern void sefDestroyEffectCf(void);
+extern void sresLoadCfMemory(void);
+typedef struct {
+    char pad[0x2C];
+    int cb1;                 /* 0x2C */
+    char pad2[0x38 - 0x2C - 4];
+    void (*cb2)(void);       /* 0x38 */
+} SEF_RENDER_CB;
+extern SEF_RENDER_CB sRender;
+void sefInitEffectCf(void)
+{
+    _sefBattleMode = 0;
+    sefDestroyEffectCf();
+    sresLoadCfMemory();
+    sRender.cb1 = 0;
+    sRender.cb2 = sefDrawEffect2D;
+}
+
+/* Look an effect name up by ID and kick off its Cf load if found; id is
+ * forwarded into srsFileLoadCf's second argument even though that
+ * function (see sefLoadEffectCf's single-arg call, already matched)
+ * ignores it on this path -- call through a locally cast pointer type
+ * rather than re-declaring srsFileLoadCf with a conflicting prototype */
+extern int srsEffectNameToID(void *name);
+int sefLoadEffectCfName(void *p, void *name)
+{
+    int id = srsEffectNameToID(name);
+    if (id > 0) {
+        ((void (*)(void *, int))srsFileLoadCf)(p, id);
+    }
+    return 0;
 }

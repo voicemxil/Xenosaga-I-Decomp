@@ -2189,3 +2189,7 @@ sceSifGetSreg = 0x00202758, 0x18; // sceSif.c
 sceSifSetSreg = 0x00202770, 0x1C; // sceSif.c
 sceSifSetSysCmdBuffer = 0x00202A70, 0x18; // sceSif.c
 sceSifSetCmdBuffer = 0x00202A58, 0x18; // sceSif.c
+sefLerpVectorA = 0x002E17C8, 0x2C; // sef.c
+sefGetVecMatrix = 0x002E2908, 0x2C; // sef.c
+sefInitEffectCf = 0x002E6C78, 0x40; // sef.c
+sefLoadEffectCfName = 0x002E7780, 0x40; // sef.c
