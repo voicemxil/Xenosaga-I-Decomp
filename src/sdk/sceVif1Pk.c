@@ -282,16 +282,33 @@ void sceVif1PkAlign(Vif1Packet *pkt, unsigned int padding, unsigned int boundary
        goto into its middle, reproducing the original's peeled entry (the
        plain while gets either cross-jumped or left in jump-to-test form);
        (3) `t1 = target + 1` in its own statement stops the reassociation
-       into target + (mask + 1).  Remaining 8 words: the mask-setup constants
-       32 and 0xFFFFFFFF swap $v0/$v1 (allocation tie, statement order and
-       temps do not move it, permuter-exhausted) and in the loop body cse
-       rewrites `next = cur + 1` into `addiu v1,v1,4` via the cur=next copy,
-       which then schedules after the store instead of before it. */
+       into target + (mask + 1); (4) the mask-setup $v0/$v1 allocation tie
+       -- called permuter-exhausted -- is fixed by PINning amt to $3 and a
+       0xFFFFFFFF temp to $2 and assigning both through PASSTHRU, and the
+       loop-body cse that rewrote `next = cur + 1` into `addiu v1,v1,4` is
+       fixed by pinning cur to $5 and next to $3, so the addiu now reads
+       cur exactly as the original does.  8 -> 4 words.
+       Remaining 4 (2 of them with --swap-adjacent sceVif1PkAlign:6, which
+       is not wired since the function does not yet match): the peeled
+       entry and the loop body each emit the store BEFORE the pointer
+       increment where the original emits it after.  Ruled out: LAUNDER
+       and LAUNDER_V on either cur or next at that point (all regress to
+       4), every --swap-adjacent site 14..33 with and without the force
+       suffix (best 4), and all six orderings of the trailing statements.
+       This is gcc sched2 hoisting a ready store over an independent
+       addiu; no source lever found. */
     unsigned int p = (padding + 2) & 0x1F;
-    unsigned int amt = 32 - p;
-    unsigned int mask = 0xFFFFFFFF >> amt;
-    unsigned int *cur = pkt->current;
-    unsigned int target = ((unsigned int)cur & ~mask) + (boundary << 2);
+    PIN(unsigned int amt, "$3");
+    PIN(unsigned int all1, "$2");
+    unsigned int mask;
+    PIN(unsigned int *cur, "$5");
+    unsigned int target;
+
+    PASSTHRU(amt, 32 - p);
+    PASSTHRU(all1, 0xFFFFFFFFu);
+    mask = all1 >> amt;
+    cur = pkt->current;
+    target = ((unsigned int)cur & ~mask) + (boundary << 2);
 
     if (target < (unsigned int)cur)
     {
@@ -301,7 +318,9 @@ void sceVif1PkAlign(Vif1Packet *pkt, unsigned int padding, unsigned int boundary
 
     if ((unsigned int)cur < target)
     {
-        unsigned int *next = cur + 1;
+        PIN(unsigned int *next, "$3");
+
+        next = cur + 1;
         *(unsigned int **)cur = 0;
         goto join;
         do
