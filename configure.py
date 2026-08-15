@@ -163,6 +163,12 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    # sceVif1PkCnt/End: the original scheduler ordered an or/sw pair the
+    # other way -- parked for months as "needs a mid-block instruction
+    # swap flag", which --swap-adjacent now is. NOTE all sites for one
+    # pass must be a single comma-separated value (argparse stores, not
+    # appends; fix_cc_asm.py rejects duplicates).
+    "sceVif1Pk.c": "--swap-adjacent sceVif1PkCnt:9,sceVif1PkEnd:9",
     # an lwc1 in a jal delay slot followed by mov.s trips a bogus hazard nop
     "MAP.c": "--omit-hazard mov.s",
     # many util natives do lwc1->cvt.s.w with no hazard nop in the original
