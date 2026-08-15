@@ -5,12 +5,16 @@ typedef struct JTHREAD
     char            pad00[8];
     struct JTHREAD *pNext;   /* 0x08 */
     unsigned char   nActive; /* 0x0C - cleared threads are skipped by cntl */
-    char            pad0D[3];
+    unsigned char   nWait;   /* 0x0D - low nibble selects the wait condition */
+    char            pad0E[2];
     int             nId;     /* 0x10 */
     char            pad14[4];
     void           *pMethod; /* 0x18 - script method the default handler runs */
     char            pad1C[8];
     int             nFlags;  /* 0x24 */
+    char            pad28[8];
+    int             nCount;  /* 0x30 - frame counter, or the waited-on object */
+    int             nLimit;  /* 0x34 - frame limit, or the awaited state value */
 } JTHREAD;
 
 /* The 0x14 slot is a per-thread native callback in JTHREAD_cntl's walk and
@@ -33,6 +37,7 @@ extern JAVA_FIELD *lookupClassField(int nClass, void *pName, int nFlags);
 extern int classJava_xeno_Chr;
 extern int classJava_xeno_Unit;
 extern char D_004DC080[];
+extern int D_00338684[];
 
 typedef struct JSYM
 {
@@ -245,5 +250,58 @@ void JTHREAD_defaultUnit(JTHREAD *pThread)
     nDone = pThread->nFlags;
     if ((nDone & 8) != 0) {
         pThread->nFlags = nDone & ~0x10;
+    }
+}
+
+
+/* Poll one thread's wait condition and, when it is satisfied, clear the
+   "waiting" bit and set the "runnable" bit.  The low nibble of nWait
+   selects the condition; anything outside 1..7 never wakes.  Conditions
+   4, 5 and 7 also clear bit 0, the rest only bit 2. */
+void JTHREAD_waitFor(JTHREAD *pThread)
+{
+    JTHREAD *pOther;
+    int nCount;
+
+    switch (pThread->nWait & 0xf) {
+    case 1:
+        nCount = pThread->nCount + 1;
+        pThread->nCount = nCount;
+        if (nCount >= pThread->nLimit) {
+            pThread->nFlags = (pThread->nFlags & ~4) | 2;
+        }
+        break;
+    case 2:
+        if (*(unsigned short *)((char *)pThread->nCount + 20) == 2) {
+            pThread->nFlags = (pThread->nFlags & ~4) | 2;
+        }
+        break;
+    case 3:
+        pOther = (JTHREAD *)pThread->nCount;
+        if ((pOther->nFlags & 8) != 0) {
+            pOther->nFlags &= ~8;
+            pThread->nFlags = (pThread->nFlags & ~4) | 2;
+        }
+        break;
+    case 4:
+        if ((*(int *)pThread->nCount & 2) == 0) {
+            pThread->nFlags = (pThread->nFlags & ~5) | 2;
+        }
+        break;
+    case 5:
+        if ((*(int *)pThread->nCount & 2) == 0) {
+            pThread->nFlags = (pThread->nFlags & ~5) | 2;
+        }
+        break;
+    case 6:
+        if (*(unsigned char *)((char *)pThread->nCount + 129) == pThread->nLimit) {
+            pThread->nFlags = (pThread->nFlags & ~4) | 2;
+        }
+        break;
+    case 7:
+        if ((D_00338684[3] & 0x800) == 0) {
+            pThread->nFlags = (pThread->nFlags & ~5) | 2;
+        }
+        break;
     }
 }
