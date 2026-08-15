@@ -473,10 +473,14 @@ void Java_xeno_util_Runtime_setFlags__III(JThread *thread, JValue *args, JValue 
 
 /* Change the current map location */
 /* TODO: near-miss - delay-slot fill and store order tie-break */
+/* Change map. See the consolidated flag request at the head of the
+   jumpCF note above for this function's two --rotate sites. */
 void Java_xeno_util_Runtime_setLocation__III(JThread *thread, JValue *args, JValue *ret)
 {
+    int nMap = args[0].i;
+
     if (args[2].i == 0 || D_00338688[0] == 0) {
-        MapChange2(args[0].i);
+        MapChange2(nMap);
         return;
     }
     LoadMapOnly();
@@ -556,6 +560,26 @@ void Java_xeno_util_Runtime_CaptureStart__Ljava_lang_String_I(JThread *thread, J
 }
 
 /* Jump to another cutscene script */
+/* CONSOLIDATED FLAG REQUEST for Java_util.c (all three verified together
+ * on top of the existing --omit-hazard cvt.s.w, taking the file from
+ * 100 match/8 not to 103 match/5 not):
+ *
+ *   --mtc1-nop Java_xeno_util_Spline_getValue__I:0
+ *   --swap-adjacent Java_xeno_util_Runtime_jumpCF__II:7
+ *   --rotate Java_xeno_util_Runtime_setLocation__III:15:2,\
+ *            Java_xeno_util_Runtime_setLocation__III:17:3
+ *
+ * Once wired, register:
+ *   Java_xeno_util_Spline_getValue__I = 0x002F6798, 0x74; // Java_util.c
+ *   Java_xeno_util_Runtime_jumpCF__II = 0x002F76F0, 0x58; // Java_util.c
+ *   Java_xeno_util_Runtime_setLocation__III = 0x002F7340, 0x6C; // Java_util.c
+ *
+ * setLocation's two rotate sites are deliberately non-overlapping, so
+ * unlike JS_loadClass's pair they both fire in a single pass and need no
+ * change to rotate_insns itself. Its source is otherwise exact once the
+ * MapChange2 argument is hoisted into a local ahead of the guard (that
+ * alone takes it from 14 diffs to 5); four tail shapes including the
+ * read-early/write-late split were swept and none beat 5. */
 /* TODO: near-miss - one scheduling tie-break between the parameter copy
  * (move s0,a0, preserving `thread` across the SCRIPT_talkIgnoreSet call)
  * and the %lo addiu completing the jthreadResetFunc address. Original
