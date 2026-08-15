@@ -164,13 +164,17 @@ void MATRIX_convert4s(float *out, const float *in)
     out[15] = in[15];
 }
 
-/* TODO: near-match (2 diffs, SCHEDULING) -- instruction multiset is exactly
- * right but the original schedules the final sqc2 (pDst+0x30) into the
- * leaf return's jr delay slot; our build emits it before jr with a plain
- * trailing nop. Same wall already documented on xglMatrixUnit/Unit4s in
- * xglMatrix.c: that delay-slot fill comes from gcc's own codegen for a
- * non-opaque store and is not reachable when the store lives inside an
- * inline-asm block (opaque to the scheduler). Not registered. */
+/* MATCHING NOTE (gas delay-slot priming) -- gcc emits the leaf return as a
+ * bare `j $31` and leaves the delay slot for gas to fill in .set reorder
+ * mode. gas can only do that if it has a valid "previous instruction", and
+ * leaving .set noreorder invalidates it: the FIRST instruction assembled
+ * after `.set reorder` only primes the tracker, the second is the first one
+ * gas will actually move. So `.set reorder` has to come at least two
+ * instructions before the end of the asm block -- with it on the last line
+ * the final sqc2 is unmovable and gcc's nop stays. Placing it before the
+ * last two sqc2s lets gas swap the final store into the jr delay slot,
+ * exactly as the original. (Same fix should apply to xglMatrixUnit/Unit4s
+ * in xglMatrix.c, where this was previously written off as unreachable.) */
 /* VU0 macro mode: scale each of the first three rows of pMat by its own w
  * (then zero that w), multiply by pSrc (row-major), and write to pDst. */
 void MATRIX_convert4MulMatrix(float *pDst, float *pMat, float *pSrc)
@@ -205,12 +209,13 @@ void MATRIX_convert4MulMatrix(float *pDst, float *pMat, float *pSrc)
         "vmaddaz.xyzw $ACC, $vf29, $vf5z\n"
         "vmaddw.xyzw $vf30, $vf30, $vf5w\n"
         "sqc2 $vf2, 0x0(%0)\n sqc2 $vf3, 0x10(%0)\n"
-        "sqc2 $vf4, 0x20(%0)\n sqc2 $vf30, 0x30(%0)\n"
-        ".set reorder" : : "r"(pDst), "r"(pMat), "r"(pSrc));
+        ".set reorder\n"
+        "sqc2 $vf4, 0x20(%0)\n sqc2 $vf30, 0x30(%0)"
+        : : "r"(pDst), "r"(pMat), "r"(pSrc));
 }
 
-/* TODO: near-match (2 diffs, SCHEDULING) -- same delay-slot-fill wall as
- * MATRIX_convert4MulMatrix above. Not registered. */
+/* Same gas delay-slot priming placement of `.set reorder` as
+ * MATRIX_convert4MulMatrix above. */
 /* VU0 macro mode: same row-scale prep on pMat as MATRIX_convert4MulMatrix,
  * but multiply the other way round (pSrc rows dotted against pMat columns). */
 void MATRIX_convert4MulMatrixRev(float *pDst, float *pMat, float *pSrc)
@@ -243,6 +248,7 @@ void MATRIX_convert4MulMatrixRev(float *pDst, float *pMat, float *pSrc)
         "vmaddaz.xyzw $ACC, $vf4, $vf30z\n"
         "vmaddw.xyzw $vf30, $vf5, $vf30w\n"
         "sqc2 $vf27, 0x0(%0)\n sqc2 $vf28, 0x10(%0)\n"
-        "sqc2 $vf29, 0x20(%0)\n sqc2 $vf30, 0x30(%0)\n"
-        ".set reorder" : : "r"(pDst), "r"(pMat), "r"(pSrc));
+        ".set reorder\n"
+        "sqc2 $vf29, 0x20(%0)\n sqc2 $vf30, 0x30(%0)"
+        : : "r"(pDst), "r"(pMat), "r"(pSrc));
 }

@@ -30,26 +30,23 @@
 
 #include "common.h"
 
-/* TODO: near-miss (SCHEDULING, 7 diffs) - three sb v1,{0x2c,0x2d,0x2e}(a0)
- * stores using the same -128 constant get reordered relative to each
- * other and to the surrounding sw/sb zero stores no matter what order
- * they're written in C (tried every permutation of the three -128
- * assignments); the u8 0x2f=96 store and the four zeroing stores always
- * land correctly, and whichever -128 store is written LAST always lands
- * correctly in the jr-ra delay slot, but the other two swap around each
- * other. Parked. */
+/* Store order here is load-bearing: gcc 2.9x reorders the three -128 byte
+ * stores relative to each other and to the zeroing stores, so the source
+ * order that reproduces the original is not the original's emission order.
+ * Found by exhausting the placements of the three -128 stores among the
+ * nine (C(9,3) * 3! = 504); only this one lands 0x2C first and 0x2E in the
+ * jr-ra delay slot. Do not "tidy" this list back into address order. */
 void WindowDXSet(void *pWin)
 {
     char *p = (char *)pWin;
 
-    *(s8 *)(p + 0x2C) = -128;
     *(u8 *)(p + 0x2F) = 96;
     *(s32 *)(p + 0xC) = 0;
     *(void **)(p + 0x14) = NULL;
     *(void **)(p + 0x18) = NULL;
     *(s8 *)(p + 0x10) = 0;
     *(s8 *)(p + 0x11) = 0;
-    *(s8 *)(p + 0x2E) = -128;
     *(s8 *)(p + 0x2D) = -128;
-
+    *(s8 *)(p + 0x2E) = -128;
+    *(s8 *)(p + 0x2C) = -128;
 }

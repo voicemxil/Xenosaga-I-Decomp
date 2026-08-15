@@ -4,6 +4,8 @@
  * it, declared as an opaque array so we don't duplicate/collide with
  * that struct) plus two active-flag bytes in PadData. */
 
+#include "matching.h"
+
 extern unsigned char GameLoopState[];
 extern unsigned char PadData[];
 
@@ -13,30 +15,37 @@ void Vibration_Set_Weak(unsigned int nVal)
     *(unsigned int *)(GameLoopState + 0x2A004) = nVal;
 }
 
-/* TODO: near-miss, 2 attempts tried (raw literal addresses, then via the
- * GameLoopState/PadData symbols). Both fold to a single lui+mem-op per
- * access; the original instead loads a base once (lui v0,0x34; addiu
- * v0,v0,-31104 == &GameLoopState) and then, for EACH field access,
- * separately rematerializes a 0x30000 addend into $at (lui at,3; addu
- * at,at,v0) before applying the small residual store offset -- no CSE of
- * that $at value across the 2-3 accesses that share it. Looks like the
- * field offset is reached through a second pointer/struct layer that
- * itself needs a non-foldable runtime add, not plain byte-offset pointer
- * arithmetic on a single flat symbol. Needs the real GAME_LOOP_STATE
- * layout this deep (0x2A000+) to find that shape. */
+/* The 0x2A0xx accesses must go through a *register* base. Written as
+ * `GameLoopState + 0x2A004` gcc folds the symbol and the offset into one
+ * %hi/%lo pair per access; the original instead materialises &GameLoopState
+ * once and lets the assembler expand each big-offset store into
+ * lui $at,3 / addu $at,$at,base / store. LAUNDER makes the base opaque so
+ * the fold cannot happen. LAUNDER2 (not two LAUNDERs) additionally fixes
+ * the order in which the two symbol lo-halves are materialised. */
 void Vibration_Stop(void)
 {
-    *(unsigned int *)(GameLoopState + 0x2A004) = 0;
-    PadData[81] = 0;
-    *(unsigned int *)(GameLoopState + 0x2A008) = 0;
-    PadData[80] = 0;
+    unsigned char *pState = GameLoopState;
+    unsigned char *pPad = PadData;
+    LAUNDER2(pState, pPad);
+    *(unsigned int *)(pState + 0x2A004) = 0;
+    pPad[81] = 0;
+    *(unsigned int *)(pState + 0x2A008) = 0;
+    pPad[80] = 0;
 }
 
-/* TODO: near-miss, see Vibration_Stop's note -- same base+offset shape. */
+
+/* Same register-base shape as Vibration_Stop. Two extra subtleties: the
+ * 0x2A008 and 0x2A00C stores come out in the opposite order from the
+ * source, and the original leaves the jr-ra delay slot empty -- gas would
+ * otherwise hoist the last store into it, so SCHED_NOP supplies the pad. */
 void Vibration_Set_Strong(unsigned char nA, unsigned char nB, unsigned int nVal)
 {
-    *(unsigned int *)(GameLoopState + 0x2A00C) = nVal;
-    GameLoopState[0x2A000] = nA;
-    GameLoopState[0x2A001] = nB;
-    *(unsigned int *)(GameLoopState + 0x2A008) = nVal;
+    unsigned char *pState = GameLoopState;
+
+    LAUNDER(pState);
+    *(unsigned int *)(pState + 0x2A008) = nVal;
+    pState[0x2A000] = nA;
+    pState[0x2A001] = nB;
+    *(unsigned int *)(pState + 0x2A00C) = nVal;
+    SCHED_NOP();
 }

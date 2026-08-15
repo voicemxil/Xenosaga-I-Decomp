@@ -41,10 +41,10 @@ void mask_init(int *pMask)
 
 void container_init(EWCONTAINER *pContainer)
 {
-    *(int *)((char *)pContainer + 12) = 0;
     pContainer->ppItems = 0;
     pContainer->nNum = 0;
     *(int *)((char *)pContainer + 8) = 0;
+    *(int *)((char *)pContainer + 12) = 0;
 }
 
 extern void EW_drawComoponent(void *pPacket, EWCOMP *pComp);

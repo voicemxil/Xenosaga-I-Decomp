@@ -45,7 +45,17 @@ extern int _SetTLBEntry(int nIndex);
  * inverted `if(!in_range) return -1` forms plus an explicit nRet local for
  * a shared-tail goto shape -- the local grew the function to 0x38 bytes
  * (duplicate epilogue got worse, not better) and the inverted form also
- * regressed. Kept the smallest (8-diff, exact-length) variant. */
+ * regressed. Kept the smallest (8-diff, exact-length) variant.
+ * ROOT CAUSE (later session): the blocker is gcc's sibling-call pass. We
+ * emit `ld ra; j _SetTLBEntry; addiu sp,16`; the original emits a real
+ * `jal ...; nop` plus a shared epilogue. -fno-optimize-sibling-calls DOES
+ * restore the jal, but lands at 11 words vs the original 12 (still missing
+ * the original's `b` to the shared epilogue, i.e. the -1 block laid out
+ * physically first), so the flag is not a fix and is NOT worth requesting:
+ * with it Set.c is still 2 match / 1 not. No source shape reproduces the
+ * jal without it -- also tried unprototyped `extern int _SetTLBEntry();`,
+ * LAUNDER/SCHED_NOP on the call result, and dropping the `return` on the
+ * call path. MMathCalcDirVector in MMath.c has the identical blocker. */
 /* Install a TLB entry for indices 13..47 (the mappable range), else -1 */
 int SetTLBEntry(int nIndex)
 {

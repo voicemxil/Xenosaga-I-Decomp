@@ -432,7 +432,15 @@ float MMathCalcDir(MC_VECTOR *pFrom, MC_VECTOR *pTo)
    early move never materializes and the tail call still sibcalls. This is
    a genuine two-part near-miss: the v0/a0 register tie-break predates the
    sibcall codegen and the barrier idiom alone can't force it. Logic is
-   correct. */
+   correct.
+   Third attempt (this session): confirmed the blocker is gcc's sibling-call
+   pass -- compiling this TU with -fno-optimize-sibling-calls does emit the
+   jal form, but at 11 words vs the original's 12 (the original also keeps
+   the early `move v0,a0` this doesn't reproduce), so the flag is NOT a fix
+   and is not worth requesting: it changes nothing else in MMath.c either
+   (35 match / 1 not, with and without). Also tried `return pDst;` instead
+   of returning the callee's value -- that forces pDst into s0 and grows the
+   function to 16 words. Set.c's SetTLBEntry has the identical blocker. */
 /* Direction vector (unnormalized diff, then normalized) from pFrom to pTo */
 MC_VECTOR *MMathCalcDirVector(MC_VECTOR *pDst, MC_VECTOR *pFrom, MC_VECTOR *pTo)
 {

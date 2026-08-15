@@ -247,7 +247,6 @@ void PartyTimePauseEnd(void)
     xglClockRead(&_CountTime);
 }
 
-/* TODO: Matches except an irreducible s2/s3 register tie-break for D_00491818/_CountTime. */
 /* Advance the play-time counters and re-check the elapsed-time limit */
 void *PartyTimeUpDate(void)
 {
@@ -262,7 +261,7 @@ void *PartyTimeUpDate(void)
     nTempUint = xglClockDayTime2UInt(&sTemp);
     xglClockUInt2DayTime(D_00491818, nBaseUint + (nTempUint - nCountUint));
     _CountTime = sTemp;
-    PartyTimeLimitCheck(&_CountTime);
+    PartyTimeLimitCheck(D_00491818);
     return D_00491818;
 }
 

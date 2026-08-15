@@ -464,16 +464,10 @@ int scWaitParseEveScript(SCOBJ *o) {
 extern char D_004CC830[];
 int scGOSUBScript(SCOBJ *o) {
     int adr = scGetAdrScript(o);
-    /* TODO: near-miss (4/27 words) - the original speculatively hoists the
-       lhu reload of field54 (used only in the true branch) and the
-       tracePrint string-address setup (used only in the false branch)
-       above the beqz; our build computes both naturally inside their own
-       branches. Tried: hoisting `idx` before the if (regressed to 14
-       diffs), swapping the two true-branch store statements (no change).
-       Scheduler-only hoisting across the branch, not reachable from C
-       so far. */
+    unsigned short raw = o->field54;
+
     if (o->field54 < 3) {
-        int idx = (unsigned short)o->field54 + 1;
+        int idx = raw + 1;
         o->field54 = idx;
         o->cmdBuf[(short)idx] = adr;
     } else {
