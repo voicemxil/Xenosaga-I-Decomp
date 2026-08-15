@@ -701,6 +701,8 @@ void Java_xeno_Chr_setSortOffset__F(void *env, int *args, int *ret)
  * shared tail (sw v0,8(s0); sw v1,0(s0); sw a1,0(s2)) is jumped into from
  * both cases -- this switch reproduces that shared tail shape but schedules
  * the pFilter assignment and the mask differently. */
+/* Select a per-character draw filter.  See the consolidated flag request
+   in look_eye_set's header for this function's one --rotate site. */
 void Java_xeno_Chr_setFilter__I(void *env, int *args, int *ret)
 {
     char *obj = (char *)args[0];
@@ -716,14 +718,17 @@ void Java_xeno_Chr_setFilter__I(void *env, int *args, int *ret)
         chr->nFlags &= ~0x800;
         ret[0] = -1;
         break;
+    /* nFlags before pFilter in these two arms only: with pFilter first
+       the two tails become identical from the `and` onwards and gcc
+       cross-jumps two more words than the original merged. */
     case 2:
-        chr->pFilter = (void *)ACT_filterGuno;
         chr->nFlags &= ~0x800;
+        chr->pFilter = (void *)ACT_filterGuno;
         ret[0] = 4;
         break;
     case 3:
-        chr->pFilter = (void *)ACT_filterStealth;
         chr->nFlags &= ~0x800;
+        chr->pFilter = (void *)ACT_filterStealth;
         ret[0] = 4;
         break;
     }
@@ -975,15 +980,24 @@ void Java_xeno_Chr_look_point__FFF(void *env, int *args, int *ret)
 
 /* Point the character's eyes at explicit yaw/pitch angles */
 /* TODO: not matching - the eye-control store schedules before the first float store */
-/* FLAG REQUEST (verified).  Source is exact -- every one of the 40 words
-   matches except a single missing hazard nop between the synthesized
-   `lui at,0x4334 / mtc1 at,$f2` (180.0f) and the `mul.s` that follows.
-   --lis-hazard-nop, which exists for exactly this shape, does not fire
-   here (19 diffs); --mtc1-nop does.  Verified MATCH, all 40 words, with:
+/* CONSOLIDATED FLAG REQUEST for Java_Chr.c (both verified together,
+   taking the file from 84 match/6 not to 86 match/4 not).  Java_Chr.c has
+   no FILE_FIX_FLAGS entry yet, so this would be its first:
+
        --mtc1-nop Java_xeno_Chr_look_eye_set__FF:0
-   (Java_Chr.c 83 match/7 not -> 84 match/6 not.)  Java_Chr.c has no
-   FILE_FIX_FLAGS entry yet, so this would be its first.  Once wired:
+       --rotate Java_xeno_Chr_setFilter__I:58:2
+
+   Once wired, register:
        Java_xeno_Chr_look_eye_set__FF = 0x00300CB8, 0xA0; // Java_Chr.c
+       Java_xeno_Chr_setFilter__I = 0x00300250, 0x118; // Java_Chr.c
+
+   This function's own share: it is exact at 40/40 words except a single
+   missing hazard nop between the synthesized `lui at,0x4334 / mtc1 at,$f2`
+   (180.0f) and the `mul.s` that follows.  --lis-hazard-nop, which exists
+   for exactly this shape, does not fire here (19 diffs); --mtc1-nop does.
+   setFilter's share is the two stores of its shared case-2/case-3 tail
+   issuing in the other order -- both are stores, so --swap-adjacent's
+   independence check rejects the pair and --rotate with LEN 2 is needed.
 
    Note the statement order matters as much as the flag: the control-word
    store has to stay LAST (the original interleaves it between the second
