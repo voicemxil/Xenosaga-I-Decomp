@@ -217,11 +217,11 @@ void tskUmnPluginInfo(TSK_TASK *pTask, UMN_INFO *w)
 
 /* --- Pas (top title-bar) window work objects --- */
 typedef struct {
-    short nX;                           /* 0x00 */
-    short nY;                           /* 0x02 */
+    unsigned short nX;                  /* 0x00 */
+    unsigned short nY;                  /* 0x02 */
     int nColor;                         /* 0x04 */
-    short nW;                           /* 0x08 */
-    short nH;                           /* 0x0A */
+    unsigned short nW;                  /* 0x08 */
+    unsigned short nH;                  /* 0x0A */
     char pad0C[4];
     char nState;                        /* 0x10 */
     char pad11[3];
@@ -284,7 +284,7 @@ void tskUmnSimulationPas(TSK_TASK *pTask, UMN_PAS_S *w)
             m->emsg.nFont = 32;
             m->emsg.nX = nMsgX;
             m->emsg.nY = nMsgY;
-            m->emsg.nColor = w->nColor + 2;
+            w->msgwork.emsg.nColor = w->nColor + 2;
         }
         w->bReady = 1;
         break;
@@ -306,12 +306,17 @@ void tskUmnSimulationPas(TSK_TASK *pTask, UMN_PAS_S *w)
             nTarget[0] = -312;
         }
         if (w->bReady != 0) {
-            MoveSlide(&w->win.nX, &nTarget[0], 3.0f);
+            int nBoxW;
+            int nBoxH;
+
+            MoveSlide((short *)&w->win.nX, &nTarget[0], 3.0f);
             WindowDXMain((WINDOWDX *)&w->win);
-            w->box.nX = (unsigned short)w->win.nX + 3;
-            w->box.nY = (unsigned short)w->win.nY + 3;
-            w->box.nW = (unsigned short)w->win.nW - 6;
-            w->box.nH = (unsigned short)w->win.nH - 6;
+            w->box.nX = w->win.nX + 3;
+            w->box.nY = w->win.nY + 3;
+            nBoxW = w->win.nW - 6;
+            nBoxH = w->win.nH - 6;
+            w->box.nW = nBoxW;
+            w->box.nH = nBoxH;
             w->box.nColor = w->nColor;
             endPrintExtFunc(w->nColor, 101, &w->box);
             MoveSlide(&w->msgwork.emsg.nX, pTargetY, 3.0f);
@@ -357,7 +362,7 @@ void tskUmnPluginPas(TSK_TASK *pTask, UMN_PAS_L *w)
             m->emsg.nFont = 32;
             m->emsg.nX = nMsgX;
             m->emsg.nY = nMsgY;
-            m->emsg.nColor = w->nColor + 2;
+            w->msgwork.emsg.nColor = w->nColor + 2;
         }
         w->bReady = 1;
         break;
@@ -379,12 +384,17 @@ void tskUmnPluginPas(TSK_TASK *pTask, UMN_PAS_L *w)
             nTarget[0] = -272;
         }
         if (w->bReady != 0) {
-            MoveSlide(&w->win.nX, &nTarget[0], 3.0f);
+            int nBoxW;
+            int nBoxH;
+
+            MoveSlide((short *)&w->win.nX, &nTarget[0], 3.0f);
             WindowDXMain((WINDOWDX *)&w->win);
-            w->box.nX = (unsigned short)w->win.nX + 3;
-            w->box.nY = (unsigned short)w->win.nY + 3;
-            w->box.nW = (unsigned short)w->win.nW - 6;
-            w->box.nH = (unsigned short)w->win.nH - 6;
+            w->box.nX = w->win.nX + 3;
+            w->box.nY = w->win.nY + 3;
+            nBoxW = w->win.nW - 6;
+            nBoxH = w->win.nH - 6;
+            w->box.nW = nBoxW;
+            w->box.nH = nBoxH;
             w->box.nColor = w->nColor;
             endPrintExtFunc(w->nColor, 101, &w->box);
             MoveSlide(&w->msgwork.emsg.nX, pTargetY, 3.0f);
@@ -417,30 +427,38 @@ void tskUmnDataBasePas(TSK_TASK *pTask, UMN_PAS_L *w)
         WindowDXSet((WINDOWDX *)&w->win);
         w->win.nX = -272;
         w->win.nY = 8;
+        w->win.nColor = w->nColor;
         w->win.nW = 272;
         w->win.nH = 32;
-        w->win.nColor = w->nColor;
         w->win.nState = 1;
         WindowDXMain((WINDOWDX *)&w->win);
         w->win.nState = 3;
         {
             EMSGWORK *m;
+            register unsigned char nOne __asm__("$4");
             short nMsgX = 288;
             short nMsgY = 11;
 
             eMessageSet(&w->msgwork.emsg, msg00[0]);
             m = &w->msgwork;
             m->emsg.nFont = 32;
+            nOne = 1;
             m->emsg.nX = nMsgX;
             m->emsg.nY = nMsgY;
-            m->emsg.nColor = w->nColor + 2;
+            w->msgwork.emsg.nColor = w->nColor + 2;
+            __asm__("" : "+r"(nOne));
+            w->bReady = nOne;
         }
-        w->bReady = 1;
         break;
     case 2:
         nTargetX = -16;
-        for (i = 3; i >= 0; i--) {
-            nTarget[i] = 288;
+        {
+            register short nFill __asm__("$3");
+
+            nFill = 288;
+            for (i = 3; i >= 0; i--) {
+                nTarget[i] = nFill;
+            }
         }
         switch (UmnWork.nPage) {
         case 16:
@@ -458,12 +476,17 @@ void tskUmnDataBasePas(TSK_TASK *pTask, UMN_PAS_L *w)
             break;
         }
         if (w->bReady != 0) {
-            MoveSlide(&w->win.nX, &nTargetX, 3.0f);
+            int nBoxW;
+            int nBoxH;
+
+            MoveSlide((short *)&w->win.nX, &nTargetX, 3.0f);
             WindowDXMain((WINDOWDX *)&w->win);
-            w->box.nX = (unsigned short)w->win.nX + 3;
-            w->box.nY = (unsigned short)w->win.nY + 3;
-            w->box.nW = (unsigned short)w->win.nW - 6;
-            w->box.nH = (unsigned short)w->win.nH - 6;
+            w->box.nX = w->win.nX + 3;
+            w->box.nY = w->win.nY + 3;
+            nBoxW = w->win.nW - 6;
+            nBoxH = w->win.nH - 6;
+            w->box.nW = nBoxW;
+            w->box.nH = nBoxH;
             w->box.nColor = w->nColor;
             endPrintExtFunc(w->nColor, 101, &w->box);
             MoveSlide(&w->msgwork.emsg.nX, nTarget, 3.0f);
