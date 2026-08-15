@@ -40,7 +40,9 @@ typedef struct {
             unsigned char nSel;         /* 0x52 */
         } plugin;
     } u;
-    char pad54[0x80 - 0x54];
+    char pad54[0x5C - 0x54];
+    signed char nMailSel;               /* 0x5C: mail hint-slot cursor */
+    char pad5D[0x80 - 0x5D];
 } UMN_WORK;
 
 extern UMN_WORK UmnWork;
@@ -597,5 +599,134 @@ slide:
         WindowDXMain(&w->win);
         break;
     }
+    }
+}
+
+/* A help-bar hint slot as the multi-hint bars address it: the eMessage sits
+   twelve bytes into a 68-byte entry, which is the stride the setup loop
+   walks. */
+typedef struct {
+    char pad00[0xC];
+    struct {
+        char pad00;
+        unsigned char nFont;            /* 0x01 */
+        char pad02[2];
+        short nX;                       /* 0x04 */
+        short nY;                       /* 0x06 */
+        int nColor;                     /* 0x08 */
+    } emsg;                             /* 0x0C */
+    char pad18[0x44 - 0x18];
+} PASMSG;
+
+typedef struct {
+    char pad00[1];
+    unsigned char bReady;               /* 0x001 */
+    char pad02[2];
+    int nColor;                         /* 0x004 */
+    PASWIN win;                         /* 0x008 */
+    PASMSG msg[5];                      /* 0x190 */
+    char pad2E4[0x3BC - 0x2E4];
+    PRINTBOX box;                       /* 0x3BC */
+} UMN_PAS_M;
+
+extern int MenuPasLengthGet(char *pMsg);
+
+/* Mail screen help bar: five hints, the widest of the Umn bars. The first
+   page family puts its second hint behind a three-slot-per-entry cursor. */
+void tskUmnMailPas(TSK_TASK *pTask, UMN_PAS_M *w)
+{
+    static char *msg00[] = { 0, 0, 0, 0, 0 };
+    int aLen[5];
+    short aTarget[5];
+    short nSlide;
+    int i;
+
+    for (i = 0; i < 5; i++) {
+        aLen[i] = MenuPasLengthGet(msg00[i]);
+    }
+    if (UmnWork.nScene != 1) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nColor = 0xFFFFF0;
+        WindowDXSet((WINDOWDX *)&w->win);
+        w->win.nX = -272;
+        w->win.nY = 8;
+        w->win.nColor = w->nColor;
+        w->win.nW = 272;
+        w->win.nH = 32;
+        w->win.nState = 1;
+        WindowDXMain((WINDOWDX *)&w->win);
+        w->win.nState = 3;
+        for (i = 0; i < 5; i++) {
+            eMessageSet(&w->msg[i].emsg, msg00[i]);
+            w->msg[i].emsg.nFont = 32;
+            w->msg[i].emsg.nX = 288;
+            w->msg[i].emsg.nY = 11;
+            w->msg[i].emsg.nColor = w->nColor + 2;
+        }
+        w->bReady = 1;
+        break;
+    case 2:
+        nSlide = -16;
+        for (i = 0; i < 5; i++) {
+            aTarget[i] = 288;
+        }
+        switch (UmnWork.nPage) {
+        case 16:
+        case 17:
+        case 32:
+        case 33:
+        case 48:
+        case 49:
+        case 53:
+        case 96:
+        case 97:
+            aTarget[0] = 16;
+            aTarget[UmnWork.nMailSel * 3 + 1] = aLen[0] + 16;
+            break;
+        case 64:
+        case 65:
+            aTarget[0] = 16;
+            aTarget[2] = aLen[0] + 16;
+            break;
+        case 80:
+        case 81:
+        case 82:
+        case 83:
+        case 84:
+        case 85:
+            aTarget[0] = 16;
+            aTarget[3] = aLen[0] + 16;
+            break;
+        default:
+            nSlide = -272;
+            break;
+        }
+        if (w->bReady != 0) {
+            int nBoxW;
+            int nBoxH;
+
+            MoveSlide((short *)&w->win.nX, &nSlide, 3.0f);
+            WindowDXMain((WINDOWDX *)&w->win);
+            w->box.nX = w->win.nX + 3;
+            w->box.nY = w->win.nY + 3;
+            nBoxW = w->win.nW - 6;
+            nBoxH = w->win.nH - 6;
+            w->box.nW = nBoxW;
+            w->box.nH = nBoxH;
+            w->box.nColor = w->nColor;
+            endPrintExtFunc(w->nColor, 101, &w->box);
+            for (i = 0; i < 5; i++) {
+                MoveSlide(&w->msg[i].emsg.nX, &aTarget[i], 3.0f);
+                if (w->msg[i].emsg.nX < 256) {
+                    eMessageMain(&w->msg[i].emsg);
+                }
+            }
+            endPrintExtFunc(w->nColor, 102, 0);
+        }
+        break;
     }
 }

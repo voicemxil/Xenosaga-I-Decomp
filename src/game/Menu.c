@@ -3663,7 +3663,10 @@ int MenuFaceEpidGet(int nType, int nFlag)
 
 /* --- Shop list window work --- */
 typedef struct {
-    char pad0[0x48];
+    unsigned char nPage;       /* 0x00: page id the help bar keys off */
+    char pad01[0x10];
+    unsigned char nSel;        /* 0x11: hint-slot cursor */
+    char pad12[0x48 - 0x12];
     signed char b48;           /* 0x48 */
 } SHOPWORK;
 typedef struct {
@@ -5622,5 +5625,255 @@ void MenuSystemPasMain(void)
         break;
     default:
         return;
+    }
+}
+
+/* The task header the shop screens are driven through */
+typedef struct MENU_TSK {
+    char pad000[0x10];
+    unsigned char nState;      /* 0x10 */
+} MENU_TSK;
+
+/* Shop help bar: sixteen hints, driven as a task rather than off its own
+   state byte */
+typedef struct {
+    char pad000[4];
+    short nHideX;              /* 0x004 */
+    short nBaseY;              /* 0x006 */
+    int nColor;                /* 0x008 */
+    WINDOWDX win;              /* 0x00C */
+    EMESSAGE msg[16];          /* 0x1A0 */
+    PRINTBOX box;              /* 0x5E0 */
+} MENU_SHOP_PAS_WORK;
+
+void MenuShopPas(MENU_TSK *pTask, MENU_SHOP_PAS_WORK *w)
+{
+    static char *msg[] = { 0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0 };
+    SHOPWORK *p;
+    short aTarget[16];
+    short nSlide;
+    int i;
+
+    switch (pTask->nState) {
+    case 0:
+        w->nHideX = -272;
+        w->nBaseY = 8;
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.nX = w->nHideX;
+        w->win.nColor = w->nColor;
+        w->win.nW = 272;
+        w->win.nY = w->nBaseY;
+        w->win.nH = 32;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        for (i = 0; i < 16; i++) {
+            eMessageSet(&w->msg[i], msg[i]);
+            w->msg[i].nFont = 32;
+            w->msg[i].nX = 288;
+            w->msg[i].nColor = w->nColor + 2;
+            w->msg[i].nY = w->nBaseY + 3;
+        }
+        break;
+    case 2:
+        nSlide = -16;
+        for (i = 0; i < 16; i++) {
+            aTarget[i] = 288;
+        }
+        p = MenuShopWork;
+        switch (p->nPage) {
+        case 32:
+            aTarget[0] = 16;
+            break;
+        case 48:
+        case 144:
+        case 160:
+        case 162:
+        case 164:
+            aTarget[p->nSel + 3] = 16;
+            break;
+        case 192:
+            aTarget[12] = 16;
+            break;
+        case 194:
+        case 196:
+        case 198:
+            aTarget[13] = 16;
+            break;
+        case 208:
+        case 210:
+        case 212:
+        case 214:
+            if (p->b48 != 0) {
+                aTarget[14] = 16;
+            } else {
+                aTarget[15] = 16;
+            }
+            break;
+        default:
+            nSlide = -272;
+            break;
+        }
+        MoveSlide(&w->win.nX, &nSlide, 3.0f);
+        WindowDXMain(&w->win);
+        w->box.nX = w->win.nX + 3;
+        w->box.nY = w->win.nY + 3;
+        w->box.nColor = w->nColor;
+        w->box.nW = w->win.nW - 6;
+        w->box.nH = w->win.nH - 6;
+        endPrintExtFuncBox(w->nColor, 101, &w->box);
+        for (i = 0; i < 16; i++) {
+            MoveSlide(&w->msg[i].nX, &aTarget[i], 3.0f);
+            if (w->msg[i].nX < 256) {
+                eMessageMain(&w->msg[i]);
+            }
+        }
+        endPrintExtFuncBox(w->nColor, 102, 0);
+        break;
+    }
+}
+
+/* Save/load screen state block */
+typedef struct {
+    char pad00[2];
+    unsigned char nSel;        /* 0x02: which hint slot the cursor owns */
+    unsigned char nPage;       /* 0x03 */
+    char pad04[0x24 - 0x04];
+    int nSlot2;                /* 0x24 */
+    char pad28[0x44 - 0x28];
+    signed char bCard;         /* 0x44 */
+} FILEWORK;
+
+extern FILEWORK *FileWork;
+
+/* TODO: near-miss (11 diffs, length exact at 229) - only the third case
+   body (pages 132/134/135) differs, and only in scheduling: the retail
+   build issues the aLen[5] load early and holds the FileWork nSlot2 load
+   back until after the two stores, while gcc here does the opposite, which
+   renames three temporaries. LAUNDER_V on the work pointer fences the
+   nSlot2 load correctly but drags aLen[5] down with it (15 diffs); an int
+   or short temp for aLen[5]+16 costs two instructions; pins on the temp
+   ($a1), on nSlot2 ($v0) and statement reorderings are all ignored. */
+/* File screen help bar: six hints on a wider (352px) window */
+typedef struct {
+    char pad000[4];
+    short nHideX;              /* 0x004 */
+    short nBaseY;              /* 0x006 */
+    int nColor;                /* 0x008 */
+    WINDOWDX win;              /* 0x00C */
+    EMESSAGE msg[6];           /* 0x1A0 */
+    char pad338[0x3C0 - 0x338];
+    PRINTBOX box;              /* 0x3C0 */
+} MENU_FILE_PAS_WORK;
+
+void MenuFilePas(MENU_TSK *pTask, MENU_FILE_PAS_WORK *w)
+{
+    static char *msg[] = { 0, 0, 0, 0, 0, 0 };
+    /* pin: the retail build keeps the FileWork pointer in $a3 for the whole
+       page test; without it the allocator picks $a1 and renames every
+       temporary in the three case bodies. */
+    PIN(FILEWORK *p, "$7");
+    int aLen[6];
+    short aTarget[6];
+    short nSlide;
+    int i;
+
+    for (i = 0; i < 6; i++) {
+        aLen[i] = MenuPasLengthGet(msg[i]);
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nHideX = -272;
+        w->nBaseY = 8;
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.nX = w->nHideX;
+        w->win.nColor = w->nColor;
+        w->win.nW = 352;
+        w->win.nY = w->nBaseY;
+        w->win.nH = 32;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        for (i = 0; i < 6; i++) {
+            eMessageSet(&w->msg[i], msg[i]);
+            w->msg[i].nFont = 32;
+            w->msg[i].nX = 288;
+            w->msg[i].nColor = w->nColor + 2;
+            w->msg[i].nY = w->nBaseY + 3;
+        }
+        break;
+    case 2:
+        nSlide = -16;
+        for (i = 0; i < 6; i++) {
+            aTarget[i] = 288;
+        }
+        p = FileWork;
+        switch (p->nPage) {
+        case 36:
+        case 128:
+        case 130:
+            aTarget[p->nSel] = 16;
+            break;
+        case 37:
+        case 38:
+        case 39:
+        case 40:
+        case 41:
+        case 42:
+        case 44:
+        case 45:
+        case 46:
+        case 80:
+        case 82:
+        case 136:
+        case 144:
+        case 145:
+        case 146:
+        case 147:
+        case 148:
+        case 149:
+        case 150:
+        case 152:
+        case 160:
+        case 161:
+        case 176:
+        case 184:
+            aTarget[p->nSel] = 16;
+            if (p->bCard != 0) {
+                aTarget[4] = aTarget[p->nSel] + aLen[p->nSel];
+            } else {
+                aTarget[p->nSlot2 + 2] = aTarget[p->nSel] + aLen[p->nSel];
+            }
+            break;
+        case 132:
+        case 134:
+        case 135:
+            aTarget[p->nSel] = -aLen[p->nSel];
+            aTarget[5] = 16;
+            aTarget[p->nSlot2 + 2] = aLen[5] + 16;
+            break;
+        default:
+            nSlide = -352;
+            break;
+        }
+        MoveSlide(&w->win.nX, &nSlide, 3.0f);
+        WindowDXMain(&w->win);
+        w->box.nX = w->win.nX + 3;
+        w->box.nY = w->win.nY + 3;
+        w->box.nColor = w->nColor;
+        w->box.nW = w->win.nW - 6;
+        w->box.nH = w->win.nH - 6;
+        endPrintExtFuncBox(w->nColor, 101, &w->box);
+        for (i = 0; i < 6; i++) {
+            MoveSlide(&w->msg[i].nX, &aTarget[i], 3.0f);
+            if (w->msg[i].nX < 256) {
+                eMessageMain(&w->msg[i]);
+            }
+        }
+        endPrintExtFuncBox(w->nColor, 102, 0);
+        break;
     }
 }
