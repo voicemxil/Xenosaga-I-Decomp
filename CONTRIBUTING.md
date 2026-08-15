@@ -82,6 +82,21 @@ Two safe habits:
   skew between the host (where edits land) and the container (where the
   build runs), which can otherwise make ninja skip a changed file.
 
+## Raw addresses: use the named symbol, not a numeric cast
+
+Writing a fixed address as `(int *)0x00996C00` makes ee-gcc materialise
+it with `lui`+`ori`, but the original build used `lui`+`addiu`, so the
+function cannot match and people have resorted to transcribing whole
+bodies as assembly. The fix is simply to reference the symbol by name:
+
+    extern int isInit;        /* not (int *)0x0099xxxx */
+
+The linker's ordinary `%hi`/`%lo` relocation then emits `lui`+`addiu`,
+matching the original. `config/symbol_addrs.txt` already names most of
+these (7,758 symbols) -- look the address up there before assuming it is
+anonymous. This one technique converted 14 transcribed assembly bodies
+back into real C; only genuinely unnamed addresses still need assembly.
+
 ## Assembly policy (portability)
 
 Two kinds of assembly appear here and they have opposite futures. See

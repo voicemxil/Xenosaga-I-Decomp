@@ -40,7 +40,24 @@
 #ifdef MATCHING
 
 /* Pin a local to a specific hard register.
- *   PIN(int cnt, "$16");  ==  register int cnt __asm__("$16"); */
+ *   PIN(int cnt, "$16");  ==  register int cnt __asm__("$16");
+ *
+ * WARNING -- never initialise on the PIN declaration itself:
+ *
+ *     PIN(void **slot, "$3") = &sym;    /- WRONG -/
+ *     PIN(void **slot, "$3");           /- right: declare... -/
+ *     slot = &sym;                      /- ...then assign    -/
+ *
+ * With an initialiser, gcc 2.9x has been observed to drop the address
+ * computation entirely across a branch. That is a MISCOMPILE, not a
+ * mismatch: the generated code is wrong, and byte-comparison against a
+ * function you have not matched yet will not catch it.
+ *
+ * A pin also only "sticks" reliably when the variable is additionally an
+ * asm operand or a call argument that lands in that register by the
+ * calling convention. On a plain dereference the pin is silently
+ * ignored; LAUNDER_V after the assignment forces it, but that defeats
+ * %hi/%lo folding into the load/store offset and costs a real addiu. */
 #define PIN(decl, reg) register decl __asm__(reg)
 
 /* Make a value opaque to the optimizer in place: defeats CSE between
