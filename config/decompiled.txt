@@ -2261,3 +2261,4 @@ MenuTecPasMain = 0x002AFA60, 0x318; // Menu.c
 MenuSkillPasMain = 0x002B6B98, 0x318; // Menu.c
 MenuItemPasMain = 0x0028A080, 0x2E8; // Menu.c
 MenuEtherPasMain = 0x002AA200, 0x368; // Menu.c
+MenuSystemPasMain = 0x002B4128, 0x260; // Menu.c

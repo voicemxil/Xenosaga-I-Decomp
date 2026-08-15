@@ -1742,7 +1742,7 @@ typedef struct {
     char pad23[0x26 - 0x23];
     short h26;                 /* 0x26: current AGWS weapon id */
     char pad28[0x30 - 0x28];
-    unsigned char b30;         /* 0x30 */
+    signed char b30;           /* 0x30: read back with lb */
     signed char b31;           /* 0x31: read back with lb */
     signed char b32;           /* 0x32: read back with lb */
     unsigned char b33;         /* 0x33: radar display option */
@@ -1755,7 +1755,8 @@ typedef struct {
     signed char bSel;          /* 0x44 */
     char pad45;
     signed char b46;           /* 0x46: current ether character */
-    char pad47[0x54 - 0x47];
+    char pad47[0x50 - 0x47];
+    int f50;                   /* 0x50: sort-availability flag, <0 = greyed */
     signed char b54;           /* 0x54 */
     signed char b55;           /* 0x55 */
     signed char b56;           /* 0x56 */
@@ -4781,6 +4782,844 @@ void MenuSkillL1R1Main(void)
         }
         break;
     }
+    default:
+        return;
+    }
+}
+
+/* ================= Wave 6: Ex (points readout) widgets ================= */
+
+/* eRibbon: the sliding title bar. Same x/y/colour/w/h header as a
+   WindowDX; the renderer state follows to 0x70. */
+typedef struct {
+    short nX;                  /* 0x00 */
+    short nY;                  /* 0x02 */
+    int nColor;                /* 0x04 */
+    short nW;                  /* 0x08 */
+    short nH;                  /* 0x0A */
+    char pad0C[0x70 - 0x0C];
+} ERIBBON;
+
+/* eTagFont: a caption drawn from a tag-escaped string. */
+typedef struct {
+    char pad00[4];
+    short nX;                  /* 0x04 */
+    short nY;                  /* 0x06 */
+    int nColor;                /* 0x08 */
+    char pad0C[0x20 - 0x0C];
+} ETAGFONT;
+
+/* eNumber: a fixed-width numeric readout. */
+typedef struct {
+    short nX;                  /* 0x00 */
+    short nY;                  /* 0x02 */
+    int nColor;                /* 0x04 */
+    char pad08[6];
+    unsigned char bE;          /* 0x0E */
+    unsigned char nDigits;     /* 0x0F */
+    char pad10[4];
+    int nValue;                /* 0x14 */
+} ENUMBER;
+
+extern void eRibbonSet(ERIBBON *pRib, int nType);
+extern void eRibbonMain(ERIBBON *pRib);
+extern void eTagFontSet(ETAGFONT *pTag, char *pText);
+extern void eTagFontMain(ETAGFONT *pTag);
+extern void eNumberSet(ENUMBER *pNum, int nMode);
+extern void eNumberMain(ENUMBER *pNum);
+
+/* The "Ex" strip: a ribbon carrying a caption and the character's spare
+   stat points, parked off-screen until the sub-menu reaches one of the
+   pages that owns it. */
+typedef struct {
+    unsigned char nState;      /* 0x00 */
+    char pad01[3];
+    int nColor;                /* 0x04 */
+    ERIBBON ribbon;            /* 0x08 */
+    ETAGFONT tag;              /* 0x78 */
+    ENUMBER num;               /* 0x98 */
+} MENU_EX_WORK;
+
+extern MENU_EX_WORK *MenuTecEx;
+
+/* TODO: near-miss (98 diffs, 114 orig vs 110 built) - behaviour and every
+   constant are recovered (jump table 0x4C8EF0, cases 32/48/50/80/82/84/86
+   are the pages that show the strip). What is left is entirely base-register
+   selection: the retail build funnels ALL ten short/byte field accesses
+   through one pseudo holding w+144 (offsets -136..+23) and recomputes
+   `addiu a0,w,120` / `addiu a0,w,152` at each call site, while gcc here
+   caches &w->tag and &w->num in callee-saved registers and issues `move
+   a0,reg` (5 extra moves, 4 fewer addius, one fewer saved-register pair).
+   Introducing explicit ERIBBON/ETAGFONT/ENUMBER locals makes it worse (400
+   bytes); the lever wanted is one that stops the cross-block address CSE. */
+/* Tec screen points strip */
+void MenuTecExMain(void)
+{
+    static char *msg00[] = { "\001T.Pts" };
+    MENU_EX_WORK *w;
+    PARAOBJ *p;
+    short nTarget;
+
+    w = MenuTecEx;
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        eRibbonSet(&w->ribbon, 3);
+        w->ribbon.nColor = w->nColor;
+        w->ribbon.nX = -256;
+        w->ribbon.nY = 48;
+        w->ribbon.nW = 256;
+        w->ribbon.nH = 24;
+        eTagFontSet(&w->tag, msg00[0]);
+        w->tag.nColor = w->nColor + 2;
+        eNumberSet(&w->num, 0);
+        w->num.nColor = w->nColor + 2;
+        w->num.nDigits = 4;
+        w->num.bE = 0;
+        w->num.nValue = 0;
+        w->nState = 2;
+    case 2:
+        nTarget = -256;
+        switch (MenuWork.state) {
+        case 32:
+        case 48:
+        case 50:
+        case 80:
+        case 82:
+        case 84:
+        case 86:
+            p = func_A19210(MenuWork.bChr);
+            nTarget = 0;
+            w->num.nValue = p->fC;
+            break;
+        }
+        MoveSlide(&w->ribbon.nX, &nTarget, 3.0f);
+        eRibbonMain(&w->ribbon);
+        w->tag.nX = w->ribbon.nX + w->ribbon.nW - 68;
+        w->tag.nY = w->ribbon.nY + 4;
+        eTagFontMain(&w->tag);
+        w->num.nX = w->ribbon.nX + w->ribbon.nW - 60;
+        w->num.nY = w->ribbon.nY + 4;
+        eNumberMain(&w->num);
+        break;
+    default:
+        return;
+    }
+}
+
+/* eMessage object: the tag-escaped text renderer used by the item screens.
+   Same header shape as the one hung off a tskUmn Pas window. */
+typedef struct {
+    char pad00;
+    unsigned char nFont;       /* 0x01 */
+    char pad02[2];
+    short nX;                  /* 0x04 */
+    short nY;                  /* 0x06 */
+    int nColor;                /* 0x08 */
+    char pad0C[0x44 - 0x0C];
+} EMESSAGE;
+
+extern void eMessageSet(EMESSAGE *pMsg, char *pText);
+extern void eMessageMain(EMESSAGE *pMsg);
+
+typedef struct {
+    unsigned char nState;      /* 0x00 */
+    char pad01[3];
+    int nColor;                /* 0x04 */
+    EMESSAGE msg;              /* 0x08 */
+} MENU_ITEM_EX_WORK;
+
+extern MENU_ITEM_EX_WORK *MenuItemEx;
+
+/* TODO: near-miss (61 diffs, 69 orig vs 65 built) - behaviour, constants and
+   the recoloured message literal are all recovered, and the frame size, the
+   branch shape (not a movz - the LAUNDER in the else arm is what stops gcc's
+   if-conversion) and the two arms now line up. What is left is base-register
+   selection again: the retail build hoists a dedicated $s4 = &w->msg.nColor
+   for the single colour store (costing an addiu and an sd/ld pair we do not
+   emit) and fills the dispatch's delay slot with it. Pinning a colour base
+   to $s4 just moves the work pointer into $s4 instead. Same wall as
+   MenuTecExMain. */
+/* Item screen "Sort" hint: slides in on page 32 and recolours the tag
+   escape in its own message literal (0x80 grey when sorting is available,
+   0x40 when MenuWork's sort flag is negative) */
+void MenuItemExMain(void)
+{
+    static char *msg00[] = { "\014\200\200\200\036\002\241\247Sort" };
+    MENU_ITEM_EX_WORK *w;
+    MENU_ITEM_EX_WORK *w2;
+    char *p;
+    short nTarget;
+    int nLevel;
+
+    w = MenuItemEx;
+    switch (w->nState) {
+    case 0:
+    {
+        /* pins: the retail scheduler hoists the three setup constants above
+           the eMessageSet call, so they live in callee-saved registers. */
+        PIN(int nX, "$16");
+        PIN(int nY, "$17");
+        PIN(int nFont, "$18");
+
+        w->nColor = 0x00FFFFF8;
+        nX = 544;
+        nY = 345;
+        nFont = 32;
+        eMessageSet(&w->msg, msg00[0]);
+        w->msg.nX = nX;
+        w->msg.nY = nY;
+        w->msg.nColor = w->nColor;
+        w->msg.nFont = nFont;
+        w->nState = 2;
+    }
+    case 2:
+        nTarget = 544;
+        if (MenuWork.state == 32) {
+            nTarget = 400;
+            p = msg00[0] + 1;
+            /* launder: without an asm in one arm gcc if-converts the pair
+               into a movz; the retail build keeps the real branch. */
+            if (MenuWork.f50 >= 0) {
+                nLevel = -128;
+            } else {
+                nLevel = 64;
+                LAUNDER(nLevel);
+            }
+            p[0] = nLevel;
+            p[2] = nLevel;
+            p[1] = nLevel;
+        }
+        MoveSlide(&w->msg.nX, &nTarget, 3.0f);
+        /* launder: the retail build recomputes &w->msg for the tail call
+           instead of keeping the entry-block copy alive in a saved
+           register, so the setup one is free to live in $a0. */
+        w2 = w;
+        LAUNDER(w2);
+        eMessageMain(&w2->msg);
+        break;
+    default:
+        return;
+    }
+}
+
+/* Accessory data record (func_A1A548): equip mask and the "group" id that
+   decides whether two accessories may be worn together */
+typedef struct {
+    char pad00[6];
+    unsigned short hEquipMask; /* 0x06 */
+    char pad08[2];
+    unsigned short hGroup;     /* 0x0A: 2 = unique-per-character */
+} MENUACCREC;
+
+/* Character para record, accessory slots view: the retail code addresses the
+   three slots as base+4 plus a 96-byte displacement, so the sub-struct is
+   modelled rather than folded into one offset. */
+typedef struct {
+    char pad00[4];
+    struct {
+        char pad00[96];
+        short aAcc[3];         /* 0x60 (0x64 from the record base) */
+    } equip;                   /* 0x04 */
+} MENUACCPARA;
+
+/* TODO: near-miss (24 diffs, length exact at 101) - every block, both loops
+   (including the three R5900 short-loop pad nops) and every constant match.
+   What is left is basic-block ORDER around the group-type select: the retail
+   build emits loop 1's `return 0` trampoline (b epilogue / move v0,zero)
+   BETWEEN the select's then-arm and the join, which forces the then-arm to
+   end in an explicit `b` and shifts the join by three; gcc here lets the
+   then-arm fall through and puts the trampoline after the loop. That in turn
+   renames the type temp ($a0 vs $v1) and the constant 2 ($v1 vs $v0). Tried:
+   if/else both polarities, ternary, `nType = 2` + guarded overwrite, and an
+   `if (0) { ng: return 0; }` block placed before the select (gcc's jump pass
+   sinks it back). Needs a block-order lever. */
+/* Ask whether an accessory may be equipped into a character's slot:
+   the record's mask must allow the character, a group-2 (unique) accessory
+   may not be duplicated, and any other accessory may not share a group with
+   something already worn */
+int MenuAccessoryEquipCheck(int nChr, int nId, int nPos)
+{
+    MENUACCREC *q;
+    MENUACCREC *r;
+    MENUACCPARA *p;
+    int nMask;
+    int nCur;
+    int nOther;
+    int nType;
+    int i;
+
+    if (nChr == 0) {
+        return 0;
+    }
+    nMask = (int)chrEquipGet(nChr);
+    p = (MENUACCPARA *)func_A191C0_2(nChr);
+    if (nId == 0) {
+        return 0;
+    }
+    q = (MENUACCREC *)func_A1A548(nId);
+    if ((q->hEquipMask & nMask) == 0) {
+        return 0;
+    }
+    if (nPos < 0) {
+        return 1;
+    }
+    nCur = p->equip.aAcc[nPos];
+    if (nCur != 0) {
+        r = (MENUACCREC *)func_A1A548(nCur);
+        if (r->hGroup == q->hGroup) {
+            if (r->hGroup != 2) {
+                return 1;
+            }
+            if (p->equip.aAcc[nPos] == nId) {
+                return 1;
+            }
+        }
+    }
+    if (nChr >= 17) {
+        nType = 2;
+    } else {
+        nType = q->hGroup;
+    }
+    if (nType == 2) {
+        for (i = 0; i < 3; i++) {
+            if (p->equip.aAcc[i] == nId) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (q->hGroup != 2) {
+        for (i = 0; i < 3; i++) {
+            nOther = p->equip.aAcc[i];
+            if (nOther != 0) {
+                r = (MENUACCREC *)func_A1A548(nOther);
+                if (r->hGroup == q->hGroup) {
+                    return 0;
+                }
+            }
+        }
+    }
+    return 1;
+}
+
+/* ================= Wave 6: Pas (help-bar) screens ================= */
+
+/* WindowDX object: the sliding frame every screen hangs its help text on */
+typedef struct {
+    short nX;                  /* 0x000 */
+    short nY;                  /* 0x002 */
+    int nColor;                /* 0x004 */
+    short nW;                  /* 0x008 */
+    short nH;                  /* 0x00A */
+    char pad00C[4];
+    signed char nState;        /* 0x010 */
+    char pad011[3];
+    void (*pFunc)(void);       /* 0x014: draw callback */
+    void *pMsg;                /* 0x018 */
+    char pad01C[0x194 - 0x1C];
+} WINDOWDX;
+
+/* endPrint frame box: the same x/y/colour/w/h header */
+typedef struct {
+    short nX;                  /* 0x00 */
+    short nY;                  /* 0x02 */
+    int nColor;                /* 0x04 */
+    short nW;                  /* 0x08 */
+    short nH;                  /* 0x0A */
+} PRINTBOX;
+
+extern void WindowDXSet(WINDOWDX *pWin);
+extern void WindowDXMain(WINDOWDX *pWin);
+extern void endPrintExtFuncBox(int nColor, int nMode, PRINTBOX *pBox);
+
+/* The bottom "pas" bar: a sliding WindowDX carrying three button hints */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    char pad001[3];
+    int nColor;                /* 0x004 */
+    WINDOWDX win;              /* 0x008 */
+    EMESSAGE msg[3];           /* 0x19C */
+    char pad268[0x334 - 0x268];
+    PRINTBOX box;              /* 0x334 */
+    char szText[0x40];         /* 0x340 */
+} MENU_PAS_WORK;
+
+extern MENU_PAS_WORK *MenuTecPas;
+
+/* Tec screen help bar */
+void MenuTecPasMain(void)
+{
+    static char *msg[] = { 0, 0, 0 };
+    MENU_PAS_WORK *w;
+    int aLen[3];
+    short aTarget[3];
+    short nSlide;
+    int i;
+
+    w = MenuTecPas;
+    for (i = 0; i < 3; i++) {
+        aLen[i] = MenuPasLengthGet(msg[i]);
+    }
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.nX = -288;
+        w->win.nY = 8;
+        w->win.nColor = w->nColor;
+        w->win.nW = 272;
+        w->win.nH = 30;
+        w->win.pFunc = MenuPasWindow;
+        w->win.pMsg = w->szText;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        for (i = 0; i < 3; i++) {
+            eMessageSet(&w->msg[i], msg[i]);
+            w->msg[i].nFont = 32;
+            w->msg[i].nX = 288;
+            w->msg[i].nY = 11;
+            w->msg[i].nColor = w->nColor + 2;
+        }
+        w->nState = 2;
+    case 2:
+        nSlide = -16;
+        for (i = 0; i < 3; i++) {
+            aTarget[i] = 288;
+        }
+        switch (MenuWork.state) {
+        case 16:
+        case 32:
+            aTarget[0] = 16;
+            break;
+        case 48:
+        case 50:
+        case 80:
+        case 82:
+        case 84:
+        case 86:
+            aTarget[0] = 16;
+            aTarget[MenuWork.b30 + 1] = aLen[0] + 16;
+            break;
+        default:
+            nSlide = -288;
+            break;
+        }
+        MoveSlide(&w->win.nX, &nSlide, 3.0f);
+        WindowDXMain(&w->win);
+        if (w->win.nState == 3) {
+            w->box.nX = w->win.nX + 3;
+            w->box.nY = w->win.nY + 3;
+            w->box.nColor = w->nColor;
+            w->box.nW = w->win.nW - 6;
+            w->box.nH = w->win.nH - 6;
+            endPrintExtFuncBox(w->nColor, 101, &w->box);
+            for (i = 0; i < 3; i++) {
+                MoveSlide(&w->msg[i].nX, &aTarget[i], 5.0f);
+                if (w->msg[i].nX < 256) {
+                    eMessageMain(&w->msg[i]);
+                }
+            }
+            endPrintExtFuncBox(w->nColor, 102, 0);
+        }
+        break;
+    default:
+        return;
+    }
+}
+
+/* Skill screen help bar: same shape as MenuTecPasMain, but the print box
+   and the window's text buffer sit lower in a shorter work block, and the
+   page table maps its own scene ids onto the three hint slots. */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    char pad001[3];
+    int nColor;                /* 0x004 */
+    WINDOWDX win;              /* 0x008 */
+    EMESSAGE msg[3];           /* 0x19C */
+    char pad268[0x2AC - 0x268];
+    PRINTBOX box;              /* 0x2AC */
+    char pad2B8[8];
+    char szText[0x40];         /* 0x2C0 */
+} MENU_SKILL_PAS_WORK;
+
+extern MENU_SKILL_PAS_WORK *MenuSkillPas;
+
+void MenuSkillPasMain(void)
+{
+    static char *msg[] = { 0, 0, 0 };
+    MENU_SKILL_PAS_WORK *w;
+    int aLen[3];
+    short aTarget[3];
+    short nSlide;
+    int i;
+
+    w = MenuSkillPas;
+    for (i = 0; i < 3; i++) {
+        aLen[i] = MenuPasLengthGet(msg[i]);
+    }
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.nX = -288;
+        w->win.nY = 8;
+        w->win.nColor = w->nColor;
+        w->win.nW = 272;
+        w->win.nH = 30;
+        w->win.pFunc = MenuPasWindow;
+        w->win.pMsg = w->szText;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        for (i = 0; i < 3; i++) {
+            eMessageSet(&w->msg[i], msg[i]);
+            w->msg[i].nFont = 32;
+            w->msg[i].nX = 288;
+            w->msg[i].nY = 11;
+            w->msg[i].nColor = w->nColor + 2;
+        }
+        w->nState = 2;
+    case 2:
+        nSlide = -16;
+        for (i = 0; i < 3; i++) {
+            aTarget[i] = 288;
+        }
+        switch (MenuWork.state) {
+        case 16:
+        case 32:
+            aTarget[0] = 16;
+            break;
+        case 48:
+        case 50:
+        case 52:
+            aTarget[0] = 16;
+            aTarget[1] = aLen[0] + 16;
+            break;
+        case 64:
+            aTarget[0] = 16;
+            aTarget[2] = aLen[0] + 16;
+            break;
+        default:
+            nSlide = -288;
+            break;
+        }
+        MoveSlide(&w->win.nX, &nSlide, 3.0f);
+        WindowDXMain(&w->win);
+        if (w->win.nState == 3) {
+            w->box.nX = w->win.nX + 3;
+            w->box.nY = w->win.nY + 3;
+            w->box.nColor = w->nColor;
+            w->box.nW = w->win.nW - 6;
+            w->box.nH = w->win.nH - 6;
+            endPrintExtFuncBox(w->nColor, 101, &w->box);
+            for (i = 0; i < 3; i++) {
+                MoveSlide(&w->msg[i].nX, &aTarget[i], 5.0f);
+                if (w->msg[i].nX < 256) {
+                    eMessageMain(&w->msg[i]);
+                }
+            }
+            endPrintExtFuncBox(w->nColor, 102, 0);
+        }
+        break;
+    default:
+        return;
+    }
+}
+
+/* Item screen help bar: nine hints, its own hide/base coordinates kept in
+   the work block, and a sparse scene test (gcc splits it into an if-chain
+   rather than a table) */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    char pad001[3];
+    short nHideX;              /* 0x004 */
+    short nBaseY;              /* 0x006 */
+    int nColor;                /* 0x008 */
+    WINDOWDX win;              /* 0x00C */
+    EMESSAGE msg[9];           /* 0x1A0 */
+    PRINTBOX box;              /* 0x404 */
+    char szText[0x40];         /* 0x410 */
+} MENU_ITEM_PAS_WORK;
+
+extern MENU_ITEM_PAS_WORK *MenuItemPas;
+
+void MenuItemPasMain(void)
+{
+    static char *msg[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    MENU_ITEM_PAS_WORK *w;
+    short aTarget[9];
+    short nSlide;
+    int i;
+
+    w = MenuItemPas;
+    switch (w->nState) {
+    case 0:
+        w->nHideX = -272;
+        w->nBaseY = 8;
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.nX = w->nHideX;
+        w->win.nY = w->nBaseY;
+        w->win.nColor = w->nColor;
+        w->win.nW = 272;
+        w->win.nH = 30;
+        w->win.pFunc = MenuPasWindow;
+        w->win.pMsg = w->szText;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        for (i = 0; i < 9; i++) {
+            eMessageSet(&w->msg[i], msg[i]);
+            w->msg[i].nFont = 32;
+            w->msg[i].nX = 288;
+            w->msg[i].nColor = w->nColor + 2;
+            w->msg[i].nY = w->nBaseY + 3;
+        }
+        w->nState = 2;
+    case 2:
+        nSlide = -16;
+        for (i = 0; i < 9; i++) {
+            aTarget[i] = 288;
+        }
+        switch (MenuWork.state) {
+        case 32:
+        case 34:
+        case 64:
+        case 128:
+            aTarget[MenuWork.b30] = 16;
+            break;
+        case 48:
+            aTarget[8] = 16;
+            break;
+        default:
+            nSlide = -272;
+            break;
+        }
+        MoveSlide(&w->win.nX, &nSlide, 3.0f);
+        WindowDXMain(&w->win);
+        w->box.nX = w->win.nX + 3;
+        w->box.nY = w->win.nY + 3;
+        w->box.nColor = w->nColor;
+        w->box.nW = w->win.nW - 6;
+        w->box.nH = w->win.nH - 6;
+        endPrintExtFuncBox(w->nColor, 101, &w->box);
+        for (i = 0; i < 9; i++) {
+            MoveSlide(&w->msg[i].nX, &aTarget[i], 3.0f);
+            if (w->msg[i].nX < 256) {
+                eMessageMain(&w->msg[i]);
+            }
+        }
+        endPrintExtFuncBox(w->nColor, 102, 0);
+        break;
+    default:
+        return;
+    }
+}
+
+/* Ether screen help bar: six hints; the deepest page family also flips the
+   first hint's target negative (it slides out to the left) while a second
+   and third hint slide in behind the two cursor columns */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    char pad001[3];
+    int nColor;                /* 0x004 */
+    WINDOWDX win;              /* 0x008 */
+    EMESSAGE msg[6];           /* 0x19C */
+    char pad334[0x334 - 0x334];
+    PRINTBOX box;              /* 0x334 */
+    char szText[0x40];         /* 0x340 */
+} MENU_ETHER_PAS_WORK;
+
+extern MENU_ETHER_PAS_WORK *MenuEtherPas;
+
+void MenuEtherPasMain(void)
+{
+    static char *msg[] = { 0, 0, 0, 0, 0, 0 };
+    MENU_ETHER_PAS_WORK *w;
+    int aLen[6];
+    short aTarget[6];
+    short nSlide;
+    int i;
+
+    w = MenuEtherPas;
+    for (i = 0; i < 6; i++) {
+        aLen[i] = MenuPasLengthGet(msg[i]);
+    }
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.nX = -288;
+        w->win.nY = 8;
+        w->win.nColor = w->nColor;
+        w->win.nW = 272;
+        w->win.nH = 30;
+        w->win.pFunc = MenuPasWindow;
+        w->win.pMsg = w->szText;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        for (i = 0; i < 6; i++) {
+            eMessageSet(&w->msg[i], msg[i]);
+            w->msg[i].nFont = 32;
+            w->msg[i].nX = 288;
+            w->msg[i].nY = 11;
+            w->msg[i].nColor = w->nColor + 2;
+        }
+        w->nState = 2;
+    case 2:
+        nSlide = -16;
+        for (i = 0; i < 6; i++) {
+            aTarget[i] = 288;
+        }
+        switch (MenuWork.state) {
+        case 16:
+        case 32:
+            aTarget[0] = 16;
+            break;
+        case 48:
+        case 50:
+        case 80:
+        case 112:
+        case 114:
+            aTarget[0] = 16;
+            aTarget[MenuWork.b30 + 1] = aLen[0] + 16;
+            break;
+        case 116:
+        case 118:
+        case 120:
+        case 128:
+        case 130:
+        case 132:
+        case 134:
+            aTarget[0] = -(aLen[0] + 16);
+            aTarget[MenuWork.b30 + 1] = 16;
+            aTarget[MenuWork.b31 + 4] = aLen[MenuWork.b30 + 1] + 16;
+            break;
+        default:
+            nSlide = -288;
+            break;
+        }
+        MoveSlide(&w->win.nX, &nSlide, 3.0f);
+        WindowDXMain(&w->win);
+        if (w->win.nState == 3) {
+            w->box.nX = w->win.nX + 3;
+            w->box.nY = w->win.nY + 3;
+            w->box.nColor = w->nColor;
+            w->box.nW = w->win.nW - 6;
+            w->box.nH = w->win.nH - 6;
+            endPrintExtFuncBox(w->nColor, 101, &w->box);
+            for (i = 0; i < 6; i++) {
+                MoveSlide(&w->msg[i].nX, &aTarget[i], 5.0f);
+                if (w->msg[i].nX < 256) {
+                    eMessageMain(&w->msg[i]);
+                }
+            }
+            endPrintExtFuncBox(w->nColor, 102, 0);
+        }
+        break;
+    default:
+        return;
+    }
+}
+
+/* System screen help bar: a single hint, and the window has no draw
+   callback or text buffer of its own */
+/* The message slot as the retail code addresses it: a 12-byte lead-in
+   (shared with the list bookkeeping the multi-hint bars walk with a
+   68-byte stride) and then the eMessage itself. */
+typedef struct {
+    char pad00[12];
+    EMESSAGE msg;              /* 0x0C */
+} MENU_PAS_ENTRY;
+
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    char pad001[3];
+    int nColor;                /* 0x004 */
+    WINDOWDX win;              /* 0x008 */
+    EMESSAGE msg;              /* 0x19C */
+    char pad1E0[0x334 - 0x1E0];
+    PRINTBOX box;              /* 0x334 */
+} MENU_SYSTEM_PAS_WORK;
+
+extern MENU_SYSTEM_PAS_WORK *MenuSystemPas;
+
+void MenuSystemPasMain(void)
+{
+    static char *msg00[] = { 0 };
+    MENU_SYSTEM_PAS_WORK *w;
+    short aTarget[8];
+    short nSlide;
+    MENU_PAS_ENTRY *e;
+    /* pins: with only one hint there is no loop to hoist them, but the
+       retail scheduler still parks the three message constants in
+       callee-saved registers above the WindowDXSet call. */
+    PIN(int nFont, "$16");
+    PIN(int nY, "$17");
+    PIN(int nX, "$18");
+
+    w = MenuSystemPas;
+    switch (w->nState) {
+    case 0:
+        nFont = 32;
+        nX = 288;
+        nY = 11;
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.nX = -288;
+        w->win.nColor = w->nColor;
+        w->win.nY = 8;
+        w->win.nW = 272;
+        w->win.nH = 30;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        eMessageSet(&w->msg, msg00[0]);
+        /* The retail build addresses the three message-setup fields off a
+           base twelve bytes below the message (the same base the multi-hint
+           bars walk with a 68-byte stride), so model that base explicitly. */
+        e = (MENU_PAS_ENTRY *)((char *)&w->msg - 12);
+        e->msg.nFont = nFont;
+        e->msg.nX = nX;
+        e->msg.nY = nY;
+        w->nState = 2;
+        w->msg.nColor = w->nColor + 2;
+    case 2:
+        nSlide = -16;
+        aTarget[0] = 288;
+        switch (MenuWork.bEnd) {
+        case 16:
+        case 32:
+        case 48:
+        case 64:
+        case 80:
+        case 96:
+        case 112:
+            aTarget[0] = 16;
+            break;
+        default:
+            nSlide = -288;
+            break;
+        }
+        MoveSlide(&w->win.nX, &nSlide, 3.0f);
+        WindowDXMain(&w->win);
+        if (w->win.nState == 3) {
+            w->box.nX = w->win.nX + 3;
+            w->box.nY = w->win.nY + 3;
+            w->box.nColor = w->nColor;
+            w->box.nW = w->win.nW - 6;
+            w->box.nH = w->win.nH - 6;
+            endPrintExtFuncBox(w->nColor, 101, &w->box);
+            MoveSlide(&w->msg.nX, &aTarget[0], 5.0f);
+            if (w->msg.nX < 256) {
+                eMessageMain(&w->msg);
+            }
+            endPrintExtFuncBox(w->nColor, 102, 0);
+        }
+        break;
     default:
         return;
     }
