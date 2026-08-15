@@ -184,11 +184,118 @@ void sefDrawEffect3D(void) {
     }
 }
 
-extern void sefInitClipViewVolume(void *p);
+/* Load 8 clip-plane quadwords into vf12..vf19; left resident for the
+ * VU0 macro-mode code in sefClipViewVolumeA to consume. Pure inline asm
+ * -- no C expression models "load into a bank of persistent VU0 regs
+ * and return without storing". */
+void sefInitClipViewVolume(void *p)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf12, 0x0(%0)\n"
+        "lqc2 $vf13, 0x10(%0)\n"
+        "lqc2 $vf14, 0x20(%0)\n"
+        "lqc2 $vf15, 0x30(%0)\n"
+        "lqc2 $vf16, 0x40(%0)\n"
+        "lqc2 $vf17, 0x50(%0)\n"
+        "lqc2 $vf18, 0x60(%0)\n"
+        "lqc2 $vf19, 0x70(%0)\n"
+        ".set reorder" : : "r"(p));
+}
+
 extern void sefClipViewVolumeA(void *p, void *q);
 void sefClipViewVolume(void *a, void *b) {
     sefInitClipViewVolume((char *)b + 1264);
     sefClipViewVolumeA(a, b);
+}
+
+/* Copy 3 position/orientation quadwords from pA and one quadword from
+ * pB into pDst -- register-to-register lq/sq via t0-t3, inline asm. */
+void sefMergeMatrixPos(void *pDst, void *pA, void *pB)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lq $8, 0x0(%1)\n"
+        "lq $9, 0x10(%1)\n"
+        "lq $10, 0x20(%1)\n"
+        "lq $11, 0x0(%2)\n"
+        "sq $8, 0x0(%0)\n"
+        "sq $9, 0x10(%0)\n"
+        "sq $10, 0x20(%0)\n"
+        "sq $11, 0x30(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(pA), "r"(pB) : "$8", "$9", "$10", "$11", "memory");
+}
+
+/* Scale from degrees to radians via the VU0 x-lane broadcast multiply
+ * -- void, unlike MMathDeg2RadVector in src/game/MMath.c (same "mfc1
+ * into a pinned $f8 constant, qmtc2.ni" idiom applied to this exact
+ * literal, but this one doesn't hand pDst back to the caller). */
+typedef struct { float x, y, z; } SEF_VEC3;
+void sefDeg2RadVector(SEF_VEC3 *pDst, SEF_VEC3 *pSrc)
+{
+    /* Split across two asm statements (with the $f8 constant's own
+     * initializer sandwiched between them) so the lqc2 lands before the
+     * literal's lwc1 -- the original schedules the vector load first
+     * and only then materializes the degrees-to-radians constant. */
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf2, 0x0(%0)\n"
+        ".set reorder" : : "r"(pSrc));
+
+    {
+        register float k __asm__("$f8") = 0.01745329238f;
+        __asm__ __volatile__(".set noreorder\n"
+            "mfc1 $t0, %1\n qmtc2.ni $t0, $vf1\n"
+            "vmulx.xyz $vf2, $vf2, $vf1x\n"
+            "sqc2 $vf2, 0x0(%0)\n"
+            ".set reorder" : : "r"(pDst), "f"(k));
+    }
+}
+
+/* Transform a direction vector by the current (already-resident) view
+ * basis in vf3/vf4/vf7/vf8: out = row7*x + row8*y + row3*z + row4*w,
+ * after negating the source z. Persistent-register VU0 macro code --
+ * the basis is set up by an earlier call and simply still live here. */
+void sefGetDirVector(void *pDst, void *pSrc)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "vsub.z $vf1z, $vf0z, $vf1z\n"
+        "vmulax.xyzw $ACC, $vf7, $vf1x\n"
+        "vmadday.xyzw $ACC, $vf8, $vf1y\n"
+        "vmaddaz.xyzw $ACC, $vf3, $vf1z\n"
+        "vmaddw.xyzw $vf1, $vf4, $vf1w\n"
+        "sqc2 $vf1, 0x0(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(pSrc) : "memory");
+}
+
+/* Sign-extend a packed short[3] vector (unaligned ldl/ldr doubleword
+ * load) into a quadword of s32 lanes via the pcgth/pextlh MMI idiom,
+ * then store. No C expression reproduces the ldl/ldr macro shape here
+ * (unlike the aligned lq/sq case) -- inline asm with $9/$10. */
+void sefLerpIVectorA(void *pSrc, void *pDst)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "ldl $9, 0x7(%0)\n"
+        "ldr $9, 0x0(%0)\n"
+        "pcgth $10, $0, $9\n"
+        "pextlh $10, $10, $9\n"
+        "sq $10, 0x0(%1)\n"
+        ".set reorder" : : "r"(pSrc), "r"(pDst) : "$9", "$10", "memory");
+}
+
+/* out = pAdd + (float)pSrc * fScale, on the VU0 x-lane; fScale enters
+ * in $f12 and the "r"(fScale) operand forces the compiler to emit the
+ * same mfc1 v0,$f12 the original used to stage it into a GPR before
+ * qmtc2. */
+void sefScaleIVectorAdd(void *pDst, void *pSrc, void *pAdd, float fScale)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "lqc2 $vf3, 0x0(%2)\n"
+        "vitof0.xyzw $vf1, $vf1\n"
+        "qmtc2 %3, $vf2\n"
+        "vmulx.xyz $vf1, $vf1, $vf2x\n"
+        "vadd.xyz $vf3, $vf1, $vf3\n"
+        "sqc2 $vf3, 0x0(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(pSrc), "r"(pAdd), "r"(fScale) : "memory");
 }
 
 /* --- sefExecLineData: progress one "line" scheduler object one frame --- */
