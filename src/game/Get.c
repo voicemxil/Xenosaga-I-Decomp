@@ -308,17 +308,27 @@ typedef struct {
 extern VECTOR D_004DC9D0;
 extern float D_00347D08;
 
-/* TODO: near-miss (LOGIC) - gcc schedules the branch-taken constant load with a
- * bnezl and hoists the gp-relative float load unconditionally; both if/else
- * orderings tried give the same 12-word diff (store-group reorder included). */
+/* TODO: near-miss (LOGIC, 12 diffs) - gcc schedules the branch-taken constant
+ * load with a bnezl and hoists the gp-relative float load unconditionally;
+ * both if/else orderings tried give the same 12-word diff (store-group
+ * reorder included). Retried this session: writing it as
+ * `float extra = D_00347D08; if (hType >= 1618) extra = 3.0f;` (matching the
+ * original's "unconditional default, conditional override" shape exactly)
+ * turns the bnezl into a plain bnez with the default load correctly filling
+ * its delay slot -- but gcc then reuses that same delay slot for the load
+ * instead of the &D_004DC9D0 address computation the original puts there,
+ * pushing everything downstream by one slot (still 12 diffs, 9 opcode).
+ * LAUNDER_V(extra) right after the initializer to pin it out of the delay
+ * slot regressed to LENGTH (28 vs 25 words) -- it also blocked the
+ * address-computation code motion the original relies on. Need a way to
+ * hint gcc that &D_004DC9D0 is the preferred delay-slot filler; not found
+ * this session. */
 /* Compute an object's on-screen center point, biasing Y by a type-dependent offset */
 void GetCenter(VECTOR *out, CENTEROBJ *p)
 {
-    float extra;
+    float extra = D_00347D08;
 
-    if (p->hType < 1618) {
-        extra = D_00347D08;
-    } else {
+    if (p->hType >= 1618) {
         extra = 3.0f;
     }
     out->x = D_004DC9D0.x + p->fX;

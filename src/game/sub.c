@@ -28,22 +28,24 @@ extern int MenuBoxMoneyGet(int id, int type);
 extern char *SeisanWork;
 extern char *SeisanResult;
 
-/* TODO: near-match (LOGIC) - recovered calls/field stores still differ in
- * call-result and object-layout source shape (12 instruction differences). */
-void subListMake00(SUB_LIST *list, int id)
+void subListMake00(SUB_LIST *list_, int id_)
 {
+    PIN(SUB_LIST *list, "$16") = list_;
+    PIN(int id, "$17") = id_;
+
     list->text = *MenuTextGet(id);
-    list->field_08 = 0;
     list->box = MenuBoxChk(id);
+    list->field_08 = 0;
 }
 
-/* TODO: near-match (LOGIC) - recovered calls/field stores still differ in
- * call-result and object-layout source shape (12 instruction differences). */
-void subListMake01(SUB_LIST *list, int id)
+void subListMake01(SUB_LIST *list_, int id_)
 {
+    PIN(SUB_LIST *list, "$16") = list_;
+    PIN(int id, "$17") = id_;
+
     list->text = *MenuTextGet(id);
-    list->field_08 = 0;
     list->box = MenuBoxMoneyGet(id, 0);
+    list->field_08 = 0;
 }
 
 /* TODO: near-match (2/13 words) - the child pointer is at data+8+index*4

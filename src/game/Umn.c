@@ -149,39 +149,29 @@ int *UmnHistoryTreeGet(int nNo)
     return pRet;
 }
 
-/* TODO: near-miss (LOGIC) -- the original loads pBase and computes the
-   nNo*128 offset unconditionally before the range branch (register a1
-   holds pBase across both paths, reused as the default return value in
-   the branch-taken delay slot). Every source shape tried here (plain
-   if, precomputed offset local, ternary, LAUNDER-pinned offset) gets
-   optimized into either a lazily-hoisted load inside the branch (8
-   words, 1 short) or a movn/mult conditional-move idiom (7 words) --
-   neither matches the original's 9-word unconditional-then-branch
-   shape. Not registered. */
 char *UmnPluginTextGet(int nNo)
 {
     char *pBase = umn_text[0];
-    char *pRet = pBase;
-    if ((unsigned int)nNo < 6) {
-        pRet = pBase + nNo * 128;
+    if ((unsigned int)nNo >= 6) {
+        return pBase;
     }
-    return pRet;
+    return pBase + nNo * 128;
 }
 
-/* TODO: near-miss (LOGIC, register-alloc/scheduling) -- not registered. */
 /* Advance the event-text cursor by nInc entries and return the next entry slot */
 void *UmnEventTextNextGet(int nInc)
 {
     EVENT_TEXT_BUF *pBuf = uet_text_buf[0];
-    unsigned short nNewPos = pBuf->nPos + nInc;
+    int nNewPos = pBuf->nPos + nInc;
     short nPos;
+    PIN(void *result, "$2") = 0;
 
-    pBuf->nPos = nNewPos;
+    pBuf->nPos = (unsigned short)nNewPos;
     nPos = (short)nNewPos;
     if (nPos < pBuf->nLimit) {
-        return (char *)pBuf + nPos * 8 + 4;
+        result = (char *)pBuf + nPos * 8 + 4;
     }
-    return 0;
+    return result;
 }
 
 /* Skip the text cursor past a run of newline characters */
@@ -198,20 +188,27 @@ void UmnEventTextGyouJump(char **ppText)
     }
 }
 
-/* TODO: near-miss (LOGIC/register-alloc) -- not registered. Algorithm is
+/* TODO: near-miss (LOGIC, 25 diffs, was 33) -- not registered. Algorithm is
    confirmed correct (decimal vs octal digit run parser, byte-truncated
-   accumulator matches the andi 0xff in the original). The original stages
-   ppText into a fresh register (t0) with a bare "move t0,a0" as its very
-   first real instruction, before the nMode branch; an explicit
-   `char **p = ppText;` local gets optimized back to a0 with no copy emitted
-   since nothing else clobbers a0 in this leaf function. Everything after
-   that single missing instruction is a 1-word shift of an otherwise
-   matching body. Two attempts spent (direct param use, explicit local). */
+   accumulator matches the andi 0xff in the original). PIN(char **p, "$8")
+   forces the original's bare "move t0,a0" staging instruction (a plain
+   local no longer got optimized back to a0) and took this from 33 to 25
+   diffs. Remaining diffs: the original's *entry* range check (c<'0' ||
+   c>nMax, before the loop) uses sltiu+sltu (unsigned) while gcc emits
+   sltiu+slt (signed) for the same C comparison against `int nMax` here;
+   rewriting as a single rotated `while` loop (no separate precheck) matches
+   the original's control-flow shape (one shared test block, entered via an
+   initial jump and re-entered on the back edge skipping the pointer
+   reload) but regressed to 27 diffs -- the do-while+precheck form controls
+   better despite looking structurally different. Declaring nMax as
+   `unsigned int` to coax sltu out of the comparison did not change the
+   opcode choice; explicit `(unsigned char)nMax` casts on both upper-bound
+   tests regressed further (29 diffs, LENGTH). Leave at 25. */
 /* Parse a run of digits (decimal when nMode == 1, otherwise octal) starting
    at *ppText, advancing *ppText past the digits consumed */
 int UmnEventTextNumberGet(char **ppText, int nMode)
 {
-    char **p = ppText;
+    PIN(char **p, "$8") = ppText;
     int nBase, nMax;
     unsigned char c;
     int nVal = 0;

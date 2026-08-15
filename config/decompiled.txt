@@ -2255,3 +2255,4 @@ MenuCfTaikiPush = 0x002752A0, 0x40; // Menu.c
 loadConstString = 0x002F1860, 0x140; // JavaClass.c
 UmnPluginTextGet = 0x00A0F550, 0x24; // Umn.c
 lookupClassField = 0x002F5BE0, 0x7C; // JavaClass.c
+UmnEventTextNextGet = 0x00A0EFC0, 0x40; // Umn.c
