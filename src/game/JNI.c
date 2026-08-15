@@ -32,6 +32,30 @@ int xheap_push(void);
 int xheap_pop(void);
 int xheap_current_clear(void);
 int instanceOf(int nClassId, int nTarget);
+void JTHREAD_waitFor(JVM *pVm);
+void virtualMachine(JVM *pVm, void *pMethod, void *pArgs, void *pRet);
+
+typedef struct DataBuffer {
+    unsigned char *pStart;                                    /* 0x00 */
+    unsigned char *pCur;                                      /* 0x04 */
+    unsigned char *pEnd;                                      /* 0x08 */
+    int nSize;                                                /* 0x0C */
+    unsigned int (*pGetUIntegerAt)(struct DataBuffer *, int); /* 0x10 */
+} DataBuffer;
+
+/* One entry of a class-library package: an 8-byte header whose 0x06 field
+   counts the 16-byte class records that follow it inline. */
+typedef struct PDBCLASS {
+    char           pad00[8];
+    unsigned char *pData; /* 0x08 */
+    int            nSize; /* 0x0C */
+} PDBCLASS;
+
+void DataBuffer_init(DataBuffer *pBuf, unsigned char *pData, int nSize,
+                     int bBigEndian);
+void PDB_getEntry(int nId, void **ppEntry, int *pnCount);
+char *getStrIndex(char *pStr, int nChar);
+int checkClass(DataBuffer *pBuf, char *pName, void *pArg);
 
 /* Initialize the class database and the VM object heap */
 int JNI_initSystem(int pStart, int nSize)
@@ -147,4 +171,106 @@ searched:
     else
         classDB[nIndex] = pClass;
     return pClass;
+}
+
+
+/* Enter the VM on behalf of one script method call.
+ *
+ * A thread flagged 0x20 (freshly rearmed) has its stack and operand top
+ * reset and the rearm/run bits cleared first.  A thread flagged 0x04 is
+ * blocked, so its wait condition is polled once and the call is dropped
+ * if it is still blocked.  Anything left holding bit 0 or bit 2 is dead
+ * or blocked and never reaches the interpreter.  The interpreter call is
+ * a tail call -- the original restores every callee-saved register and
+ * `j`s straight into virtualMachine. */
+void JNI_callMethod(JVM *pVm, void *pMethod, void *pArgs, void *pRet)
+{
+    int nFlags;
+    int nNew;
+
+    nFlags = pVm->nFlags;
+    if ((nFlags & 0x20) != 0) {
+        pVm->nTop = 0;
+        pVm->nSp = 0;
+        /* A separate local, not an in-place &=: the original keeps the
+           new flag word in its own register and copies it back, which an
+           in-place update coalesces away (a whole-function 1-word shift). */
+        nNew = nFlags & ~0x23;
+        pVm->nFlags = nNew;
+        nFlags = nNew;
+    }
+    if ((nFlags & 4) != 0) {
+        JTHREAD_waitFor(pVm);
+        nFlags = pVm->nFlags;
+        if ((nFlags & 4) != 0) {
+            return;
+        }
+    }
+    if ((nFlags & 5) != 0) {
+        return;
+    }
+    virtualMachine(pVm, pMethod, pArgs, pRet);
+}
+
+
+/* FLAG REQUEST (verified). Source is exact -- 63/63 words -- and the one
+   remaining difference is `i = 0` being sunk into the delay slot of the
+   `nCount > 0` guard instead of issuing before it, a pure sched2 tie-break
+   (moving the initialiser inside the guard, after pBase, or into a for()
+   header all cost two words instead).  Verified MATCH, all 63 words, with:
+       --rotate JNI_searchClasses:16:2
+   Once wired, register:
+       JNI_searchClasses = 0x002F0A90, 0xFC; // JNI.c
+
+   Note the outer retry must be `for (;;) { ... if (!pName) break; }` with a
+   single `return 0` after the loop.  Returning 0 from inside the loop lets
+   gcc reuse the just-tested null pointer as the return value and fold the
+   branch into a branch-likely, one word short.
+
+   Scan every class record of a package for pName, retrying with each
+   ':'-separated suffix of the name and counting the retries in *pnDepth.
+   Returns checkClass's non-zero result on a hit, 0 when the name runs out. */
+int JNI_searchClasses(int nId, char *pName, void *pArg, int *pnDepth)
+{
+    DataBuffer buf;
+    void *pEntry;
+    int nCount;
+    int i;
+    int nClass;
+    char *p;
+    char *pBase;
+    int nRet;
+
+    PDB_getEntry(nId, &pEntry, &nCount);
+    *pnDepth = 0;
+    for (;;) {
+        i = 0;
+        if (nCount > 0) {
+            pBase = (char *)pEntry;
+            do {
+                nClass = *(unsigned short *)(pBase + 6);
+                p = pBase + 8;
+                if (nClass > 0) {
+                    do {
+                        DataBuffer_init(&buf, ((PDBCLASS *)p)->pData,
+                                        ((PDBCLASS *)p)->nSize, 1);
+                        nRet = checkClass(&buf, pName, pArg);
+                        if (nRet != 0) {
+                            return nRet;
+                        }
+                        nClass--;
+                        p += 16;
+                    } while (nClass > 0);
+                }
+                i++;
+                pBase = p;
+            } while (i < nCount);
+        }
+        pName = getStrIndex(pName, ':');
+        if (pName == 0) {
+            break;
+        }
+        (*pnDepth)++;
+    }
+    return 0;
 }
