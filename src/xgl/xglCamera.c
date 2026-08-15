@@ -167,6 +167,64 @@ void xglCameraScreenInit(void *pCamera)
 
 extern void xglCameraTravelManual(void *pCamera);
 extern void xglCameraTravelChase(void *pCamera);
+extern void xglVectorScaleXYZ(float *pDest, const float *pSource, float fScale);
+extern unsigned short D_00490E20;
+
+/* TODO: near-miss (word count now matches at 60/60; ~13 real diffs
+ * remain, mostly SCHEDULING). Structure/offsets/constants are verified:
+ * 0x30=vShootAngle, 0x60=vShootPlace, 0xC=scale field, 0x0=X field;
+ * D_004D8868/004D886C are the .lit4 constants 0.08f/0.24f (write
+ * inline, don't extern them). Two things took real work to reproduce:
+ * (1) the calls only pass `factor` (or `factor2`) as fScale -- the
+ * *pScale = *pScale * factor store is a SEPARATE side effect on the
+ * scale field, not fed into the call; (2) an empty asm memory barrier
+ * in the else-arm (not both arms) is needed to stop gcc from merging
+ * the if/else branches' identical `x = *(float*)pBase` loads into one
+ * post-join load, which is what the original's redundant
+ * `lwc1 $f12,0x0($s0)` twice (once in the branch-taken `b`'s delay
+ * slot, once at the join label) actually is. Residual diffs: the
+ * leading `lui $v1,%hi(D_00490E20)` sits BEFORE the stack frame setup
+ * in the original (i.e. before `move s0,a0` even) -- no C-level
+ * reordering moved it earlier, this may need a $v1 pin or is a
+ * genuine 2.96 prologue-scheduling artifact; and the second factor's
+ * `x - 5.0f` computes into $f12 in the original but $f20 here (swap
+ * likely needs `factor2` recomputed via a *pAngle-styled pinned temp
+ * rather than a plain local -- not yet tried). */
+/* When the travel-rig "wide" mode bit is set, quadruple the shoot-angle
+ * scale and the angle/place vectors; then rescale both vectors by a
+ * focus-distance-dependent factor derived from the camera's X field */
+void xglCameraTravelScale(void *pCamera)
+{
+    int flag;
+    char *pBase;
+    float *pAngle, *pPlace;
+    float x;
+
+    flag = D_00490E20 & 0x40;
+    pBase = (char *)pCamera;
+    pAngle = (float *)(pBase + 0x30);
+    pPlace = (float *)(pBase + 0x60);
+
+    if (flag != 0) {
+        *(float *)(pBase + 0xC) = *(float *)(pBase + 0xC) * 4.0f;
+        xglVectorScaleXYZ(pAngle, pAngle, 4.0f);
+        xglVectorScaleXYZ(pPlace, pPlace, 4.0f);
+        x = *(float *)pBase;
+    } else {
+        __asm__ __volatile__("" : : : "memory");
+        x = *(float *)pBase;
+    }
+    {
+        float factor = (x - 5.0f) * 0.08f + 1.0f;
+        *(float *)(pBase + 0xC) = *(float *)(pBase + 0xC) * factor;
+        xglVectorScaleXYZ(pAngle, pAngle, factor);
+    }
+    x = *(float *)pBase;
+    {
+        float factor2 = (x - 5.0f) * 0.24f + 1.0f;
+        xglVectorScaleXYZ(pPlace, pPlace, factor2);
+    }
+}
 
 /* TODO: VERIFIED FULL MATCH (164/164 bytes, masked_compare diffs == [])
  * under FILE_FIX_FLAGS["xglCamera.c"] = "--branch-likely

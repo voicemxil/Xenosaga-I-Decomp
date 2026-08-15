@@ -499,17 +499,18 @@ int xglCdStreamRewind(XGLCDSTREAM *pStream)
 int xglCdArcInitSub1(XGLCDARC *pArc, char *pName, char *pBuf)
 {
     XGLCDFILEPOS pos;
-    char nCount;
+    int nCount;
 
-    if (xglCdGetFilePos(&pos, pName, xglCdDummyCallback) != 0) {
-        pArc->pBuf = pBuf;
-        pArc->nLsn = pos.nUnk00;
-        pArc->nReady = 0;
-        xglCdArcInitSub0(&pos, pBuf, 0);
-        nCount = *pBuf;
-        if (nCount >= 2) {
-            xglCdArcInitSub0(&pos, pBuf + 0x800, nCount - 1);
-        }
+    if (xglCdGetFilePos(&pos, pName, xglCdDummyCallback) == 0) {
+        return 0;
+    }
+    pArc->pBuf = pBuf;
+    pArc->nLsn = pos.nUnk00;
+    pArc->nReady = 0;
+    xglCdArcInitSub0(&pos, pBuf, 0);
+    nCount = *(unsigned char *)pBuf;
+    if (nCount >= 2) {
+        xglCdArcInitSub0(&pos, pBuf + 0x800, nCount - 1);
     }
     return nCount + 1;
 }

@@ -2005,7 +2005,6 @@ sprt_init = 0x0026BFF8, 0x10; // EW.c
 mask_init = 0x0026C008, 0x14; // EW.c
 xglCameraTravelProc = 0x0022B910, 0xA4; // xglCamera
 xglCdArcInitSub1 = 0x0021F730, 0x84; // xglCd.c
-// xglCameraTravelScale = 0x0022B170, 0xF0; // xglCamera.c -- WIP: 60d, registered before matching; re-enable at 0d
 
 RFU000_FullReset = 0x00200100, 0x10; // kernel
 ResetEE = 0x00200110, 0x10; // kernel

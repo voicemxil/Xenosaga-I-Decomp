@@ -68,3 +68,69 @@ void xglPacketSend(void)
         xglDmaDirectSrcChain(1, (u_int)pSendPacket->pBase);
     }
 }
+
+typedef unsigned long u_long;
+
+int sceVif1PkCnt(XGLPACKET *pPk, int nArg);
+int sceVif1PkAddCode(XGLPACKET *pPk, unsigned int nCode);
+int sceVif1PkOpenDirectHLCode(XGLPACKET *pPk, int nArg);
+int sceVif1PkAddDirectDataN(XGLPACKET *pPk, void *pData, int nQwc);
+int sceVif1PkCloseDirectCode(XGLPACKET *pPk);
+
+extern unsigned int TestPrim_0_004A8D00[];
+extern unsigned short D_004A9100[];
+
+/* TODO: near-miss (13 diffs of 45 words, pure SCHEDULING -- same
+ * instruction multiset, no logic difference). Register width/pinning is
+ * fully solved: `volatile u_long *p` for the 0x70000000 indexed stores
+ * defeats CSE against the literal-address call argument; `t0`/`v1` must
+ * be u_long (not unsigned int) so `t0 = 0xC800; t0 <<= 19;` emits a
+ * plain `dsll` instead of the `dsll32+dsra32` 32-bit-truncation
+ * round-trip; the 0xC800 and 6 constants need tied empty-asm
+ * passthroughs (`"=r"(x):"0"(...)`) or 2.96 constant-folds the whole
+ * shift into a single `lui`; pinning pPk into its own $4-tied copy
+ * (`pPkA0`) right after the D_004A9100 lhu reproduces the original's
+ * early, otherwise-inexplicable `move a0,s0` (freeing $a0 the moment
+ * D_004A9100's base is no longer needed). What's left: gcc 2.96's
+ * scheduler places the `sd` of the literal 6 and the two `or`s in a
+ * different relative order than ours no matter how the equivalent C
+ * statements are reordered (confirmed non-source-order-sensitive here,
+ * unlike most of this file) -- the memory barriers above pin some of it
+ * but not all. Likely needs a --swap-adjacent/--branch-likely-style
+ * site-indexed fixer flag rather than more C-level massaging. */
+/* Queue the interpolation-matrix DIRECT block into the current packet:
+ * fixed template quadwords plus a VU MSCAL row built from D_004A9100 */
+int xglPacketInterpolate(void)
+{
+    XGLPACKET *pPk;
+    register volatile u_long *p __asm__("$9");
+    register u_long v1 __asm__("$3");
+    register unsigned int v0 __asm__("$2");
+    register u_long t0 __asm__("$8");
+    register u_long nSix __asm__("$7");
+    register XGLPACKET *pPkA0 __asm__("$4");
+
+    pPk = pCurrentPacket;
+    sceVif1PkCnt(pPk, 0);
+    sceVif1PkAddCode(pPk, 0x11000000);
+    sceVif1PkOpenDirectHLCode(pPk, 0);
+    sceVif1PkAddDirectDataN(pPk, TestPrim_0_004A8D00, 4);
+
+    p = (volatile u_long *)0x70000000;
+    v0 = D_004A9100[0];
+    __asm__("" : "=r"(pPkA0) : "0"(pPk));
+    __asm__("" : "=r"(t0) : "0"((u_long)0xC800));
+    t0 <<= 19;
+    __asm__("" : "=r"(nSix) : "0"((u_long)6));
+    v0 <<= 5;
+    p[1] = nSix;
+    __asm__ __volatile__("" : : : "memory");
+    v1 = 0x24020000;
+    v1 |= v0;
+    __asm__ __volatile__("" : : : "memory");
+    v1 |= t0;
+    p[0] = v1;
+    sceVif1PkAddDirectDataN(pPkA0, (void *)0x70000000, 1);
+    sceVif1PkAddDirectDataN(pPk, (char *)TestPrim_0_004A8D00 + 0x50, 7);
+    return sceVif1PkCloseDirectCode(pPk);
+}
