@@ -2219,3 +2219,7 @@ sceCdStSeek = 0x0020E5A0, 0x2C; // sceCd.c
 sceCdStSeekF = 0x0020E570, 0x2C; // sceCd.c
 sceCdStStart = 0x0020E538, 0x34; // sceCd.c
 sceCdStStop = 0x0020E5D0, 0x38; // sceCd.c
+sceDeci2ExRecv = 0x00201778, 0x34; // sceDeci2.c
+sceDeci2ExSend = 0x002017B0, 0x34; // sceDeci2.c
+sceFsReset = 0x00204690, 0x34; // sceFs.c
+sceMcMkdir = 0x0020EE80, 0x34; // sceMc.c

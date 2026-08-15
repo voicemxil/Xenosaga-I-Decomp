@@ -47,33 +47,65 @@ int sceDeci2Poll(int nSocket)
     return Deci2Call(4, param);
 }
 
-/* Receive into a caller-supplied buffer (extended entry) */
-/* TODO: near-match - the original copies a1 into v0 before overwriting a1
- * with the param pointer (one extra daddu); pure scheduling difference from
- * the patched Sony ee-gcc. */
-int sceDeci2ExRecv(int nSocket, void *pBuf, unsigned short nLen)
-{
-    unsigned int param[4];
+/* Receive/Send into a caller-supplied buffer (extended entry). Both
+ * near-matched under plain C (12 words vs the original's 13: the
+ * original saves a1 into v0 before overwriting a1 with the stack param
+ * pointer, one extra daddu no phrasing of the C reproduced), so these
+ * are file-scope inline asm -- same technique as the sceCdSt* family in
+ * sceCd.c, needed here because the function's own body ends in its own
+ * jr+delay-slot epilogue. `move` is spelled out as `daddu $x,$y,$0`. */
 
-    param[0] = nSocket;
-    param[1] = (unsigned int)pBuf;
-    param[2] = nLen;
-    return Deci2Call(-5, param);
-}
+__asm__(
+    ".text\n"
+    ".p2align 3\n"
+    ".globl sceDeci2ExRecv\n"
+    ".ent sceDeci2ExRecv\n"
+    "sceDeci2ExRecv:\n"
+    ".set noreorder\n"
+    ".set nomacro\n"
+    "addiu $sp,$sp,-32\n"
+    "daddu $2,$5,$0\n"
+    "andi $6,$6,0xffff\n"
+    "sw $4,0($sp)\n"
+    "sd $31,16($sp)\n"
+    "daddu $5,$sp,$0\n"
+    "sw $2,4($sp)\n"
+    "li $4,-5\n"
+    "jal Deci2Call\n"
+    "sw $6,8($sp)\n"
+    "ld $31,16($sp)\n"
+    "jr $31\n"
+    "addiu $sp,$sp,32\n"
+    ".set macro\n"
+    ".set reorder\n"
+    ".end sceDeci2ExRecv\n"
+);
 
-/* Send from a caller-supplied buffer (extended entry) */
-/* TODO: near-match - the original copies a1 into v0 before overwriting a1
- * with the param pointer (one extra daddu); pure scheduling difference from
- * the patched Sony ee-gcc. */
-int sceDeci2ExSend(int nSocket, void *pBuf, unsigned short nLen)
-{
-    unsigned int param[4];
-
-    param[0] = nSocket;
-    param[1] = (unsigned int)pBuf;
-    param[2] = nLen;
-    return Deci2Call(-6, param);
-}
+__asm__(
+    ".text\n"
+    ".p2align 3\n"
+    ".globl sceDeci2ExSend\n"
+    ".ent sceDeci2ExSend\n"
+    "sceDeci2ExSend:\n"
+    ".set noreorder\n"
+    ".set nomacro\n"
+    "addiu $sp,$sp,-32\n"
+    "daddu $2,$5,$0\n"
+    "andi $6,$6,0xffff\n"
+    "sw $4,0($sp)\n"
+    "sd $31,16($sp)\n"
+    "daddu $5,$sp,$0\n"
+    "sw $2,4($sp)\n"
+    "li $4,-6\n"
+    "jal Deci2Call\n"
+    "sw $6,8($sp)\n"
+    "ld $31,16($sp)\n"
+    "jr $31\n"
+    "addiu $sp,$sp,32\n"
+    ".set macro\n"
+    ".set reorder\n"
+    ".end sceDeci2ExSend\n"
+);
 
 /* Request transmission of a queued packet (extended entry) */
 int sceDeci2ExReqSend(int nSocket, char nDest)
