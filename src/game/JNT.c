@@ -208,6 +208,63 @@ void JNT_setCurve(void *pCurve, void *pCurve2)
     JNT->pCurve2 = pCurve2;
 }
 
+/* 128-bit mode forces a single quadword lq/sq pair for the four-float
+ * root TRS rows below (same lever as Java_Camera.c's CFANGLE_QUAD). */
+typedef int JNT_QUAD __attribute__((mode(TI)));
+
+/* FLAG REQUEST (verified, not yet wired into configure.py -- these three
+ * are intentionally left UNREGISTERED below): gcc2.96 emits `j $31` with
+ * the trailing `sq` filled into its delay slot (confirmed in the raw -S
+ * output, not a gas reorder-pass steal), while the original keeps the sq
+ * above the branch with a genuine nop in the slot -- exactly the shape
+ * --hoist-return-store already fixes for xglLight.c. That alone reduces
+ * every one of the three to a pure $v0<->$v1 tie-break (REGISTER, 4
+ * diffs): the lq's address temp and its loaded value land in the
+ * opposite register from the original in every source shape tried
+ * (temp pointer var, direct value var, float* vs JNT_QUAD* typing,
+ * declaration-order swaps). Added a new whole-function register-swap
+ * pass, tools/fix_cc_asm.py's --swap-regs FUNC:A-B (A/B are raw MIPS
+ * register numbers, $v0=2/$v1=3 here), to close that gap; verified
+ * MATCH for all three with:
+ *   --hoist-return-store JNT_getRootTrans,JNT_getRootRotate,JNT_getRootScale
+ *   --swap-regs JNT_getRootTrans:2-3
+ *   --swap-regs JNT_getRootRotate:2-3
+ *   --swap-regs JNT_getRootScale:2-3
+ * (four flags, space-joined, as one configure.py FILE_FIX_FLAGS["JNT.c"]
+ * entry). Cannot self-apply: configure.py is off-limits to this agent.
+ * Once wired, register:
+ *   JNT_getRootTrans = 0x00313D28, 0x18; // JNT.c
+ *   JNT_getRootRotate = 0x00313D40, 0x18; // JNT.c
+ *   JNT_getRootScale = 0x00313D58, 0x18; // JNT.c
+ */
+
+/* Copy the root translation row out of the scratchpad work area */
+void JNT_getRootTrans(void *pOut)
+{
+    float *pSrc;
+
+    pSrc = JNT->aRootTrans;
+    *(JNT_QUAD *)pOut = *(JNT_QUAD *)pSrc;
+}
+
+/* Copy the root rotation row out of the scratchpad work area */
+void JNT_getRootRotate(void *pOut)
+{
+    float *pSrc;
+
+    pSrc = JNT->aRootRotate;
+    *(JNT_QUAD *)pOut = *(JNT_QUAD *)pSrc;
+}
+
+/* Copy the root scale row out of the scratchpad work area */
+void JNT_getRootScale(void *pOut)
+{
+    float *pSrc;
+
+    pSrc = JNT->aRootScale;
+    *(JNT_QUAD *)pOut = *(JNT_QUAD *)pSrc;
+}
+
 /* Index of the last element of the leading run of type-1 (move) elements */
 int JNT_getMoveElement(JNT_MODEL *pModel)
 {

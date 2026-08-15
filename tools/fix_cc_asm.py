@@ -397,6 +397,41 @@ def hoist_return_delay_stores(lines, scope=()):
     return out
 
 
+def swap_registers(lines, sites):
+    """Swap two raw register numbers throughout a named function's body.
+
+    A pure register-numbering tie-break: for a tiny leaf function with
+    only two independent pseudos and no other register pressure (e.g. an
+    lq address temp and its loaded value), gcc2.96's allocator sometimes
+    numbers the pair in the opposite order the original compiler did --
+    no C-level reordering of the source (variable declaration order,
+    temp-vs-inline expression, pointer-vs-value) was found to influence
+    it (see JNT_getRootTrans/Rotate/Scale, where address and value swap
+    $2<->$3 identically regardless of source shape). This is a blunt,
+    whole-function-scoped rename: every whole-token $A becomes $B and
+    vice versa, so it is only safe where A and B are truly the same kind
+    of temp throughout the function (verified against the original
+    binary at each call site, same as swap_adjacent/swap_into_slot).
+
+    sites: {func: (regA, regB)} parsed from "FUNC:A-B" tokens.
+    """
+    if not sites:
+        return lines
+    owner = function_at(lines)
+    out = []
+    for i, line in enumerate(lines):
+        pair = sites.get(owner[i])
+        if pair:
+            a, b = pair
+            ra = re.compile(r'\$%d\b' % a)
+            rb = re.compile(r'\$%d\b' % b)
+            line = ra.sub('\x01', line)
+            line = rb.sub('$%d' % a, line)
+            line = line.replace('\x01', '$%d' % b)
+        out.append(line)
+    return out
+
+
 def unfill_gcc_slots(flat, scope, owner_of):
     """Rewrite gcc's own delay-slot fills back to hoisted-insn + nop.
 
@@ -838,7 +873,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          branch_likely=None, branch_unlikely=None,
          war_restore=None, pin_slot=None, lis_hazard_nop=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
-         swap_slot_tgt=None, rotate=None):
+         swap_slot_tgt=None, rotate=None, swap_regs=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -846,6 +881,14 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if hoist_return_store is not None:
         lines = hoist_return_delay_stores(lines, hoist_return_store)
+
+    if swap_regs is not None:
+        spec = {}
+        for tok in swap_regs:
+            fn, ab = tok.split(':')
+            a, b = ab.split('-')
+            spec[fn] = (int(a), int(b))
+        lines = swap_registers(lines, spec)
 
     owner = function_at(lines)
 
@@ -1253,6 +1296,14 @@ if __name__ == "__main__":
                              "emission order in the post-processed asm) -- "
                              "the ee-as COP1-move stall pad no heuristic "
                              "reproduces")
+    parser.add_argument("--swap-regs", action="append", default=None,
+                        metavar="FUNC:A-B",
+                        help="whole-function register-number swap: every "
+                             "$A becomes $B and vice versa within FUNC "
+                             "(0-based raw register numbers, e.g. 2-3 for "
+                             "$v0/$v1). A pure allocator naming tie-break, "
+                             "distinct from the scheduling fixers above; "
+                             "repeatable for multiple FUNC:A-B sites")
     parser.add_argument("--expand-sym-loads", action="store_true",
                         help="also manually expand integer loads with "
                              "symbol(+off)(reg) addresses (see "
@@ -1286,4 +1337,5 @@ if __name__ == "__main__":
          scope(args.war_restore_swap), scope(args.pin_slot_nop),
          scope(args.lis_hazard_nop), scope(args.swap_adjacent),
          scope(args.swap_into_slot), scope(args.mtc1_nop),
-         scope(args.swap_slot_target), scope(args.rotate))
+         scope(args.swap_slot_target), scope(args.rotate),
+         args.swap_regs)
