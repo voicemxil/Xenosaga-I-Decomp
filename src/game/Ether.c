@@ -3,6 +3,8 @@
  * line2 and right-panel work buffers that hang off the same system block.
  */
 
+#include "matching.h"
+
 typedef struct {
     unsigned short id;          /* 0x00 */
     char pad02[0x06];            /* 0x02 */
@@ -237,14 +239,16 @@ void EtherTreeLineColorGet(unsigned char *color, int type)
     }
 }
 
-/* TODO: near-match - the natural local pointer remains in $v1 and is copied
- * to $a0 for the call; the original allocates it directly in $a0. */
+/* PIN to $a0: gcc otherwise leaves the line pointer in $v1 and copies it to
+ * $a0 for the call. The pin sticks here because the variable is also the
+ * call argument (see matching.h). */
 /* Draw the secondary ether-tree line layer when active */
 void EtherTreeLine2Draw(void)
 {
     if ((EtherTreeSystem->flags & 1) != 0) {
-        ETHER_LINE2 *line = EtherTreeLine2;
+        PIN(ETHER_LINE2 *line, "$4");
 
+        line = EtherTreeLine2;
         if ((line->flags & 1) != 0) {
             subLine2_DrawType_1(line);
         }

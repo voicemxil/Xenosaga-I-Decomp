@@ -685,3 +685,47 @@ void Java_xeno_Camera_setClipRange__FF(void *pEnv, JVAL *pArgs, JVAL *pRet)
     pCamera->fClipNear = pArgs[1].f;
     pCamera->fClipFar = pArgs[2].f;
 }
+
+
+/* TODO: not matching (27 built vs 25 original words).  The logic and the
+   0x21-entry sweep are right; two things block it, both TI-mode codegen:
+    - the `por $r,$0,$0` zero-materialisation wall, which the fix_cc_asm
+      peephole requested in Java_Chr.c's setPointLightReset note removes
+      (verified: `sq zero` does appear under a prototype of that pass);
+    - with that applied the only remainder is that gcc folds the 0x60 and
+      0x70 displacements into the two `sq`s, where the original keeps two
+      separate address registers and stores at offset 0.  That costs the
+      two loop-padding nops gcc inserts instead, which is the whole 2-word
+      difference.
+
+   Clear the eight fog parameters of one camera definition, or of every
+   definition when the index is negative.  Both halves go out as TI-mode
+   quadword stores. */
+void Java_xeno_Camera_resetFog__I(void *pEnv, JVAL *pArgs, JVAL *pRet)
+{
+    typedef int T128 __attribute__((mode(TI)));
+    int nIndex;
+    int nFirst;
+    int nLast;
+    int nNum;
+    CFCAMERA *pDef;
+
+    nIndex = pArgs[1].i;
+    if (nIndex < 0) {
+        nFirst = 0;
+        nLast = 0x21;
+    } else {
+        nFirst = nIndex;
+        nLast = nFirst + 1;
+    }
+    if (nFirst < nLast) {
+        pDef = &CfCameraDefine[nFirst];
+        nNum = nLast - nFirst;
+        do {
+            *(T128 *)&pDef->aFog[0] = 0;
+            *(T128 *)&pDef->aFog[4] = 0;
+            nNum--;
+            pDef++;
+        } while (nNum != 0);
+    }
+}

@@ -2284,3 +2284,6 @@ JNT_addConsumer = 0x00313D70, 0x9C; // JNT.c
 JNT_startProduction = 0x00313E58, 0xCC; // JNT.c
 MenuItemInfoMain = 0x0028A368, 0x348; // Menu.c
 JNT_setModelMatrix = 0x00313A90, 0xC0; // JNT.c
+JNI_loadClassLibrary = 0x002F0B90, 0xB4; // JNI.c
+AgwsAllRecovery = 0x00275D88, 0x70; // Agws.c
+EtherTreeLine2Draw = 0x002BB590, 0x4C; // Ether.c

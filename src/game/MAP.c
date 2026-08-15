@@ -550,12 +550,20 @@ void MAP_initUnitSequance(void)
     }
 }
 
-/* TODO: near-match (LOGIC, 10 of 49 words) - moving the pTargetPos derivation
- * into the else branch (from unconditional) improved 12->10 diffs but gcc
- * still hoists "MapUnit+nOffset+0x10" above the branch test as a pure
- * expression; original computes it in the bnez delay slot. Register/schedule
- * tie-break, not clearly reachable from source; a (char*)pTarget+0x10 form
- * regresses to LENGTH (47 vs 49 words) so was reverted. */
+/* TODO: near-match (LOGIC, 5 of 49 words, was 10). Fixed this session: the
+ * original associates the byte offset as MapUnit + (nOffset + 0x10), not
+ * (MapUnit + nOffset) + 0x10 -- gcc reassociates the written-out form and
+ * makes "MapUnit + 0x10" the common subexpression instead. Forcing the
+ * nOffset16 temp in its own block, unconditionally (NOT inside the else),
+ * reproduces the original's two adds.
+ * What is left (5 diffs) is purely which of the two adds the scheduler
+ * emits first: the original emits the *unused-yet* addiu a1,v0,16 before
+ * addu v0,v0,a2 whose result the very next lbu needs; ours emits them the
+ * other way and the a1/v1/v0 roles follow. Tried: swapping the two source
+ * statements (no change), LAUNDER on nOffset16 (no change), LAUNDER /
+ * LAUNDER2 on pTargetPos and/or pTarget (all regress to 31-32 diffs and
+ * lose a word), (char*)pTarget+0x10 (42 diffs, 47 words), and computing
+ * pTargetPos inside the else (10 diffs). */
 /* Update an enemy marker from its linked map unit */
 void MAP_updateUnitEnemy(MAPUNIT *pUnit)
 {
@@ -568,13 +576,17 @@ void MAP_updateUnitEnemy(MAPUNIT *pUnit)
     nEnemy = pUnit->nUnk080;
     nIndex = D_0037915B[nEnemy * 0x38B0];
     nOffset = nIndex * 0x300;
+    {
+        int nOffset16 = nOffset + 0x10;
+
+        pTargetPos = (float *)((char *)MapUnit + nOffset16);
+    }
     pTarget = (MAPUNIT *)((char *)MapUnit + nOffset);
     if (pTarget->nUnk0A2 == 0) {
         pUnit->nFlags |= 8;
     } else {
         float fAngle;
 
-        pTargetPos = (float *)((char *)MapUnit + nOffset + 0x10);
         *(unsigned long long *)&pUnit->fPos[0] =
             *(unsigned long long *)&pTargetPos[0];
         *(unsigned long long *)&pUnit->fPos[2] =

@@ -1735,7 +1735,8 @@ char *MenuMapExTextLoad(int nMemory, int nFlag)
 typedef struct {
     char pad0[3];
     unsigned char state;       /* 0x03: menu-system state */
-    char pad04[0x11 - 4];
+    char pad04[0x10 - 4];
+    signed char b10;           /* 0x10: character-select armed */
     unsigned char bEnd;        /* 0x11: 0xFF once the end-print is done */
     char pad12[0x20 - 0x12];
     signed char b20;           /* 0x20: system-option row (info text index) */
@@ -6113,6 +6114,203 @@ void MenuItemInfoMain(void)
         w->msg.pText = pText;
         MoveSlide(&w->win.nY, &nTarget[0], 3.0f);
         MoveSlide(&w->win.nH, &nTarget[1], 3.0f);
+        WindowDXMain(&w->win);
+        break;
+    default:
+        return;
+    }
+}
+
+/* Skill data record fields the info window needs */
+typedef struct {
+    char pad00[0x0E];
+    unsigned short hSkill;     /* 0x0E: 0 = the slot carries no skill */
+} MENUSKILLREC;
+
+/* Skill name/effect text pair */
+typedef struct {
+    char *pName;               /* 0x00 */
+    char *pEffect;             /* 0x04 */
+} MENUSKILLTEXT;
+
+extern MENUSKILLTEXT *func_A2C648(int nId);
+extern int func_A19698(int nChr, unsigned short hSkill);
+
+/* TODO: near-miss (34 diffs, length exact at 284) - every case body, the
+   shared empty-string block behind the two branch-likelies, the strings and
+   the jump table (0x4C9780) are recovered. What is left is the prologue:
+   the retail build copies the four help-text tables onto the stack in
+   declaration order (slots 0/16/32/48) while gcc emits the fourth before
+   the third, which permutes the four hoisted %hi registers with it, and it
+   loads the work pointer earlier. Initialising w in its declaration (so the
+   gp load precedes the copies) does not move it. */
+/* Skill screen info window: the caption follows the page - the character
+   prompt, the top-menu entries, the selected skill's name and effect, or
+   the reason an extraction is not possible */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    unsigned char bReady;      /* 0x001 */
+    signed char b02;           /* 0x002 */
+    unsigned char bHelp;       /* 0x003 */
+    int nColor;                /* 0x004 */
+    WINDOWDX win;              /* 0x008 */
+    char pad19C[4];
+    MENUMSGDX msg;             /* 0x1A0 */
+    char pad1B0[0x350 - 0x1B0];
+    char szText[0x80];         /* 0x350 */
+} MENU_SKILL_INFO_WORK;
+
+extern MENU_SKILL_INFO_WORK *MenuSkillInfo;
+
+void MenuSkillInfoMain(void)
+{
+    MENU_SKILL_INFO_WORK *w = MenuSkillInfo;
+    char *aChar[2] = {
+        "Select a character.",
+        " cannot be selected."
+    };
+    char *aMenu[3] = {
+        "Extract skills from accessories.",
+        "Allocate skills.",
+        "Cancel."
+    };
+    char *aSkill[3] = {
+        "Skill: ",
+        "\nEffect: ",
+        " has been extracted. \037"
+    };
+    char *aErr[2] = {
+        "Skill has already been extracted.",
+        "Skill cannot be extracted from the selected item."
+    };
+    short nTarget;
+    MENUSKILLREC *pRec;
+    char *pText;
+    unsigned char bArm;
+    int nId;
+    int nOne;
+
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        nOne = 1;
+        LAUNDER(nOne);
+        WindowDXSet(&w->win);
+        w->win.nX = -16;
+        w->win.nColor = w->nColor;
+        w->win.nY = 480;
+        w->win.nW = 544;
+        w->win.nH = 54;
+        w->win.pFunc = MenuInfoWindow;
+        w->win.pMsg = &w->msg;
+        w->msg.nX = 0;
+        w->msg.nY = 0;
+        w->msg.pText = 0;
+        w->win.nState = nOne;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        w->b02 = -1;
+        w->bReady = nOne;
+        w->bHelp = 0;
+        memset(w->szText, 0, 128);
+        w->nState = 2;
+    case 2:
+        pText = w->szText;
+        nTarget = 386;
+        bArm = MenuWork.b20 & 1;
+        if (bArm != 0) {
+            w->bHelp = 0;
+        }
+        if (w->bHelp == 0) {
+            if (PadData.hHeld & 0x20) {
+                w->bHelp = 1;
+            }
+        } else if (PadData.trig != 0) {
+            w->bHelp = 0;
+        }
+        switch (MenuWork.state) {
+        case 16:
+            eMessageCpy(pText, aChar[0]);
+            if (w->bHelp == 0) {
+                break;
+            }
+            if (MenuWork.b10 == 0) {
+                break;
+            }
+            eMessageCpy(pText, MenuCharNameGet(MenuWork.bChr));
+            eMessageCat(aChar[1]);
+            break;
+        case 32:
+            eMessageCpy(pText, aMenu[MenuWork.b30]);
+            break;
+        case 48:
+        case 50:
+            bArm = MenuWork.b20 & 1;
+            if (bArm != 0) {
+                w->b02 = -1;
+            }
+            if (MenuWork.f50 < 0) {
+                eMessageCpy(pText, "");
+                break;
+            }
+            nId = (short)MenuSortGet(0, MenuWork.f50);
+            if (nId == 0) {
+                break;
+            }
+            pRec = (MENUSKILLREC *)func_A1A548(
+                (short)MenuSortGet(0, MenuWork.f50));
+            if (w->bHelp == 0) {
+                eMessageCpy(pText, aSkill[0]);
+                if (pRec->hSkill != 0) {
+                    eMessageCat(func_A2C648(pRec->hSkill)->pName);
+                }
+                eMessageCat(aSkill[1]);
+                if (pRec->hSkill == 0) {
+                    break;
+                }
+                eMessageCat(func_A2C648(pRec->hSkill)->pEffect);
+                break;
+            }
+            if (MenuWork.bSel == 0) {
+                break;
+            }
+            if (((MENUSKILLREC *)func_A1A548(MenuWork.bSel))->hSkill == 0) {
+                eMessageCpy(pText, aErr[1]);
+                break;
+            }
+            if (func_A19698(MenuWork.bChr, pRec->hSkill) == 0) {
+                break;
+            }
+            eMessageCpy(pText, aErr[0]);
+            break;
+        case 52:
+            bArm = MenuWork.b20 & 1;
+            if (bArm == 0) {
+                break;
+            }
+            pRec = (MENUSKILLREC *)func_A1A548(
+                (short)MenuSortGet(0, MenuWork.f50));
+            eMessageCpy(pText, aSkill[0]);
+            if (pRec->hSkill != 0) {
+                eMessageCat(func_A2C648(pRec->hSkill)->pName);
+            }
+            eMessageCat(aSkill[2]);
+            break;
+        case 64:
+            if (MenuWork.f50 >= 0) {
+                eMessageCpy(pText,
+                            ((MENUTEXTREC *)MenuTextGet(
+                                MenuSortGet(0, MenuWork.f50)))->pName);
+            } else {
+                eMessageCpy(pText, "");
+            }
+            break;
+        default:
+            nTarget = 512;
+            break;
+        }
+        w->msg.pText = pText;
+        MoveSlide(&w->win.nY, &nTarget, 3.0f);
         WindowDXMain(&w->win);
         break;
     default:

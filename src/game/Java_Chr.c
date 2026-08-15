@@ -800,10 +800,32 @@ void Java_xeno_Chr_setPointLightPos__IFFF(void *env, int *args, int *ret)
 }
 
 /* Clear all three of the character's point lights */
-/* TODO: near-miss (LOGIC, 5 diffs) -- same TI-mode lq/sq wall as
- * nmlModelGetGblPosition et al.: 2.96 always materializes a zero source
- * register with `por $r,$0,$0` before a TI-mode `sq`, where the original
- * stores `$0` directly, and offsets/counter direction don't change it. */
+/* TOOL REQUEST (verified, with numbers).  This is the TI-mode zero-store
+ * wall shared with nmlModelGetGblPosition et al.: gcc 2.96 always
+ * materialises the zero into a register (`por $r,$0,$0`) ahead of a
+ * quadword `sq`, while the original stores `$0` directly and has a
+ * literal nop where the `por` sits.
+ *
+ * Source cannot reach it.  Five shapes were swept here -- plain
+ * `*(T128 *)p = 0`, a `(T128)0` cast, a zeroed T128 local, and PIN()ing a
+ * T128 local to "$0" both with and without an initialiser.  The two PIN
+ * forms do not even compile ("Insn does not satisfy its constraints" on a
+ * TI-mode set of $0); the other three all give the same 3 diffs.
+ *
+ * The ask is a tools/fix_cc_asm.py peephole: where `por $X,$0,$0` is
+ * followed (before $X is redefined) only by `sq $X,...`, rewrite the por
+ * to a literal `nop` and retarget those stores to `$0`.  I prototyped
+ * exactly that as a post-pass and measured it:
+ *   peephole alone                       3 diffs -> 1 diff
+ *   peephole + --swap-adjacent
+ *       Java_xeno_Chr_setPointLightReset__:18    MATCH, all 33 words
+ *       (Java_Chr.c 81 match/9 not -> 82 match/8 not)
+ * Once the peephole exists, register:
+ *   Java_xeno_Chr_setPointLightReset__ = 0x003006E0, 0x84; // Java_Chr.c
+ * Java_xeno_Camera_resetFog__I needs the same peephole (it also picks up
+ * `sq zero` under the prototype) plus a separate fix for gcc folding the
+ * 0x60/0x70 displacements into the stores where the original keeps two
+ * address registers -- see that function's own note. */
 void Java_xeno_Chr_setPointLightReset__(void *env, int *args, int *ret)
 {
     typedef int T128 __attribute__((mode(TI)));

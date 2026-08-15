@@ -56,6 +56,7 @@ void DataBuffer_init(DataBuffer *pBuf, unsigned char *pData, int nSize,
 void PDB_getEntry(int nId, void **ppEntry, int *pnCount);
 char *getStrIndex(char *pStr, int nChar);
 int checkClass(DataBuffer *pBuf, char *pName, void *pArg);
+void loadStaticClass(int *pOut, int nClass);
 
 /* Initialize the class database and the VM object heap */
 int JNI_initSystem(int pStart, int nSize)
@@ -273,4 +274,42 @@ int JNI_searchClasses(int nId, char *pName, void *pArg, int *pnDepth)
         (*pnDepth)++;
     }
     return 0;
+}
+
+
+/* Load every static class of a package.  Note the original never advances
+   either cursor: the entry pointer is re-read from the stack each outer
+   pass and the record cursor is re-derived from it, so both loops run over
+   the SAME record -- reproduced as-is. */
+void JNI_loadClassLibrary(int nId)
+{
+    DataBuffer buf;
+    void *pEntry;
+    int nCount;
+    int nOut;
+    int i;
+    int nClass;
+    char *p;
+    int nRet;
+
+    PDB_getEntry(nId, &pEntry, &nCount);
+    i = 0;
+    if (nCount > 0) {
+        do {
+            nClass = *(unsigned short *)((char *)pEntry + 6);
+            p = (char *)pEntry + 8;
+            if (nClass > 0) {
+                do {
+                    DataBuffer_init(&buf, ((PDBCLASS *)p)->pData,
+                                    ((PDBCLASS *)p)->nSize, 1);
+                    nRet = checkClass(&buf, 0, 0);
+                    if (nRet != 0) {
+                        loadStaticClass(&nOut, nRet);
+                    }
+                    nClass--;
+                } while (nClass > 0);
+            }
+            i++;
+        } while (i < nCount);
+    }
 }

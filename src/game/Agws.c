@@ -9,11 +9,12 @@ typedef struct {
 } AGWS_RECOVERY;
 
 extern AGWS_RECOVERY *func_A191C0(int id);
-extern void func_A11108(int id, int *work0, int *work1);
+extern AGWS_RECOVERY *func_A11108(int id, int *work0, int *work1);
 
-/* TODO: near-match (LOGIC) - the recovery iteration/copies are recovered,
- * but unknown helper interfaces and local-work-buffer source shape leave 11
- * instruction differences. Resolve the original helper prototypes. */
+/* func_A11108 also returns an AGWS_RECOVERY *: the two shorts copied into
+ * func_A191C0's record come from ITS return value, not from the record
+ * itself (the original reads lhu 0/2 off the second call's v0 and writes
+ * sh 0x34/0x36 through the first call's, saved in s0). */
 void AgwsAllRecovery(void)
 {
     int work0[4];
@@ -22,9 +23,9 @@ void AgwsAllRecovery(void)
 
     for (i = 17; i < 33; i++) {
         AGWS_RECOVERY *recovery = func_A191C0(i);
+        AGWS_RECOVERY *source = func_A11108(i, work0, work1);
 
-        func_A11108(i, work0, work1);
-        recovery->field_34 = recovery->field_00;
-        recovery->field_36 = recovery->field_02;
+        recovery->field_34 = source->field_00;
+        recovery->field_36 = source->field_02;
     }
 }
