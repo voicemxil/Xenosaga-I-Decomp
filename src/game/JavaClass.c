@@ -15,25 +15,43 @@ extern int memcmp(const void *, const void *, unsigned int);
 STRENTRY **g_StrTable;
 int g_StrCount;
 
-/* TODO: near-miss (LOGIC, 41 diffs of 80) -- the zero-init loop (do{*p--=0;}
- * while(--i>=0), verified byte-exact against the original's decrement-then-
- * store/test-after shape) and the not-found/found control flow both match.
- * What's left: (1) the hash-bucket index and its <<2 byte offset land in
- * $s3/$s4 the opposite way round from the original in every attempted
- * source shape (separate idx/ofs locals, pointer-vs-array-subscript access,
- * declaration-order swaps -- none moved the allocator); (2) the search
- * loop's `lhu length; nop*4; bnel` back-edge only gets one nop where the
- * original has four, a scheduling gap no loop idiom tried here closes.
- * Both look like the same class of gcc2.96 allocator/scheduler tie-break
- * as JNT_getRootTrans's $v0/$v1 swap (see JNT.c) -- may need an analogous
- * register-swap fixer plus a delay-slot-count fixer, neither built yet. */
+/* MATCHED, 80/80 words, no fix_cc_asm flags. Three source-shape facts did
+ * it, and all three are reusable on the rest of this family:
+ *
+ * 1. The search loop must NOT be a `for`/`while` -- gcc 2.96 rotates those
+ *    (peels the first test, duplicates the `lhu` into a bottom-test delay
+ *    slot) and the original is un-rotated: the null test IS the loop-top
+ *    branch target, and both back-edges jump to it. Writing it as an
+ *    explicit `loop:` label with `goto loop` keeps the test at the top,
+ *    which is also what makes the four scheduling nops after `lhu` appear
+ *    on their own (they are gcc's own padding for that block, not a
+ *    delay-slot artefact -- nothing needed to be forced).
+ *
+ * 2. Both `continue` arms must share ONE `next:` block (`goto next`), not
+ *    a duplicated `p = p->next; goto loop;`. gcc's reorg then annul-copies
+ *    that block's first insn into each branch's delay slot and retargets
+ *    the branch past it, which is exactly how the original's
+ *    `bnel/lw` + `bnezl/lw` pair is built. Duplicating the arms instead
+ *    makes gcc invert the second test's polarity to fill the slot
+ *    (`beqz ->epilogue` + `b ->loop`), a 4-word miss.
+ *
+ * 3. `g_StrCount++` as a read-modify-write in place pins its store one
+ *    slot too early. Splitting it -- `cnt = g_StrCount + 1;` before the
+ *    bucket-head store and `g_StrCount = cnt;` after -- is the only shape
+ *    of the 120 tail-statement permutations that gives the original's
+ *    store order. (`--rotate loadConstString:68:2` also matched, but a
+ *    plain-C fix is preferred over a flag; see CONTRIBUTING.)
+ *
+ * The $s3/$s4 bucket-index/byte-offset roles noted in the old TODO were
+ * never a real allocator tie-break: they fell into place by themselves
+ * once the tail store order was right. */
 /* Intern (pStr, nLength) into the global string table, allocating and
  * chaining a new STRENTRY on first sight. nLength == -1 means "compute
  * via strlen"; nLength == 0 is rejected outright. */
 void *loadConstString(char *pStr, int nLength)
 {
     STRENTRY *p;
-    int idx, hash;
+    int idx, hash, cnt;
 
     if (g_StrTable == 0) {
         STRENTRY **pRow;
@@ -56,31 +74,55 @@ void *loadConstString(char *pStr, int nLength)
     hash = StringUtf_getHash(pStr, nLength);
     idx = hash & (STRTAB_SIZE - 1);
 
-    for (p = g_StrTable[idx]; p != 0; p = p->next) {
-        if (p->length == nLength && memcmp(p->data, pStr, nLength) == 0)
-            return p;
-    }
+    p = g_StrTable[idx];
+loop:
+    if (p == 0)
+        goto notfound;
+    if (p->length != nLength)
+        goto next;
+    if (memcmp(p->data, pStr, nLength) == 0)
+        return p;
+next:
+    p = p->next;
+    goto loop;
 
+notfound:
     p = (STRENTRY *) xmalloc(sizeof(STRENTRY), 20);
     p->hash = (unsigned short) idx;
-    p->next = g_StrTable[idx];
     p->data = pStr;
     p->length = (unsigned short) nLength;
+    p->next = g_StrTable[idx];
+    cnt = g_StrCount + 1;
     g_StrTable[idx] = p;
-    g_StrCount++;
+    g_StrCount = cnt;
     return p;
 }
 
-/* TODO: near-miss (LENGTH, 26 diffs, 30 orig vs 31 built words) -- the
- * two-region setup (static-first / instance-after) and the goto-shared
- * found/notfound exits both match in shape. The remaining diff is a
- * register-role swap in the search loop itself (the original keeps the
- * class-pointer's nStaticFieldCount reload in one register across both
- * branches; ours re-derives it), which then perturbs which register the
- * loop counter lands in. Tried: hoisting nStaticFieldCount into its own
- * local before the if/else, computing both branches' n via a shared
- * expression -- no change. Needs a permute.py pass over the two setup
- * blocks. */
+/* MATCHED, 31/31 words, no fix_cc_asm flags. Two independent levers, and
+ * the second one is the exact opposite of what loadConstString needed --
+ * worth remembering when picking a loop idiom in this family:
+ *
+ * 1. Assign `n` BEFORE `p` in both arms of the if/else. That single
+ *    statement swap is what puts the counter in $a0 (the incoming
+ *    pClass register, reused once the last field load retires) and the
+ *    cursor in $a1 (the incoming pName register, which is why pName has
+ *    to be copied to $a3 in the entry branch's delay slot). With `p`
+ *    first the roles invert and $t0 gets dragged in as a fifth register.
+ *    The old TODO called this a "register-role swap needing permute.py";
+ *    it is just source statement order.
+ *
+ * 2. The search must be a real `for`, NOT the hand-written
+ *    `if (n < 0) goto notfound; loop: ...; goto loop;`. gcc 2.96 turns a
+ *    `for` into guard-test + do-while, which is the original's shape:
+ *    a `bltz` guard at the entry and a separate `bgez` back-edge at the
+ *    bottom, each with its own `n--` (one in the found-branch's delay
+ *    slot, one before the guard). Written with explicit gotos, gcc
+ *    cross-jumps the two `n--; test` blocks into one shared
+ *    `n--; bgezl` and tail-merges both returns onto a single `j $31`,
+ *    losing a word and rewriting the whole loop. (loadConstString wanted
+ *    the goto form because its loop must stay un-rotated; this one wants
+ *    the `for` because it must BE rotated. The test is whether the
+ *    original's back-edge targets the null/bounds test or the body.) */
 /* Search a class's field table for pName, restricted to the static or
  * instance sub-range by nFlags. Fields are stored static-first: entries
  * [0, nStaticFieldCount) are static, [nStaticFieldCount, nFieldCount)
@@ -92,24 +134,16 @@ JFIELD *lookupClassField(JCLASS_FIELDS *pClass, void *pName, int nFlags)
 
     nFlags &= 0xff;
     if (nFlags != 0) {
-        p = pClass->fields;
         n = pClass->nStaticFieldCount;
+        p = pClass->fields;
     } else {
-        p = pClass->fields + pClass->nStaticFieldCount;
         n = pClass->nFieldCount - pClass->nStaticFieldCount;
+        p = pClass->fields + pClass->nStaticFieldCount;
     }
 
-    n--;
-    if (n < 0)
-        goto notfound;
-loop:
-    if (p->name == pName)
-        return p;
-    n--;
-    if (n >= 0) {
-        p++;
-        goto loop;
+    for (n--; n >= 0; n--, p++) {
+        if (p->name == pName)
+            return p;
     }
-notfound:
     return 0;
 }
