@@ -1737,7 +1737,9 @@ typedef struct {
     unsigned char state;       /* 0x03: menu-system state */
     char pad04[0x11 - 4];
     unsigned char bEnd;        /* 0x11: 0xFF once the end-print is done */
-    char pad12[0x22 - 0x12];
+    char pad12[0x20 - 0x12];
+    signed char b20;           /* 0x20: system-option row (info text index) */
+    char pad21;
     signed char bHdd;          /* 0x22: HDD present flag */
     char pad23[0x26 - 0x23];
     short h26;                 /* 0x26: current AGWS weapon id */
@@ -1764,7 +1766,9 @@ typedef struct {
     short h60;                 /* 0x60 */
     char pad62[2];
     short h64;                 /* 0x64 */
-    char pad66[0x7A - 0x66];
+    char pad66[0x72 - 0x66];
+    signed char b72;           /* 0x72: item sort mode */
+    char pad73[0x7A - 0x73];
     signed char b7A;           /* 0x7A: equip-calc stat type */
 } MENUTECWORK;
 extern MENUTECWORK MenuWork;
@@ -2163,7 +2167,7 @@ typedef struct {
     int f0;                    /* 0x00 */
     int f4;                    /* 0x04: equip count */
     unsigned char b8;          /* 0x08 */
-    unsigned char b9;          /* 0x09 */
+    signed char b9;            /* 0x09 */
     char padA[2];
 } MENUTECLISTENT;
 extern MWLIST *MenuListMake(int nIdx, int nType);
@@ -5875,5 +5879,243 @@ void MenuFilePas(MENU_TSK *pTask, MENU_FILE_PAS_WORK *w)
         }
         endPrintExtFuncBox(w->nColor, 102, 0);
         break;
+    }
+}
+
+/* A message object hung off a WindowDX: the window's renderer draws
+   pText inside the frame */
+typedef struct {
+    short nX;                  /* 0x00 */
+    short nY;                  /* 0x02 */
+    char pad04[4];
+    int nMode;                 /* 0x08 */
+    char *pText;               /* 0x0C */
+} MENUMSGDX;
+
+extern void MenuInfoWindow(void);
+extern void *memset(void *, int, unsigned int);
+
+/* Bottom info window: the frame slides up from off-screen and carries the
+   help line for the option row the cursor is on */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    unsigned char bReady;      /* 0x001 */
+    char pad002[2];
+    int nColor;                /* 0x004 */
+    WINDOWDX win;              /* 0x008 */
+    char pad19C[4];
+    MENUMSGDX msg;             /* 0x1A0 */
+    char pad1B0[0x350 - 0x1B0];
+    char szText[0x80];         /* 0x350 */
+} MENU_INFO_WORK;
+
+extern MENU_INFO_WORK *MenuSystemInfo;
+
+/* System screen info window */
+void MenuSystemInfoMain(void)
+{
+    char *aText[7] = {
+        "Set all sound output during game to stereo or mono. \nDefault: Stereo",
+        "Remember cursor location.\nDefault: On",
+        "Set vibration On/Off.\nDefault: On",
+        "Set radar display On/Off.\nDefault: On",
+        "Adjust game display position on TV monitor.",
+        "Set data location.\nOn: Hard Disk Drive\nOff: DVD-ROM",
+        "Return to default settings."
+    };
+    MENU_INFO_WORK *w;
+    char *pText;
+    short nTarget;
+    PIN(int nOne, "$3");
+
+    w = MenuSystemInfo;
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.nX = -16;
+        w->win.nY = 480;
+        w->win.nW = 544;
+        w->win.nH = 78;
+        w->win.nColor = w->nColor;
+        w->win.pFunc = MenuInfoWindow;
+        w->win.pMsg = &w->msg;
+        w->msg.nX = 0;
+        w->msg.nY = 0;
+        w->msg.pText = 0;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        /* launder: the retail build materialises this 1 separately from the
+           one the window state uses; CSEing them makes gcc carry the value
+           across WindowDXSet in a callee-saved register. */
+        nOne = 1;
+        LAUNDER(nOne);
+        w->msg.nMode = nOne;
+        w->bReady = nOne;
+        memset(w->szText, 0, 128);
+        w->nState = 2;
+    case 2:
+        pText = w->szText;
+        nTarget = 362;
+        switch (MenuWork.bEnd) {
+        case 16:
+        case 32:
+        case 48:
+        case 64:
+        case 80:
+        case 96:
+        case 112:
+            eMessageCpy(pText, aText[MenuWork.b20]);
+            break;
+        default:
+            nTarget = 512;
+            break;
+        }
+        MoveSlide(&w->win.nY, &nTarget, 3.0f);
+        w->msg.pText = pText;
+        WindowDXMain(&w->win);
+        break;
+    default:
+        return;
+    }
+}
+
+/* Item-name record returned by MenuTextGet */
+typedef struct {
+    char pad00[4];
+    char *pName;               /* 0x04 */
+} MENUTEXTREC;
+
+extern char *strcpy(char *pDst, const char *pSrc);
+extern char *strcat(char *pDst, const char *pSrc);
+
+/* Item screen info window: the frame slides down and grows a second line
+   when the help toggle is armed, and the text is either the selected
+   item's description, a "cannot use" note, or the sort-order caption */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    char pad001[2];
+    unsigned char bHelp;       /* 0x003 */
+    char pad004[4];
+    int nColor;                /* 0x008 */
+    WINDOWDX win;              /* 0x00C */
+    MENUMSGDX msg;             /* 0x1A0 */
+    char pad1B0[0x350 - 0x1B0];
+    char szText[0x80];         /* 0x350 */
+} MENU_ITEM_INFO_WORK;
+
+extern MENU_ITEM_INFO_WORK *MenuItemInfo;
+
+void MenuItemInfoMain(void)
+{
+    char *aSort[5] = {
+        "Categorical Order",
+        "Numerical Order",
+        "Alphabetical Order",
+        "Sort by ",
+        "Cancel."
+    };
+    char *aNote[2] = {
+        "This item cannot be used here.",
+        "This item can only be used at save points."
+    };
+    short nTarget[2];
+    MENU_ITEM_INFO_WORK *w;
+    MENUTECLISTENT *pList;
+    char *pText;
+    unsigned char bArm;
+    int nSel;
+    int nType;
+
+    w = MenuItemInfo;
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.nX = -16;
+        w->win.nY = 480;
+        w->win.nW = 544;
+        w->win.nH = 54;
+        w->win.nColor = w->nColor;
+        w->win.pFunc = MenuInfoWindow;
+        w->win.pMsg = &w->msg;
+        w->msg.nX = 0;
+        w->msg.nY = 0;
+        w->msg.pText = 0;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        w->bHelp = 0;
+        memset(w->szText, 0, 128);
+        w->nState = 2;
+    case 2:
+        pText = w->szText;
+        nTarget[0] = 384;
+        nTarget[1] = 54;
+        bArm = MenuWork.b20 & 1;
+        if (bArm != 0) {
+            w->bHelp = 0;
+        }
+        if (w->bHelp == 0) {
+            if (PadData.hHeld & 0x20) {
+                w->bHelp = 1;
+            }
+        } else if (PadData.trig != 0) {
+            w->bHelp = 0;
+        }
+        switch (MenuWork.state) {
+        case 32:
+        case 34:
+        case 64:
+            if ((unsigned char)MenuWork.bHdd != 0) {
+                break;
+            }
+            nSel = MenuWork.f50;
+            if (nSel >= 0) {
+                strcpy(pText,
+                       ((MENUTEXTREC *)MenuTextGet(
+                           MenuSortGet(0, nSel)))->pName);
+                if (MenuWork.b30 != 0) {
+                    break;
+                }
+                if (w->bHelp != 1) {
+                    break;
+                }
+                pList = (MENUTECLISTENT *)MenuListGet(0);
+                nType = pList[MenuWork.f50].b9;
+                if (nType == 1) {
+                    strcpy(pText, aNote[0]);
+                } else if (nType == 2) {
+                    strcpy(pText, aNote[1]);
+                }
+            } else {
+                strcpy(w->szText, "");
+            }
+            break;
+        case 128:
+            if (MenuWork.b72 == 3) {
+                strcpy(pText, aSort[4]);
+            } else {
+                strcpy(pText, aSort[3]);
+                strcat(pText, aSort[MenuWork.b72]);
+                strcat(pText, ".");
+            }
+            break;
+        case 48:
+            nTarget[0] = 408;
+            nTarget[1] = 30;
+            break;
+        default:
+            nTarget[0] = 464;
+            break;
+        }
+        w->msg.pText = pText;
+        MoveSlide(&w->win.nY, &nTarget[0], 3.0f);
+        MoveSlide(&w->win.nH, &nTarget[1], 3.0f);
+        WindowDXMain(&w->win);
+        break;
+    default:
+        return;
     }
 }
