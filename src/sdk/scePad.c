@@ -76,6 +76,16 @@ __asm__(
  * sceSifCallRpc, own jr epilogue). `move` spelled out as
  * `daddu $x,$y,$0` per house convention. */
 
+/* scePadGetPortMax: near-miss in real C -- named-symbol addressing
+ * (buffer_00996C00, padsif from config/symbol_addrs.txt) reproduces
+ * every instruction except the final branch: ee-gcc 2.9 does not
+ * synthesize a branch-likely (bgezl) for this ">=0 ? reply : 0" shape
+ * under any phrasing tried (plain if/return, ternary) -- it always
+ * emits a plain bltz with an always-executed delay slot instead, 3
+ * words different in encoding though behaviourally equivalent. Matches
+ * this file's original header note that a C ternary does not reproduce
+ * the original's bgezl. Parked as inline asm. */
+
 __asm__(
     ".text\n"
     ".p2align 3\n"
