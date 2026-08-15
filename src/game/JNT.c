@@ -57,7 +57,8 @@ typedef struct {
     unsigned short nJointNum;   /* 0x06 */
     unsigned short nElementNum; /* 0x08 */
     unsigned short nSubNum;     /* 0x0A */
-    char pad00C[0x4];           /* 0x0C */
+    unsigned short nExtraNum;   /* 0x0C */
+    unsigned short nHairNum;    /* 0x0E */
     JNT_ATTRIBUTE_BLOCK block;  /* 0x10 */
 } JNT_MODEL;
 
@@ -134,6 +135,10 @@ JNT_ELEMENT *JNT_setMDLMatrix(JNT_WORK *pWork, JNT_ELEMENT *pElement);
 
 /* A producer callback: (work area, root element, registered argument). */
 typedef void (*JNT_CONSUMER)(JNT_WORK *, JNT_ELEMENT *, void *);
+
+void xglMatrixUnit4s(void *pMtx);
+void xglMatrixMul(void *pOut, void *pA, void *pB);
+void MATRIX_convert4(void *pOut, void *pIn);
 
 /* Element count of the model currently loaded in the work area */
 int JNT_hairID(JNT_WORK *pWork)
@@ -632,4 +637,91 @@ int JNT_startProduction(JNT_PRODUCER *pProducer, void *pUnit, float fFrame)
     }
     pProducer->nFlags = JNT->nFlags;
     return 0;
+}
+
+
+/* TODO: near-miss (100 built vs 99 original words).  Every block is
+ * structurally right -- the quadword save of the root matrix, both element
+ * walks, the two JNT_getStaticVal2 loops and the palette re-multiply -- and
+ * the whole difference is one CSE inside the last loop.
+ *
+ * The original reads pWork->nIndex THREE times per iteration: once for the
+ * MATRIX_convert4 source, once for the destination address, and once for
+ * the increment.  The first two survive here because there are calls
+ * between them, but gcc 2.96 folds the third into the second: the only
+ * thing separating them is the four TI-mode quadword stores, and
+ * -fstrict-aliasing says a `mode(TI)` store cannot touch an `int` load.
+ *
+ * The JVAL/JSVALUE union trick that fixes the same class of CSE in
+ * Java_Chr.c and JS.c does NOT reach this one -- wrapping the quadword in
+ * a union (so the stores take the union's alias set), and separately
+ * reading nIndex through a union that also contains a JNT_QUAD member,
+ * both leave the count unchanged at 100.  Three copy shapes (a JNT_QUAD*
+ * source cursor, the fully inlined form, and a char* cursor with explicit
+ * byte offsets) were also swept, all identical.
+ *
+ * Also worth keeping: pWork->pModel has to be re-read after the first walk
+ * (the `nTotal += pModel->nHairNum` line) or gcc parks it in a callee-saved
+ * register and the whole register assignment shifts.
+ *
+ * Rebuild the palette from the current static pose.
+ *
+ * The root matrix is saved off to the work area's 0x720 slot and the live
+ * one reset to identity, then the element walk is run twice: once over the
+ * elements/sub-elements/extras and once over the hair range.  Only if the
+ * hair range was non-empty is the palette then re-multiplied by the saved
+ * root.  Returns the element cursor the walk left behind. */
+JNT_ELEMENT *JNT_resetMatrix(JNT_WORK *pWork, JNT_ELEMENT *pElement)
+{
+    float aBase[16];
+    float aMul[16];
+    float aCur[16];
+    JNT_MODEL *pModel;
+    char *pRoot;
+    char *pDst;
+    JNT_QUAD *pSrc;
+    int nIndex;
+    int nTotal;
+    int bHair;
+    int i;
+
+    pRoot = (char *)pWork + 0x720;
+    pSrc = (JNT_QUAD *)pWork->pMatrix;
+    ((JNT_QUAD *)pRoot)[0] = pSrc[0];
+    ((JNT_QUAD *)pRoot)[1] = pSrc[1];
+    ((JNT_QUAD *)pRoot)[2] = pSrc[2];
+    ((JNT_QUAD *)pRoot)[3] = pSrc[3];
+    xglMatrixUnit4s(pWork->pMatrix);
+
+    pModel = pWork->pModel;
+    nIndex = pWork->nIndex;
+    nTotal = pModel->nElementNum + pModel->nSubNum + pModel->nExtraNum;
+    while (nIndex < nTotal) {
+        pElement = JNT_getStaticVal2(pWork, pElement);
+        nIndex = pWork->nIndex;
+    }
+    pModel = pWork->pModel;
+    nTotal += pModel->nHairNum;
+    bHair = nIndex < nTotal;
+    if (bHair) {
+        do {
+            pElement = JNT_getStaticVal2(pWork, pElement);
+        } while (pWork->nIndex < nTotal);
+    }
+    MATRIX_convert4(aBase, pRoot);
+    pWork->nIndex = nIndex;
+    if (bHair) {
+        do {
+            MATRIX_convert4(aCur, (char *)pWork->pMatrix + pWork->nIndex * 64);
+            xglMatrixMul(aMul, aBase, aCur);
+            pDst = (char *)pWork->pMatrix + pWork->nIndex * 64;
+            ((JNT_QUAD *)pDst)[0] = ((JNT_QUAD *)aMul)[0];
+            ((JNT_QUAD *)pDst)[1] = ((JNT_QUAD *)aMul)[1];
+            ((JNT_QUAD *)pDst)[2] = ((JNT_QUAD *)aMul)[2];
+            ((JNT_QUAD *)pDst)[3] = ((JNT_QUAD *)aMul)[3];
+            i = pWork->nIndex + 1;
+            pWork->nIndex = i;
+        } while (i < nTotal);
+    }
+    return pElement;
 }
