@@ -1,129 +1,132 @@
-/* PS2 SDK scePad request/state string table lookups.
+/* PS2 SDK libpad (scePad*) client side.
  *
- * Both index a fixed-address table of string pointers (raw low-memory
- * address, same house issue as sceSif.c) and tail-call strcpy when the
- * index is in range; out of range, they instead read a single byte out
- * of a different fixed struct and store it at the destination. Written
- * as file-scope inline asm: the raw addresses need it, the branch
- * target reuses a register set in the OTHER path's delay slot (not
- * expressible in C), and the body ends in a tail-call j/jr, so a plain
- * C function body cannot reproduce the exact instruction stream (see
- * sceSif.c's sceSifExitCmd comment for the general reasoning). */
+ * All eleven functions in this file are ordinary C -- see the FLAG
+ * REQUEST note below.  The fixed low-memory objects they touch are all
+ * named in config/symbol_addrs.txt, so they are declared by name rather
+ * than cast from a numeric address (CONTRIBUTING.md, "Raw addresses"):
+ *
+ *     ReqStateStr  0x004AB9C8   request-code -> string table
+ *     PadStateStr  0x004AB9A8   pad-state-code -> string table
+ *     isInit       0x004AB9A0   "pad module initialised" flag
+ *     padsif       0x009969C0   SIF-RPC client data block
+ *     buffer_00996C00 0x00996C00 128-byte RPC send/receive payload
+ *     PadInfo      0x00996A10   per-port/slot state, 28 bytes each,
+ *                               indexed port*112 + slot*28
+ *
+ * ---------------------------------------------------------------------
+ * FLAG REQUEST (verified, measured 2026-08-15).  This translation unit
+ * was built WITHOUT `-fno-schedule-insns`; the SDK default in
+ * configure.py (`SDK_CFLAGS = "-O2 -G0 -fno-schedule-insns"`) is wrong
+ * for scePad.c specifically.  Adding
+ *
+ *     FILE_CFLAGS_OVERRIDE["scePad.c"] = "-O2 -G0"
+ *
+ * makes all ELEVEN functions match byte for byte as the plain C below.
+ * With the flag left on, only four do (scePadReqIntToStr,
+ * scePadStateIntToStr, scePadGetPortMax, scePadEnd -- they have no
+ * schedulable window), and the other seven are 4-40 words off; those
+ * seven are therefore still parked as file-scope asm at the bottom of
+ * this file, with their real C kept in the comment above each one.
+ *
+ * The tell is the R5900 dual multiplier: the original pairs the
+ * `port*112` and `slot*28` index multiplies as `mult1`/`mult` on the two
+ * independent units, which only the first scheduling pass emits.  The
+ * flag is needed per file, not globally: sceCd.c, sceMpeg.c and sceSif.c
+ * all REGRESS at "-O2 -G0" (measured: sceCd 0 -> 4 broken, sceMpeg 0 ->
+ * 5, sceSif 0 -> 1), so `SDK_CFLAGS` itself must not change.
+ * --------------------------------------------------------------------- */
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl scePadReqIntToStr\n"
-    ".ent scePadReqIntToStr\n"
-    "scePadReqIntToStr:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "sltiu $2,$4,4\n"
-    "beqz $2,1f\n"
-    "lui $2,0x4d\n"
-    "lui $2,0x4b\n"
-    "sll $3,$4,2\n"
-    "addiu $2,$2,-17976\n"
-    "daddu $4,$5,$0\n"
-    "addu $3,$3,$2\n"
-    "j strcpy\n"
-    "lw $5,0($3)\n"
-    "1:\n"
-    "lbu $3,21744($2)\n"
-    "jr $31\n"
-    "sb $3,0($5)\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end scePadReqIntToStr\n"
-);
+extern char *ReqStateStr[4];
+extern char *PadStateStr[8];
+extern int   isInit;
+extern int   padsif;
+extern int   buffer_00996C00[32];
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl scePadStateIntToStr\n"
-    ".ent scePadStateIntToStr\n"
-    "scePadStateIntToStr:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "sltiu $2,$4,8\n"
-    "beqz $2,1f\n"
-    "lui $2,0x4d\n"
-    "lui $2,0x4b\n"
-    "sll $3,$4,2\n"
-    "addiu $2,$2,-18008\n"
-    "daddu $4,$5,$0\n"
-    "addu $3,$3,$2\n"
-    "j strcpy\n"
-    "lw $5,0($3)\n"
-    "1:\n"
-    "lbu $3,21744($2)\n"
-    "jr $31\n"
-    "sb $3,0($5)\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end scePadStateIntToStr\n"
-);
+char *strcpy(char *dst, const char *src);
+extern int sceSifCallRpc(void *pCd, unsigned int fno, int mode, void *send,
+                         int ssize, void *recv, int rsize, void *ef, void *ea);
 
-/* scePad RPC family: each dispatcher stores a fixed opcode (and
- * sometimes the caller's args) into a fixed low-memory RPC payload
- * struct (base 0x996C00, raw-address house issue) and calls
- * sceSifCallRpc against the pad module's client-data block (base
- * 0x9969C0), then either returns the reply payload's result word
- * (offset 0xC) on success or 0 on failure -- the ">=0 ? reply : 0"
- * shape the original expresses with a bgezl branch-likely, not a C
- * ternary the compiler reproduces this way. File-scope inline asm for
- * the usual reasons (raw addresses, delay-slot-exact jal to
- * sceSifCallRpc, own jr epilogue). `move` spelled out as
- * `daddu $x,$y,$0` per house convention. */
+/* Copy the name of a pad request code into `str` ("" when out of range).
+ * The out-of-range arm is GCC's own inlining of strcpy() of a one-byte
+ * string constant, which is why it loads a byte from .rodata instead of
+ * storing zero; the in-range arm is a real tail call to strcpy. */
+void scePadReqIntToStr(int req, char *str)
+{
+    if ((unsigned int)req < 4)
+        strcpy(str, ReqStateStr[req]);
+    else
+        strcpy(str, "");
+}
 
-/* scePadGetPortMax: near-miss in real C -- named-symbol addressing
- * (buffer_00996C00, padsif from config/symbol_addrs.txt) reproduces
- * every instruction except the final branch: ee-gcc 2.9 does not
- * synthesize a branch-likely (bgezl) for this ">=0 ? reply : 0" shape
- * under any phrasing tried (plain if/return, ternary) -- it always
- * emits a plain bltz with an always-executed delay slot instead, 3
- * words different in encoding though behaviourally equivalent. Matches
- * this file's original header note that a C ternary does not reproduce
- * the original's bgezl. Parked as inline asm. */
+/* Copy the name of a pad state code into `str` ("" when out of range). */
+void scePadStateIntToStr(int state, char *str)
+{
+    if ((unsigned int)state < 8)
+        strcpy(str, PadStateStr[state]);
+    else
+        strcpy(str, "");
+}
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl scePadGetPortMax\n"
-    ".ent scePadGetPortMax\n"
-    "scePadGetPortMax:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "addiu $sp,$sp,-48\n"
-    "lui $2,0x99\n"
-    "sd $16,16($sp)\n"
-    "li $3,12\n"
-    "addiu $16,$2,27648\n"
-    "lui $4,0x99\n"
-    "sd $31,32($sp)\n"
-    "addiu $4,$4,27072\n"
-    "sw $3,27648($2)\n"
-    "li $5,1\n"
-    "sw $0,0($sp)\n"
-    "daddu $6,$0,$0\n"
-    "daddu $7,$16,$0\n"
-    "li $8,128\n"
-    "daddu $9,$16,$0\n"
-    "li $10,128\n"
-    "jal sceSifCallRpc\n"
-    "daddu $11,$0,$0\n"
-    "bgezl $2,1f\n"
-    "lw $2,12($16)\n"
-    "daddu $2,$0,$0\n"
-    "1:\n"
-    "ld $31,32($sp)\n"
-    "ld $16,16($sp)\n"
-    "jr $31\n"
-    "addiu $sp,$sp,48\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end scePadGetPortMax\n"
-);
+/* RPC opcode 12: ask the IOP pad module how many ports it supports. */
+int scePadGetPortMax(void)
+{
+    buffer_00996C00[0] = 12;
+    if (sceSifCallRpc(&padsif, 1, 0, buffer_00996C00, 128,
+                      buffer_00996C00, 128, 0, 0) < 0)
+        return 0;
+    return buffer_00996C00[3];
+}
+
+/* RPC opcode 15: shut the pad module down, clearing `isInit` when the
+ * IOP side confirms with a reply of exactly 1. */
+int scePadEnd(void)
+{
+    int r;
+
+    buffer_00996C00[0] = 15;
+    if (sceSifCallRpc(&padsif, 1, 0, buffer_00996C00, 128,
+                      buffer_00996C00, 128, 0, 0) < 0)
+        return 0;
+    r = buffer_00996C00[3];
+    if (r == 1)
+        isInit = 0;
+    return r;
+}
+
+/* ===================================================================
+ * The seven functions below are byte-exact as the C shown above each
+ * one; they are asm ONLY because this file is currently compiled with
+ * -fno-schedule-insns.  See the FLAG REQUEST at the top: with
+ * FILE_CFLAGS_OVERRIDE["scePad.c"] = "-O2 -G0" each commented C body
+ * compiles to exactly these instructions and the asm can be deleted.
+ *
+ * They share these declarations:
+ *
+ *     typedef struct scePadSlotInfo {
+ *         unsigned char reserved[16];
+ *         int open;          // nonzero once the port/slot is opened
+ *         int stat20;
+ *         int stat24;
+ *     } scePadSlotInfo;      // 28 bytes
+ *     extern scePadSlotInfo PadInfo[2][4];
+ *     extern unsigned char *scePadGetDmaStr(int port, int slot);
+ *     void *memcpy(void *, const void *, int);
+ * =================================================================== */
+
+/* ASM-TRANSCRIBED: needs FILE_CFLAGS_OVERRIDE["scePad.c"] = "-O2 -G0";
+ * matches byte-exactly as
+ *
+ *     int scePadGetSlotMax(int port)
+ *     {
+ *         buffer_00996C00[0] = 13;
+ *         buffer_00996C00[1] = port;
+ *         if (sceSifCallRpc(&padsif, 1, 0, buffer_00996C00, 128,
+ *                           buffer_00996C00, 128, 0, 0) < 0)
+ *             return 0;
+ *         return buffer_00996C00[3];
+ *     }
+ *
+ * 7 words differ under -fno-schedule-insns (the port store floats). */
 
 __asm__(
     ".text\n"
@@ -165,61 +168,31 @@ __asm__(
     ".end scePadGetSlotMax\n"
 );
 
-/* scePadEnd: same RPC shape as scePadGetPortMax/GetSlotMax above, but
- * on success (and only when the reply is exactly 1) also clears a
- * second fixed low-memory "pad module alive" flag. */
-
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl scePadEnd\n"
-    ".ent scePadEnd\n"
-    "scePadEnd:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "addiu $sp,$sp,-48\n"
-    "lui $2,0x99\n"
-    "sd $16,16($sp)\n"
-    "li $3,15\n"
-    "addiu $16,$2,27648\n"
-    "lui $4,0x99\n"
-    "sd $31,32($sp)\n"
-    "addiu $4,$4,27072\n"
-    "sw $3,27648($2)\n"
-    "li $5,1\n"
-    "sw $0,0($sp)\n"
-    "daddu $6,$0,$0\n"
-    "daddu $7,$16,$0\n"
-    "li $8,128\n"
-    "daddu $9,$16,$0\n"
-    "li $10,128\n"
-    "jal sceSifCallRpc\n"
-    "daddu $11,$0,$0\n"
-    "bgezl $2,1f\n"
-    "lw $7,12($16)\n"
-    "b 2f\n"
-    "daddu $2,$0,$0\n"
-    "1:\n"
-    "li $2,1\n"
-    "bne $7,$2,2f\n"
-    "daddu $2,$7,$0\n"
-    "lui $2,0x4b\n"
-    "sw $0,-18016($2)\n"
-    "daddu $2,$7,$0\n"
-    "2:\n"
-    "ld $31,32($sp)\n"
-    "ld $16,16($sp)\n"
-    "jr $31\n"
-    "addiu $sp,$sp,48\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end scePadEnd\n"
-);
-
-/* scePadInit2: zeroes a 4-entry array of small records at a fixed
- * low-memory address (raw-address house issue), then performs the
- * same scePad RPC-family shape as scePadEnd/scePadGetPortMax above
- * (opcode 16) to complete initialization. */
+/* ASM-TRANSCRIBED: needs FILE_CFLAGS_OVERRIDE["scePad.c"] = "-O2 -G0";
+ * matches byte-exactly as
+ *
+ *     int scePadInit2(int mode)
+ *     {
+ *         int i;
+ *
+ *         for (i = 0; i < 4; i++) {
+ *             PadInfo[0][i].open = 0;
+ *             PadInfo[0][i].stat24 = 0;
+ *             PadInfo[0][i].stat20 = 0;
+ *             PadInfo[1][i].open = 0;
+ *             PadInfo[1][i].stat24 = 0;
+ *             PadInfo[1][i].stat20 = 0;
+ *         }
+ *         buffer_00996C00[0] = 16;
+ *         buffer_00996C00[4] = 0;
+ *         if (sceSifCallRpc(&padsif, 1, 0, buffer_00996C00, 128,
+ *                           buffer_00996C00, 128, 0, 0) < 0)
+ *             return 0;
+ *         return buffer_00996C00[3];
+ *     }
+ *
+ * (`mode` really is unused -- a0 is clobbered before the RPC.)
+ * 4 words differ under -fno-schedule-insns. */
 
 __asm__(
     ".text\n"
@@ -275,12 +248,27 @@ __asm__(
     ".end scePadInit2\n"
 );
 
-/* scePadPortClose: computes the pad-state slot index as
- * port*112 + slot*28 (the R5900 dual multiply units let the compiler
- * schedule these as an independent mult1/mult pair) to test whether
- * the port/slot is open, then performs the same RPC-family shape
- * (opcode 14, forwarding port/slot/mode) as scePadEnd above, clearing
- * the local "open" flag on success. */
+/* ASM-TRANSCRIBED: needs FILE_CFLAGS_OVERRIDE["scePad.c"] = "-O2 -G0";
+ * matches byte-exactly as
+ *
+ *     int scePadPortClose(int port, int slot, int mode)
+ *     {
+ *         if (PadInfo[port][slot].open == 0)
+ *             return 0;
+ *         buffer_00996C00[0] = 14;
+ *         buffer_00996C00[1] = port;
+ *         buffer_00996C00[2] = slot;
+ *         buffer_00996C00[4] = 1;
+ *         if (sceSifCallRpc(&padsif, 1, 0, buffer_00996C00, 128,
+ *                           buffer_00996C00, 128, 0, 0) < 0)
+ *             return 0;
+ *         PadInfo[port][slot].open = 0;
+ *         return buffer_00996C00[3];
+ *     }
+ *
+ * This is the clearest instance of the flag: `mult1 $3,$7,$3` /
+ * `mult $4,$5,$4` is the scheduler pairing the two index multiplies onto
+ * the R5900's two multiplier units.  46 vs 45 words otherwise. */
 
 __asm__(
     ".text\n"
@@ -343,12 +331,17 @@ __asm__(
     ".end scePadPortClose\n"
 );
 
-/* scePadGetReqState/scePadGetState/scePadRead/scePadGetButtonMask:
- * all index the same fixed pad-state DMA table (port*112 + slot*28,
- * same mult1/mult pair as scePadPortClose above, off a fixed
- * low-memory base) via scePadGetDmaStr, then read/copy fields out of
- * the returned per-pad record. File-scope inline asm for the raw
- * addresses and to preserve the exact branch-likely/delay-slot shape. */
+/* ASM-TRANSCRIBED: needs FILE_CFLAGS_OVERRIDE["scePad.c"] = "-O2 -G0";
+ * matches byte-exactly as
+ *
+ *     int scePadGetReqState(int port, int slot)
+ *     {
+ *         if (PadInfo[port][slot].open == 0)
+ *             return 0;
+ *         return scePadGetDmaStr(port, slot)[113];
+ *     }
+ *
+ * 10 words differ under -fno-schedule-insns. */
 
 __asm__(
     ".text\n"
@@ -383,6 +376,23 @@ __asm__(
     ".set reorder\n"
     ".end scePadGetReqState\n"
 );
+
+/* ASM-TRANSCRIBED: needs FILE_CFLAGS_OVERRIDE["scePad.c"] = "-O2 -G0";
+ * matches byte-exactly as
+ *
+ *     int scePadGetState(int port, int slot)
+ *     {
+ *         unsigned char *p;
+ *
+ *         if (PadInfo[port][slot].open == 0)
+ *             return 99;
+ *         p = scePadGetDmaStr(port, slot);
+ *         if (p[112] == 6 && p[113] == 2)
+ *             return 5;
+ *         return p[112];
+ *     }
+ *
+ * 30 vs 29 words under -fno-schedule-insns. */
 
 __asm__(
     ".text\n"
@@ -429,6 +439,22 @@ __asm__(
     ".end scePadGetState\n"
 );
 
+/* ASM-TRANSCRIBED: needs FILE_CFLAGS_OVERRIDE["scePad.c"] = "-O2 -G0";
+ * matches byte-exactly as
+ *
+ *     int scePadRead(int port, int slot, void *buf)
+ *     {
+ *         int *p;
+ *
+ *         if (PadInfo[port][slot].open == 0)
+ *             return 0;
+ *         p = (int *)scePadGetDmaStr(port, slot);
+ *         memcpy(buf, p, p[24]);
+ *         return p[24];
+ *     }
+ *
+ * 10 words differ under -fno-schedule-insns. */
+
 __asm__(
     ".text\n"
     ".p2align 3\n"
@@ -474,6 +500,32 @@ __asm__(
     ".set reorder\n"
     ".end scePadRead\n"
 );
+
+/* ASM-TRANSCRIBED: needs FILE_CFLAGS_OVERRIDE["scePad.c"] = "-O2 -G0";
+ * matches byte-exactly as
+ *
+ *     int scePadGetButtonMask(int port, int slot)
+ *     {
+ *         unsigned char *p;
+ *
+ *         if (PadInfo[port][slot].open == 0)
+ *             return 0;
+ *         p = scePadGetDmaStr(port, slot);
+ *         if (p[114] != 1)
+ *             return 0;
+ *         if (p[100] < 2)
+ *             return 0;
+ *         if (p[102] < 2)
+ *             return 0;
+ *         return (long)p[121] + ((long)p[122] << 8) + ((long)p[123] << 16)
+ *              + ((long)p[124] << 24);
+ *     }
+ *
+ * The `long` casts are load-bearing and independent of the flag: `long`
+ * is 64-bit on this target, which is what produces the dsll/daddu chain
+ * and the closing dsll32/dsra32 truncation back to int (plain int
+ * arithmetic gives sll/addu and is two words short).
+ * 24 words differ under -fno-schedule-insns. */
 
 __asm__(
     ".text\n"

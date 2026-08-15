@@ -69,7 +69,10 @@ void *sceSifGetDataTable(void)
  * loader/heap primitives (same house pattern as sceFs.c). */
 
 extern int sceSifFreeSysMemory(int a0, int a1);
-extern int _sceSifLoadElfPart(int a0, int a1, int a2, int a3);
+/* (path, section name, destination, mode) -- the section name is what
+ * sceSifLoadElf below hard-codes to "all". */
+extern int _sceSifLoadElfPart(const char *path, const char *sec, void *dest,
+                              int mode);
 extern int _sceSifLoadModuleBuffer(int a0, int a1, int a2, int a3);
 extern int _sceSifLoadModule(int a0, int a1, int a2, int a3, int a4);
 
@@ -78,9 +81,9 @@ int sceSifFreeIopHeap(int a0, int a1)
     return sceSifFreeSysMemory(a0, a1);
 }
 
-int sceSifLoadElfPart(int a0, int a1, int a2)
+int sceSifLoadElfPart(const char *path, const char *sec, void *dest)
 {
-    return _sceSifLoadElfPart(a0, a1, a2, 1);
+    return _sceSifLoadElfPart(path, sec, dest, 1);
 }
 
 int sceSifLoadModuleBuffer(int a0, int a1, int a2)
@@ -107,99 +110,59 @@ int sceSifLoadModule(int a0, int a1, int a2)
     return _sceSifLoadModule(a0, a1, a2, (int)&local, 0);
 }
 
-/* sceSifExitCmd: tears down the SIF cmd layer -- disables the DMA
+/* sceSifExitCmd: tears down the SIF cmd layer -- disables the SIF0 DMA
  * channel, removes its handler, and clears the init-check flag.
  * `sif0_handleid` and `_cmd_init_check` are named fixed addresses from
- * config/symbol_addrs.txt (defeating the lui+ori/lui+addiu problem: a
- * plain `return`-less fall-off-the-end C body also gets GCC's own
- * synthesized epilogue here, matching the original's ld ra/jr ra), but
- * the allocator picks v0 for both address temps where the original
- * used v1 throughout -- a pure tie-break (PIN doesn't stick on a plain
- * dereference; see the sceCdCallback comment in sceCd.c for the same
- * wall). Parked as inline asm pending a lever for that tie-break. */
+ * config/symbol_addrs.txt.
+ *
+ * The v0/v1 address-temp difference that had this parked as assembly
+ * was not an allocator tie-break: DisableDmac() and RemoveDmacHandler()
+ * return the previous state / handler id, so with their true `int`
+ * return type the call result occupies v0 and both address temps move
+ * to v1 by themselves -- the same wrong-prototype cause as
+ * sceCdCallback in sceCd.c. No PIN or LAUNDER needed. */
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl sceSifExitCmd\n"
-    ".ent sceSifExitCmd\n"
-    "sceSifExitCmd:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "addiu $sp,$sp,-16\n"
-    "sd $31,0($sp)\n"
-    "jal DisableDmac\n"
-    "li $4,5\n"
-    "lui $3,0x99\n"
-    "li $4,5\n"
-    "jal RemoveDmacHandler\n"
-    "lw $5,0x18d4($3)\n"
-    "lui $3,0x4b\n"
-    "ld $31,0($sp)\n"
-    "sw $0,-23888($3)\n"
-    "jr $31\n"
-    "addiu $sp,$sp,16\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end sceSifExitCmd\n"
-);
+extern int DisableDmac(int channel);
+extern int RemoveDmacHandler(int channel, int handlerid);
+extern int sif0_handleid;
+extern int _cmd_init_check;
 
-/* sceSifIsAliveIop: the boolean cast of (x & 0x10000) is a single-bit
- * test, and GCC's own idiom substitution turns that into a shift+andi
- * (sra/andi) rather than the and+sltu the original uses, regardless of
- * how the C is phrased -- so this is inline asm (file-scope, see
- * sceSifExitCmd above, since it still needs to call through sceSifGetReg
- * with a controlled delay slot). */
+void sceSifExitCmd(void)
+{
+    DisableDmac(5);
+    RemoveDmacHandler(5, sif0_handleid);
+    _cmd_init_check = 0;
+}
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl sceSifIsAliveIop\n"
-    ".ent sceSifIsAliveIop\n"
-    "sceSifIsAliveIop:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "addiu $sp,$sp,-16\n"
-    "sd $31,0($sp)\n"
-    "jal sceSifGetReg\n"
-    "li $4,4\n"
-    "lui $3,0x1\n"
-    "ld $31,0($sp)\n"
-    "and $2,$2,$3\n"
-    "sltu $2,$0,$2\n"
-    "jr $31\n"
-    "addiu $sp,$sp,16\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end sceSifIsAliveIop\n"
-);
+/* sceSifIsAliveIop: bit 0x10000 of SIF register 4 is the "IOP is up"
+ * flag.
+ *
+ * The phrasing is load-bearing. Written as a boolean expression --
+ * `return (x & 0x10000) != 0;`, `!!(...)`, or any cast of it -- gcc
+ * folds the single-bit test into sra+andi (2 words) and the function is
+ * one word short. Written as an explicit branch it keeps the mask in a
+ * register (`lui`+`and`) and materialises the boolean with sltu, which
+ * is what the original does. `x & 0x10000; return x > 0;` also matches;
+ * the branch form is kept because it is the clearer source. */
 
-/* sceSifLoadElf: the fixed 0x4D4BE8 constant hits the same lui+ori vs
- * lui+addiu issue as the raw-address accessors, so this is inline asm
- * too (file-scope, for the same jal-delay-slot-control reason). */
+int sceSifIsAliveIop(void)
+{
+    if (sceSifGetReg(4) & 0x10000)
+        return 1;
+    return 0;
+}
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl sceSifLoadElf\n"
-    ".ent sceSifLoadElf\n"
-    "sceSifLoadElf:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "daddu $6,$5,$0\n"
-    "addiu $sp,$sp,-16\n"
-    "lui $5,0x4d\n"
-    "sd $31,0($sp)\n"
-    "addiu $5,$5,19432\n"
-    "jal _sceSifLoadElfPart\n"
-    "li $7,1\n"
-    "ld $31,0($sp)\n"
-    "jr $31\n"
-    "addiu $sp,$sp,16\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end sceSifLoadElf\n"
-);
+/* sceSifLoadElf: load every section of an ELF from the IOP-side loader.
+ * The "fixed unnamed 0x4D4BE8 constant" that had this parked as
+ * assembly is just a string literal: asm/data/cod/2BE280.rodata.s
+ * labels 0x004D4BE8 as `.asciz "all"`, the section-name argument
+ * _sceSifLoadElfPart takes (compare sceSifLoadElfPart above, which
+ * passes the caller's own section name through). */
+
+int sceSifLoadElf(const char *path, void *dest)
+{
+    return _sceSifLoadElfPart(path, "all", dest, 1);
+}
 
 /* sceSifRemoveCmdHandler / sceSifAddCmdHandler: pick one of two SIF
  * command-table pointers out of the fixed low-memory _data_table block
