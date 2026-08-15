@@ -1,6 +1,7 @@
 INCLUDE "config/undefined_funcs_auto.txt";
 INCLUDE "config/undefined_syms_auto.txt";
 INCLUDE "config/symbol_addrs.txt";
+INCLUDE "config/linker_script_extra.ld";
 
 SECTIONS
 {
@@ -83,7 +84,14 @@ SECTIONS
     cod_ROM_END = __romPos;
     cod_VRAM_END = .;
 
-    ov02_ROM_START = __romPos;
+    /* PINNED. The retail ELF pads the loaded cod image (which ends at
+     * ROM 0x2DC4E0) out to 0x2DD000 before the ov02 overlay, so ov02's load
+     * address is 0x2DD000, not the running __romPos. Splat's logical ROM
+     * image (config/SLUS_204.69.rom) uses the same 0x2DD000 offset. Letting
+     * __romPos decide instead shifts the whole overlay 0xB20 bytes earlier
+     * in the objcopy -O binary image and makes tools/verify_elf.py report
+     * every ov02 byte as a mismatch. */
+    ov02_ROM_START = 0x2DD000;
     ov02_VRAM = ADDR(.ov02);
     .ov02 0xA00000 : AT(ov02_ROM_START)
     {
@@ -95,22 +103,28 @@ SECTIONS
         ov02_TEXT_SIZE = ABSOLUTE(ov02_TEXT_END - ov02_TEXT_START);
         ov02_DATA_START = .;
         build/asm/ov02/2DD000.o(.data*);
-        . = ALIGN(., 16);
+        build/asm/data/ov02/2EC680.data.o(.data*);
+        /* No `. = ALIGN(., 16)` here, unlike every other segment: the retail
+         * ov02 section is 0x138EC bytes and ends 4-byte aligned. Padding to
+         * 16 makes the objcopy -O binary image 4 bytes longer than
+         * config/SLUS_204.69.rom. ov02 has no rodata/lit4/sdata, so nothing
+         * downstream depends on this alignment. */
         ov02_DATA_END = .;
         ov02_DATA_SIZE = ABSOLUTE(ov02_DATA_END - ov02_DATA_START);
+        /* These three are empty in ov02 and their ALIGNs are deliberately
+         * omitted for the same reason as above -- an ALIGN still advances
+         * the location counter even when the input section is empty, which
+         * is what padded the image past the retail 0x138EC. */
         ov02_RODATA_START = .;
         build/asm/ov02/2DD000.o(.rodata*);
-        . = ALIGN(., 16);
         ov02_RODATA_END = .;
         ov02_RODATA_SIZE = ABSOLUTE(ov02_RODATA_END - ov02_RODATA_START);
         ov02_LIT4_START = .;
         build/asm/ov02/2DD000.o(.lit4*);
-        . = ALIGN(., 16);
         ov02_LIT4_END = .;
         ov02_LIT4_SIZE = ABSOLUTE(ov02_LIT4_END - ov02_LIT4_START);
         ov02_SDATA_START = .;
         build/asm/ov02/2DD000.o(.sdata*);
-        . = ALIGN(., 16);
         ov02_SDATA_END = .;
         ov02_SDATA_SIZE = ABSOLUTE(ov02_SDATA_END - ov02_SDATA_START);
     }

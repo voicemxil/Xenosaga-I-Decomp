@@ -179,6 +179,10 @@ For C-compiled code, the assembler uses `-mabi=eabi` which natively supports 64-
 
 Splat's auto-generated linker script places sections sequentially, but minor size differences from alignment cause downstream sections to shift, breaking GP-relative relocations. The pinned linker script forces each section to its exact original virtual address.
 
+The build links against `config/SLUS_204.69.pinned.ld` **directly** — it is not copied over Splat's generated `config/SLUS_204.69.ld` any more, so a `splat split` that skipped `tools/post_split.sh` can no longer silently downgrade the link. The pinned script also `INCLUDE`s the symbol-definition files (`undefined_funcs_auto.txt`, `undefined_syms_auto.txt`, `symbol_addrs.txt`, `linker_script_extra.ld`); without them every hardware address and unextracted function is an undefined reference. `LDFLAGS` must never regain `--noinhibit-exec`: it makes `ld` emit output despite a failed link, which hid exactly that breakage for months.
+
+Whole-image check: `ninja check` (or `python3 tools/verify_elf.py`) flattens the linked ELF and diffs it against `config/SLUS_204.69.rom`. It currently matches byte for byte. Full details in [docs/LINKING.md](docs/LINKING.md).
+
 ### Symbol Extraction
 
 `tools/extract_symbols.py` reads the original ELF's `.symtab` via `nm` and produces `symbol_addrs.txt`. It filters compiler noise (`$L` labels, hardware labels), deduplicates by address (preferring global over local), and disambiguates static functions with identical names by appending the address.

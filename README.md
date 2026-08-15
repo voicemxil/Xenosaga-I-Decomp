@@ -8,6 +8,8 @@ A work-in-progress decompilation of **Xenosaga Episode I** (PS2).
 | Reloaded | `SLPS_290.05` | — | Planned |
 <!--progress-end-->
 The project has a **byte-matching build** of the full NTSC-U executable, with 7,758 named symbols extracted from the original ELF. Functions are being rewritten in C and verified against the original binary.
+
+`ninja check` proves the claim end to end: the linked ELF, flattened to a raw image, is byte-identical to the retail executable image — 3,082,476 / 3,082,476 bytes, SHA-1 `ba1132845398d91cd9a921e92965eb51d915ec8b`. See [docs/LINKING.md](docs/LINKING.md).
 To set up the repository, see [SETUP.md](SETUP.md).
 For information on how the project works and how to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Project Structure

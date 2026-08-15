@@ -27,7 +27,7 @@ Everything else is installed automatically by `setup.sh`, including:
 After running `setup.sh`, place the original ELF in the `elf/` directory and run:
 ```bash
 source venv/bin/activate
-mips64r5900el-ps2-elf-objcopy -O binary --gap-fill=0x00 elf/SLUS_204.69 config/SLUS_204.69.rom
+python3 tools/verify_elf.py --make-rom          # build config/SLUS_204.69.rom
 python3 -m splat split config/SLUS_204.69.yaml
 bash tools/post_split.sh
 python3 configure.py
@@ -36,11 +36,25 @@ ninja
 
 The built ELF will be at `build/SLUS_204.69.elf`.
 
+> **Do not** use `objcopy -O binary` on `elf/SLUS_204.69` to make
+> `config/SLUS_204.69.rom` (earlier revisions of this file said to). The retail
+> ov02 LOAD segment has PhysAddr `0xA5B8F8`, so `objcopy` leaves a ~5.7 MB hole
+> and emits an 8.4 MB file. The reference image is the contiguous slice
+> `elf/SLUS_204.69[0x1000:0x2F18EC]`, which is what `--make-rom` writes.
+
 ## Verifying the Build
 
-To verify decompiled functions match:
+Two independent checks — see [docs/LINKING.md](docs/LINKING.md).
+
+Per-function: does the decompiled C emit the original instructions?
 ```bash
 python3 tools/verify.py
+```
+
+Whole image: is the linked executable byte-identical to the retail one?
+```bash
+ninja check                       # strict; any difference fails
+python3 tools/verify_elf.py       # summary + first mismatch ranges
 ```
 
 To check overall progress:
