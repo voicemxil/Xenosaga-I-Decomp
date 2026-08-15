@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* VIF1 packet builder structure (matches PS2 assembly layout) */
 typedef struct Vif1Packet
 {
@@ -135,18 +137,24 @@ void sceVif1PkAddUpkData128(Vif1Packet *pkt, u128 value)
        an $a1 preference) for 14.  No source-level lever found for the last
        rotation. */
     U128 u;
-    unsigned int *dest = pkt->current;
-    long lo, hi;
+    PIN(unsigned int *dest, "$2");
+    PIN(long lo, "$3");
+    long hi;
+    PIN(int l0, "$6");
+    PIN(unsigned int *end, "$6");
     int h1;
 
     u.q = value;
     hi = u.d[1];
     h1 = (int)(hi >> 32);
     lo = u.d[0];
-    dest[0] = (int)lo;
+    PASSTHRU(dest, pkt->current);
+    PASSTHRU(l0, (int)lo);
+    dest[0] = l0;
     dest++;
     dest[0] = (int)(lo >> 32);
-    pkt->current = dest + 3;
+    PASSTHRU(end, dest + 3);
+    pkt->current = end;
     dest[1] = (int)hi;
     dest[2] = h1;
 }

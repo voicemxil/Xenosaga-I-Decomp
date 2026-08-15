@@ -35,21 +35,19 @@ float UnduGet(float x, float z)
  * lever (temp + LAUNDER at the load site?) rather than a source reorder. */
 void UnduParamInit(UNDU_PARAM *param)
 {
-    param->field_0D = 0x10;
-    param->field_38 = 1;
-    param->field_10 = 1.0f;
-    param->field_14 = -1000.0f;
     param->field_1C = 0x70000000;
     param->field_00 = 0;
+    param->field_10 = 1.0f;
     param->field_04 = 0;
     param->field_08 = 0;
+    param->field_14 = -1000.0f;
+    param->field_30 = 0;
+    param->field_0D = 0x10;
     param->field_0A = 0;
     param->field_0C = 0x10;
     param->field_18 = 0;
     param->field_20 = 0;
-    /* field_28 is left uninitialized by the original -- only field_20 and
-       field_30 get zeroed here. */
-    param->field_30 = 0;
+    param->field_38 = 1;
 }
 
 /* TODO: near-match (LENGTH) - the direct-index and linear-id lookup logic
