@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Normal-map model rendering global state accessors */
 
 typedef int TI __attribute__((mode(TI)));
@@ -1591,7 +1593,7 @@ int nmlModelLexDataCheck(void *pData)
         if ((*(long *)p & 0xFFFFFF) != 0x78656C) {
             goto out;
         }
-        __asm__ __volatile__("" : "+r"(nRet));
+        LAUNDER_V(nRet);
         if (p[63] != 0 && *(int *)(p + 0x6C) == 0) {
             n = *(int *)(p + 0x44);
             nOfs = *(int *)((int)p + n * 4 + 0xAC);

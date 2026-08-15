@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* 4x4 matrix helpers - EE-side quadword math plus the VU0 matrix-stack stubs.
  *
  * The xglMatrixStack* entry points are all VU0 macro-mode: they poke a
@@ -419,7 +421,7 @@ void xglMatrixRotX(XGL_MATRIX *pDst, XGL_MATRIX *pSrc, float fAngle)
     int nSin;
     int nCos;
     float aSC[4];
-    register float *pSC __asm__("$7") = aSC;
+    PIN(float *pSC, "$7") = aSC;
     float fSin;
     float fCos;
 
@@ -467,7 +469,7 @@ void xglMatrixRotY(XGL_MATRIX *pDst, XGL_MATRIX *pSrc, float fAngle)
     int nSin;
     int nCos;
     float aSC[4];
-    register float *pSC __asm__("$7") = aSC;
+    PIN(float *pSC, "$7") = aSC;
     float fSin;
     float fCos;
 
@@ -515,7 +517,7 @@ void xglMatrixRotZ(XGL_MATRIX *pDst, XGL_MATRIX *pSrc, float fAngle)
     int nSin;
     int nCos;
     float aSC[4];
-    register float *pSC __asm__("$7") = aSC;
+    PIN(float *pSC, "$7") = aSC;
     float fSin;
     float fCos;
 

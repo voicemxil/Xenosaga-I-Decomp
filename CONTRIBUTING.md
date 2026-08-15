@@ -82,6 +82,35 @@ Two safe habits:
   skew between the host (where edits land) and the container (where the
   build runs), which can otherwise make ninja skip a changed file.
 
+## Assembly policy (portability)
+
+Two kinds of assembly appear here and they have opposite futures. See
+`include/matching.h`; `tools/progress.py` reports a running count of both.
+
+**Steering constructs** — `PIN`, `LAUNDER`, `LAUNDER_V`, `PASSTHRU`,
+`SCHED_NOP`. These emit no machine code. They exist only to push
+ee-gcc's allocator and scheduler into the shape the original build
+produced, and they carry no semantics: build without `MATCHING` defined
+and they all disappear, leaving portable C that means the same thing.
+Use the macros, never raw `__asm__("" : "+r"(x))`, and put a one-line
+comment on each saying what the compiler did wrong. Note `LAUNDER` and
+`LAUNDER_V` are **not** interchangeable — dropping the `volatile`
+changes the schedule (this cost one function a regression when the
+macro layer was introduced).
+
+**Hardware assembly** — VU0 macro-mode blocks, MMI/quadword moves,
+unaligned `ldl/ldr`, kernel syscall stubs. The original really was
+assembly here, so reproducing it as assembly is *more* faithful than
+inventing C. It cannot be defined away; a port must supply an
+equivalent. Wrap new sites in `PS2_ASM(...)` so they stay greppable and
+counted.
+
+**When assembly is standing in for logic you cannot express in C at
+all** — for example writing a whole function body in `__asm__` because
+no C phrasing reproduced an addressing mode — that is not a match worth
+keeping. It hides something we do not understand yet. Leave the
+function as a documented near-miss instead.
+
 ## Conventions
 
 ### Source files

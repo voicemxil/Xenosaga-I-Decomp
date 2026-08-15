@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Font rendering / packet-flush subsystem */
 
 typedef unsigned char u_char;
@@ -64,21 +66,21 @@ extern u_char D_004DC2A9[];   /* SP-code-8 bit sizes live at -9 from here */
 int xglFontGetKanjiClutUV(int nCode, u_int *pClut)
 {
     u_int c;
-    register u_int lo __asm__("$6");
-    register u_int hi __asm__("$4");
+    PIN(u_int lo, "$6");
+    PIN(u_int hi, "$4");
     u_short idx;
     int t;
-    register int b173 __asm__("$3");
-    register int b176 __asm__("$7");
+    PIN(int b173, "$3");
+    PIN(int b176, "$7");
     u_int u;
     u_int page;
 
-    __asm__("" : "=r"(c) : "0"(nCode & 0xFFFF));
-    __asm__("" : "=r"(lo) : "0"(c & 0xFF));
-    __asm__("" : "=r"(hi) : "0"(c >> 8));
-    __asm__("" : "=r"(b173) : "0"(lo < 173));
-    __asm__("" : "=r"(b176) : "0"(lo < 176));
-    __asm__("" : "=r"(t) : "0"(hi + lo * 94 - 161));
+    PASSTHRU(c, nCode & 0xFFFF);
+    PASSTHRU(lo, c & 0xFF);
+    PASSTHRU(hi, c >> 8);
+    PASSTHRU(b173, lo < 173);
+    PASSTHRU(b176, lo < 176);
+    PASSTHRU(t, hi + lo * 94 - 161);
     idx = t;
 
     if (b173) {
@@ -313,12 +315,12 @@ void xglFontInitial(void)
 int xglFontGetProportionalSize(int nCode)
 {
     u_int nSize;
-    register u_int nLow __asm__("$3");
+    PIN(u_int nLow, "$3");
     int n;
 
     __asm__("" : "=r"(nSize)
         : "0"((*(u_short *)(FS.nLoadAddr + 0x78040 + nCode * 2) + 255) & 0xFFFF));
-    __asm__("" : "=r"(nLow) : "0"(nSize & 0xFF));
+    PASSTHRU(nLow, nSize & 0xFF);
     if (nLow == 255) {
         nSize = FS.nPropBase << 8;
     }

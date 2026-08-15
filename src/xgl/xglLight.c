@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Directional/parallel light rig used by the xgl engine's shading pipeline */
 
 typedef int TI __attribute__((mode(TI)));
@@ -48,8 +50,8 @@ void xglLightIntensityAmbient(void *pLight, void *pSrc)
 /* Set one of a light's up-to-3 parallel colors (no-op past slot 2) */
 void xglLightIntensityParallel(void *pLight, unsigned int nNo, void *pSrc)
 {
-    register char *pBase __asm__("$2") = (char *)(nNo * 0x20 + (unsigned int)pLight);
-    register char *pDst __asm__("$3") = pBase + 0x10;
+    PIN(char *pBase, "$2") = (char *)(nNo * 0x20 + (unsigned int)pLight);
+    PIN(char *pDst, "$3") = pBase + 0x10;
 
     if (nNo < 3) {
         *(TI *)pDst = *(TI *)pSrc;

@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* tskMenuModel - menu 3D-model viewer task drivers (unit + weapon) */
 
 typedef union QUAD {
@@ -152,7 +154,7 @@ extern void *memset(void *, int, unsigned int);
 void tskMenuModelTaskMain(MENUMODELTSK *t)
 {
     MMACT *act = t->pAct;
-    register int stat __asm__("$5");
+    PIN(int stat, "$5");
     MMSTATE *q;
 
     stat = t->nLoadStat;

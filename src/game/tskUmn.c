@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* tskUmn - ov02 (Umn overlay) menu screen tasks: mail / database /
    simulation / plugin windows.
 
@@ -442,7 +444,7 @@ void tskUmnDataBasePas(TSK_TASK *pTask, UMN_PAS_L *w)
         w->win.nState = 3;
         {
             EMSGWORK *m;
-            register unsigned char nOne __asm__("$4");
+            PIN(unsigned char nOne, "$4");
             short nMsgX = 288;
             short nMsgY = 11;
 
@@ -453,14 +455,14 @@ void tskUmnDataBasePas(TSK_TASK *pTask, UMN_PAS_L *w)
             m->emsg.nX = nMsgX;
             m->emsg.nY = nMsgY;
             w->msgwork.emsg.nColor = w->nColor + 2;
-            __asm__("" : "+r"(nOne));
+            LAUNDER(nOne);
             w->bReady = nOne;
         }
         break;
     case 2:
         nTargetX = -16;
         {
-            register short nFill __asm__("$3");
+            PIN(short nFill, "$3");
 
             nFill = 288;
             for (i = 3; i >= 0; i--) {
@@ -564,8 +566,8 @@ void tskUmnSimulationInfo(TSK_TASK *pTask, UMN_INFO *w)
             if (UmnWork.u.nSimulationScript >= 0) {
                 {
                     char *pLit = "\xa5\xb7\xa5\xca\xa5\xea\xa5\xaa\x20";
-                    register long long nHead __asm__("$5");
-                    register unsigned short nTail __asm__("$3");
+                    PIN(long long nHead, "$5");
+                    PIN(unsigned short nTail, "$3");
 
                     nTail = *(unsigned short *)(pLit + 8);
                     nHead = *(long long *)pLit;

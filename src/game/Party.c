@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Party roster management - bitmask/status accessors around a single global PARTY_DATA record */
 
 typedef struct {
@@ -69,7 +71,7 @@ void PartyFriendOff(int nNo)
 /* Ask whether a character is currently an active friend */
 int PartyFriendCheck(int nNo)
 {
-    register PARTY_DATA *pData __asm__("$6");
+    PIN(PARTY_DATA *pData, "$6");
     unsigned int nShift;
     unsigned int nMask;
 
@@ -111,7 +113,7 @@ void PartyLockPartyOff(int nNo)
 /* Ask whether a character's party lock is set */
 int PartyLockPartyCheck(int nNo)
 {
-    register PARTY_DATA *pData __asm__("$6");
+    PIN(PARTY_DATA *pData, "$6");
     unsigned int nShift;
     unsigned int nMask;
 
@@ -153,7 +155,7 @@ void PartyOutFriendOff(int nNo)
 /* Ask whether a character's out-of-party friend flag is set */
 int PartyOutFriendCheck(int nNo)
 {
-    register PARTY_DATA *pData __asm__("$6");
+    PIN(PARTY_DATA *pData, "$6");
     unsigned int nShift;
     unsigned int nMask;
 

@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* DMA transfer helpers for the xgl engine */
 
 typedef unsigned int u_int;
@@ -153,11 +155,11 @@ void xglDmaBufferRequest(XGLDMABUFF *pBuff, u_int nCh)
 void xglDmaMFIFOSetup(u_int nAddr, u_int nSize, int nCh)
 {
     XGLDMACHAN *pChan;
-    register u_int nCtrl __asm__("$2");
-    register vu_int *pE040 __asm__("$3");
-    register vu_int *pE000 __asm__("$5");
-    register vu_int *pE050 __asm__("$6");
-    register u_int nChcr __asm__("$9");
+    PIN(u_int nCtrl, "$2");
+    PIN(vu_int *pE040, "$3");
+    PIN(vu_int *pE000, "$5");
+    PIN(vu_int *pE050, "$6");
+    PIN(u_int nChcr, "$9");
 
     if (nCh < 3) {
         pChan = tbl_00490D60[nCh];
@@ -190,18 +192,18 @@ void xglDmaMFIFOSetup(u_int nAddr, u_int nSize, int nCh)
 u_int xglDmaMFIFOKick(u_int nTadr, u_int nQwc)
 {
     u_int nSize;
-    register u_int nMask __asm__("$8");
+    PIN(u_int nMask, "$8");
     u_int nSpace;
-    register XGLDMACHAN *pChan __asm__("$9");
+    PIN(XGLDMACHAN *pChan, "$9");
 
     nSize = *(vu_int *)0x1000E040 + 0x10;
     while (*(vu_int *)0x1000D000 & 0x100) {
     }
     *(vu_int *)0x1000D080 = nTadr & 0x3FF0;
-    __asm__("" : "=r"(pChan) : "0"(mfifo_drain));
+    PASSTHRU(pChan, mfifo_drain);
     *(vu_int *)0x1000D020 = nQwc;
     nQwc <<= 4;
-    __asm__("" : "=r"(nMask) : "0"(nSize - 0x10));
+    PASSTHRU(nMask, nSize - 0x10);
     do {
         nSpace = (pChan->tadr - *(vu_int *)0x1000D010 + nSize) & nMask;
         nSpace = nSpace ? nSpace : nSize;
@@ -214,9 +216,9 @@ u_int xglDmaMFIFOKick(u_int nTadr, u_int nQwc)
 /* TODO: Find the natural source shape for this matched scheduling scaffold. */
 void xglDmaMFIFOLeave(void)
 {
-    register u_int *pCtrl __asm__("$3");
-    register u_int nCtrl __asm__("$2");
-    register int nMask __asm__("$4");
+    PIN(u_int *pCtrl, "$3");
+    PIN(u_int nCtrl, "$2");
+    PIN(int nMask, "$4");
     vu_int *pWait;
 
     sceGsSyncPath(0, 0);

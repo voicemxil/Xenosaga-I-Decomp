@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* CD/DVD access helpers for the xgl engine */
 
 typedef unsigned int u_int;
@@ -169,13 +171,13 @@ int sceClose(int nFd);
  * keep the lbu above the status lb. */
 void xglCdReadCancel(void)
 {
-    register XGLCDWORK *pLW __asm__("$5");
-    register XGLCDWORK *pFd __asm__("$16");
-    register XGLCDWORK *pEnd __asm__("$2");
-    register int nTmp __asm__("$2");
+    PIN(XGLCDWORK *pLW, "$5");
+    PIN(XGLCDWORK *pFd, "$16");
+    PIN(XGLCDWORK *pEnd, "$2");
+    PIN(int nTmp, "$2");
     int n;
 
-    __asm__("" : "=r"(pLW) : "0"(&LW));
+    PASSTHRU(pLW, &LW);
     __asm__("" : "=r"(nTmp) : "0"(pLW->nUnk3E) : "memory");
     pLW->nUnk3F = nTmp;
     if (pLW->nStatus == 1) {
@@ -209,14 +211,14 @@ do_break:
     goto done;
 
 do_close:
-    __asm__("" : "=r"(pFd) : "0"(&LW));
+    PASSTHRU(pFd, &LW);
     if (pFd->nFd >= 0) {
         sceClose(pFd->nFd);
         pFd->nFd = -1;
     }
 
 done:
-    __asm__("" : "=r"(pEnd) : "0"(&LW));
+    PASSTHRU(pEnd, &LW);
     pEnd->nStatus = 0;
 }
 
@@ -244,16 +246,16 @@ void xglCdLoadOverlay(int nNo)
 {
     char aData[16];
     char aBuf[256];
-    register u_char *pSrc __asm__("$5");
+    PIN(u_char *pSrc, "$5");
     char *pDst;
-    register int c __asm__("$2");
+    PIN(int c, "$2");
 
     if (nNo != loaded_overlay) {
         loaded_overlay = nNo;
         pSrc = (u_char *)D_00491708;
         c = *pSrc;
         pDst = aBuf;
-        __asm__("" : "=r"(c) : "0"(c));
+        PASSTHRU(c, c);
         for (;;) {
             *pDst = c;
             if ((c << 24) == 0) {
@@ -262,7 +264,7 @@ void xglCdLoadOverlay(int nNo)
             pSrc++;
             pDst++;
             c = *pSrc;
-            __asm__("" : "=r"(c) : "0"(c));
+            PASSTHRU(c, c);
         }
         pDst[1] = 'V';
         pDst[0] = 'O';
@@ -272,7 +274,7 @@ void xglCdLoadOverlay(int nNo)
         pSrc = (u_char *)arcfileaddr;
         for (;;) {
             c = *pSrc;
-            __asm__("" : "=r"(c) : "0"(c));
+            PASSTHRU(c, c);
             *pDst = c;
             if ((c << 24) == 0) {
                 break;
@@ -331,13 +333,13 @@ int xglCdStreamReadRingCore(void *pStr)
  * ring core and spin until the read cursor catches up */
 int xglCdStreamReadRing(XGLCDSTREAM *pStr, int nBytes)
 {
-    register int nBusy __asm__("$2");
+    PIN(int nBusy, "$2");
 
     nBytes = (nBytes + 2047) & -2048;
     pStr->nWritePos = (pStr->nWritePos + nBytes) % pStr->nRingBytes;
     for (;;) {
         xglCdStreamReadRingCore(pStr);
-        __asm__("" : "=r"(nBusy) : "0"(pStr->nUnk18));
+        PASSTHRU(nBusy, pStr->nUnk18);
         if (nBusy == 0) {
             break;
         }
@@ -368,10 +370,10 @@ void xglCdInitial(void)
     u_char *p;
     u_char *pSrc;
     u_int nAddr;
-    register u_char *pArc __asm__("$3");
-    register int nM1 __asm__("$2");
-    register int nDualByte __asm__("$9");
-    register int nTwo __asm__("$10");
+    PIN(u_char *pArc, "$3");
+    PIN(int nM1, "$2");
+    PIN(int nDualByte, "$9");
+    PIN(int nTwo, "$10");
     u_char *pDst;
     int i;
     int nDual;
@@ -392,8 +394,8 @@ void xglCdInitial(void)
     nDualByte = *(u_char *)&nDual;
     p[51] = nDualByte;
     nAddr = WorkEnd;
-    __asm__("" : "=r"(pArc) : "0"(ArcHeader));
-    __asm__("" : "=r"(nM1) : "0"(-1));
+    PASSTHRU(pArc, ArcHeader);
+    PASSTHRU(nM1, -1);
     pArc[72] = nM1;
     loaded_overlay = nTwo;
     pArc[24] = nM1;
@@ -446,8 +448,8 @@ void xglCdStreamParamInit(XGLCDSTREAM *pStream)
  * address just past it, zero-terminating the next entry */
 char *xglCdArcInitSub2(char *pArc)
 {
-    register unsigned char *p __asm__("$3") = (unsigned char *)pArc + 1;
-    register unsigned int c __asm__("$5");
+    PIN(unsigned char *p, "$3") = (unsigned char *)pArc + 1;
+    PIN(unsigned int c, "$5");
 
     c = *p;
 

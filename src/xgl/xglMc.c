@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Memory-card front-end state helpers */
 
 typedef struct {
@@ -186,9 +188,9 @@ void xglMcWriteMapName(char *pName, int nNo)
 int xglMcRequest(int nId, int nCmd, MCPARAM *pParam, int *pResult)
 {
     MCREQUEST *pReq;
-    register unsigned char *pSrc __asm__("$5");
-    register char *pDst __asm__("$4");
-    register int i __asm__("$6");
+    PIN(unsigned char *pSrc, "$5");
+    PIN(char *pDst, "$4");
+    PIN(int i, "$6");
     int c;
     int n0;
     int n1;
@@ -224,10 +226,10 @@ int xglMcRequest(int nId, int nCmd, MCPARAM *pParam, int *pResult)
         if (pName == 0) {
             *(int *)pReq->aName = 0;
         } else {
-            __asm__("" : "=r"(pSrc) : "0"(pName));
+            PASSTHRU(pSrc, pName);
             pDst = pReq->aName;
             c = *pSrc;
-            __asm__("" : "=r"(c) : "0"(c));
+            PASSTHRU(c, c);
             i = 0;
             for (;;) {
                 *pDst = c;
@@ -241,7 +243,7 @@ int xglMcRequest(int nId, int nCmd, MCPARAM *pParam, int *pResult)
                 }
                 pDst++;
                 c = *pSrc;
-                __asm__("" : "=r"(c) : "0"(c));
+                PASSTHRU(c, c);
             }
         }
         break;

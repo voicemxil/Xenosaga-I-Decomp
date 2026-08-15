@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* VIF1 packet double-buffer management for the xgl engine */
 
 typedef unsigned int u_int;
@@ -103,12 +105,12 @@ extern unsigned short D_004A9100[];
 int xglPacketInterpolate(void)
 {
     XGLPACKET *pPk;
-    register volatile u_long *p __asm__("$9");
-    register u_long v1 __asm__("$3");
-    register unsigned int v0 __asm__("$2");
-    register u_long t0 __asm__("$8");
-    register u_long nSix __asm__("$7");
-    register XGLPACKET *pPkA0 __asm__("$4");
+    PIN(volatile u_long *p, "$9");
+    PIN(u_long v1, "$3");
+    PIN(unsigned int v0, "$2");
+    PIN(u_long t0, "$8");
+    PIN(u_long nSix, "$7");
+    PIN(XGLPACKET *pPkA0, "$4");
 
     pPk = pCurrentPacket;
     sceVif1PkCnt(pPk, 0);
@@ -118,7 +120,7 @@ int xglPacketInterpolate(void)
 
     p = (volatile u_long *)0x70000000;
     v0 = D_004A9100[0];
-    __asm__("" : "=r"(pPkA0) : "0"(pPk));
+    PASSTHRU(pPkA0, pPk);
     __asm__("" : "=r"(t0) : "0"((u_long)0xC800));
     t0 <<= 19;
     __asm__("" : "=r"(nSix) : "0"((u_long)6));

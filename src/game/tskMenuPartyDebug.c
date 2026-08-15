@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* tskMenuPartyDebug - pause-menu party debug pages (EUC-JP debug UI) */
 
 typedef struct PADDATA {
@@ -59,7 +61,7 @@ void PauseMenuPagePartyDebugTakeAgws(void)
     int j;
     int col;
     int row;
-    register int trig __asm__("$5");
+    PIN(int trig, "$5");
 
     trig = PadData.hTrig;
     switch (trig) {
@@ -127,7 +129,7 @@ void PauseMenuPagePartyDebugLockParty(void)
     int j;
     int col;
     int row;
-    register int trig __asm__("$5");
+    PIN(int trig, "$5");
 
     trig = PadData.hTrig;
     switch (trig) {
@@ -177,7 +179,7 @@ void PauseMenuPagePartyDebugLockParty(void)
         col = i % 2 * 128;
         row = i / 2 * 16 + 48;
         i = j;
-        __asm__("" : "+r"(i));
+        LAUNDER(i);
         xglFontDebugPrintf(col + 16, row, MenuCharNameGet(j));
         xglFontDebugPrintf(col + 88, row, LockStrs[PartyLockPartyCheck(j)]);
     } while (i < 12);
@@ -196,7 +198,7 @@ void PauseMenuPagePartyDebugOutFriend(void)
     int j;
     int col;
     int row;
-    register int trig __asm__("$5");
+    PIN(int trig, "$5");
 
     trig = PadData.hTrig;
     switch (trig) {
@@ -246,7 +248,7 @@ void PauseMenuPagePartyDebugOutFriend(void)
         col = i % 2 * 128;
         row = i / 2 * 16 + 48;
         i = j;
-        __asm__("" : "+r"(i));
+        LAUNDER(i);
         xglFontDebugPrintf(col + 16, row, MenuCharNameGet(j));
         xglFontDebugPrintf(col + 88, row, OutFriendStrs[PartyOutFriendCheck(j)]);
     } while (i < 12);
@@ -265,7 +267,7 @@ void PauseMenuPagePartyDebugFriend(void)
     int j;
     int col;
     int row;
-    register int trig __asm__("$5");
+    PIN(int trig, "$5");
 
     trig = PadData.hTrig;
     switch (trig) {
@@ -315,7 +317,7 @@ void PauseMenuPagePartyDebugFriend(void)
         col = i % 2 * 128;
         row = i / 2 * 16 + 48;
         i = j;
-        __asm__("" : "+r"(i));
+        LAUNDER(i);
         xglFontDebugPrintf(col + 16, row, MenuCharNameGet(j));
         xglFontDebugPrintf(col + 88, row, FriendStrs[PartyFriendCheck(j)]);
     } while (i < 7);

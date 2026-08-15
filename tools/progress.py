@@ -19,6 +19,30 @@ from decomplib import Repo, parse_decompiled  # noqa: E402
 TOTAL_TEXT_SIZE = 1279344
 
 
+
+def portability_debt():
+    """Count matching-only steering constructs and PS2 hardware asm.
+
+    Steering constructs (PIN/LAUNDER/PASSTHRU/SCHED_NOP) emit no code
+    and vanish in a non-MATCHING build, so they cost portability
+    nothing -- but they are also where a wrong C body can hide behind a
+    forced shape, so the count is worth watching. PS2_ASM and raw
+    __asm__ blocks DO carry work and must be hand-ported.
+    """
+    import glob as _glob
+    import re as _re
+    steer = hw = raw = 0
+    steer_re = _re.compile(r'\b(PIN|LAUNDER|LAUNDER2|LAUNDER_V|PASSTHRU|PASSTHRU_V|SCHED_NOP)\s*\(')
+    for path in _glob.glob("src/**/*.c", recursive=True):
+        if "/libgcc/" in path:
+            continue  # vendored gcc/newlib sources are upstream verbatim
+        text = open(path, errors="ignore").read()
+        steer += len(steer_re.findall(text))
+        hw += len(_re.findall(r'\bPS2_ASM\s*\(', text))
+        raw += len(_re.findall(r'__asm__\s*(?:__volatile__|volatile)?\s*\(\s*"', text))
+    return steer, hw, raw
+
+
 def main():
     entries, hardware_entries = parse_decompiled()
     repo = Repo()
@@ -51,6 +75,7 @@ def main():
     print(f"  In progress:    {unmatched_count} functions ({unmatched_bytes} bytes)")
     print(f"  Hardware:       {hardware_count} functions ({hardware_bytes} bytes)")
     print(f"  Total:          {decompiled_count} functions ({decompiled_bytes} bytes)")
+    _print_debt()
 
     if "--by-file" in sys.argv:
         print("\n  per source file (matched / in-progress):")
@@ -79,6 +104,13 @@ def main():
             print("README.md updated.")
         else:
             print("README.md already up to date.")
+
+
+def _print_debt():
+    steer, hw, raw = portability_debt()
+    print(f"  Portability:    {steer} steering constructs (vanish in a "
+          f"non-MATCHING build), {hw} PS2_ASM + {raw - hw} raw asm blocks "
+          f"needing hand-porting")
 
 
 if __name__ == "__main__":

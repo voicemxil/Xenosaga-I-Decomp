@@ -8,6 +8,8 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include "matching.h"
+
 typedef signed char s8;
 typedef short s16;
 typedef int s32;

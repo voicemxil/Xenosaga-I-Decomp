@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Core geometry/math helpers */
 
 extern long long iRandSeed;
@@ -143,8 +145,8 @@ float xglAtan2(float y, float x)
  * truncating encoding (funct 0x24, what objdump prints as trunc.w.s). */
 int F2I(float f)
 {
-    register int bits __asm__("$3");
-    register float x __asm__("$f0");
+    PIN(int bits, "$3");
+    PIN(float x, "$f0");
     int r;
 
     __asm__("mfc1 %0, %1" : "=r"(bits) : "f"(f));

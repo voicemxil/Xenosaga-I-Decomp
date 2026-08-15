@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* tskMenuBg - menu background fade task (MenuBg*) */
 
 /* Three fade-alpha bytes; the per-frame driver pokes [1] and [2] through
@@ -21,7 +23,7 @@ void MenuBgTaskMain(void)
     unsigned char *q;
     int v;
 
-    __asm__("" : "+r"(p));
+    LAUNDER(p);
     q = p;
     v = *p + 248;
     if (*p != 0) {

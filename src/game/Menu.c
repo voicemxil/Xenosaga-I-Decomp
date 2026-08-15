@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Menu subsystem - equip/status UI getters, model/sub-window plumbing, sort
    helpers and misc bibration/load-sync bookkeeping */
 
@@ -693,7 +695,7 @@ int MenuTecTLevLimitCheck(int nId, int nLev)
 
     pSave = (unsigned char *)MenuTecSaveDataGet(nId);
     q = (unsigned char *)(nLev + (int)pSave);
-    __asm__("" : "+r"(pSave));
+    LAUNDER(pSave);
     if (nLev < 0) {
         return 0;
     }
@@ -775,9 +777,9 @@ void MenuModelSubWindowMainSub(SUBWIN *p)
 /* Dispose a model unit's three weapon slots, then tear down its two actor/resource pairs */
 void MenuModelUnitDispose(char *p)
 {
-    register char **pWeapon __asm__("$16");
+    PIN(char **pWeapon, "$16");
     char *q1;
-    register int i __asm__("$17");
+    PIN(int i, "$17");
 
     if (p == 0) {
         return;
@@ -797,10 +799,10 @@ void MenuModelUnitDispose(char *p)
         ActorAndResourceDispose(a0v, a1v, 1);
     }
     {
-        register char *q2 __asm__("$17");
+        PIN(char *q2, "$17");
 
         q2 = p + 0x28;
-        __asm__("" : "+r"(q2));
+        LAUNDER(q2);
         ActorAndResourceDispose(q1, q2, 0);
     }
 }
@@ -1008,7 +1010,7 @@ void MenuCfTaikiPush(void)
     int cont;
 
     base = sRender_0;
-    __asm__("" : "+r"(base));
+    LAUNDER(base);
     dst = D_0036C278;
     src = (int *)(base + 0x24);
     i = 0;
@@ -1016,9 +1018,9 @@ void MenuCfTaikiPush(void)
         v = *src;
         i++;
         cont = i < 8;
-        __asm__("" : "+r"(cont));
+        LAUNDER(cont);
         *src = 0;
-        __asm__("" : "+r"(v));
+        LAUNDER(v);
         *dst = v;
         src++;
         dst++;
@@ -1040,7 +1042,7 @@ int MenuEtherJoutoCheck(int nId)
     }
     p = func_A1A488(idx);
     t = *(unsigned short *)((char *)p + 2) & 0x4000;
-    __asm__("" : "+r"(t));
+    LAUNDER(t);
     return t == 0;
 }
 
@@ -1057,7 +1059,7 @@ extern MAPNAMEENT *save_map_text_p __asm__("save_map_text");
 /* Search the save-map-name table for a matching id, else return the table base */
 void *MenuSaveMapNameGet(int nId)
 {
-    register MAPNAMEENT *p __asm__("$5");
+    PIN(MAPNAMEENT *p, "$5");
     MAPNAMEENT *base;
     int i;
 
@@ -1079,7 +1081,7 @@ void *MenuSaveMapNameGet(int nId)
 int MenuSortCheck(int nIdx)
 {
     int *p;
-    register int cnt __asm__("$3");
+    PIN(int cnt, "$3");
     int v;
 
     cnt = 0;
@@ -1118,8 +1120,8 @@ int MenuEtherCharPointCheck(int nId, int nPoint)
     pt = p1->f10;
     p2 = (ETHERINFO *)func_A1A488(nPoint);
     pt = pt < p2->s08;
-    __asm__("" : "+r"(pt));
-    __asm__("" : "+r"(pt));
+    LAUNDER(pt);
+    LAUNDER(pt);
     return pt == 0;
 }
 
@@ -1173,7 +1175,7 @@ extern int MenuScenarioNoGet(void);
 void *MenuCharNameGet(int nId)
 {
     void *p;
-    register int sc __asm__("$2");
+    PIN(int sc, "$2");
 
     p = D_0036D760[nId];
     if (nId != 5) {
@@ -1184,7 +1186,7 @@ void *MenuCharNameGet(int nId)
         return p;
     }
     p = D_0036D7D8[0];
-    __asm__ volatile("" : "+r"(p));
+    LAUNDER_V(p);
     return p;
 }
 
@@ -1287,23 +1289,23 @@ void MenuCfTaikiPop(void)
     char *base;
     int *src;
     int *dst;
-    register int i __asm__("$4");
-    register int v __asm__("$3");
+    PIN(int i, "$4");
+    PIN(int v, "$3");
     int cont;
 
     base = sRender_0;
-    __asm__("" : "+r"(base));
+    LAUNDER(base);
     src = D_0036C278;
     dst = (int *)(base + 0x24);
     i = 0;
     do {
         v = *src;
-        __asm__("" : "+r"(v));
-        __asm__("" : "+r"(v));
+        LAUNDER(v);
+        LAUNDER(v);
         src++;
         i++;
         cont = i < 8;
-        __asm__("" : "+r"(cont));
+        LAUNDER(cont);
         *dst = v;
         dst++;
     } while (cont != 0);
@@ -2075,7 +2077,7 @@ int MenuWeaponEquipCheck(int nChr, int nWpn)
 /* Equip a skill into the given slot, or the first free slot when nSlot < 0 */
 void MenuSkillEquip(short nChr, short nId, int nSlot)
 {
-    register char *pChr __asm__("$6");
+    PIN(char *pChr, "$6");
     short *q;
     short v;
     int i;
@@ -2090,14 +2092,14 @@ void MenuSkillEquip(short nChr, short nId, int nSlot)
     goto test;
 loop:
     i++;
-    __asm__("" : "+r"(i));
+    LAUNDER(i);
     if (i >= 3) {
         return;
     }
     q = (short *)((i << 1) + (int)pChr + 0xA6);
 test:
     v = *q;
-    __asm__ volatile("nop");
+    SCHED_NOP();
     if (v != 0) {
         goto loop;
     }
@@ -2171,7 +2173,7 @@ extern MWLIST *MenuListMake(int nIdx, int nType);
 void MenuTecListMake00(void)
 {
     int n;
-    register MENUTECLISTENT *p __asm__("$16");
+    PIN(MENUTECLISTENT *p, "$16");
     int *pSort;
     MENUTECWORK *w;
     short nTec;
@@ -2253,7 +2255,7 @@ void MenuEtherCapSet(void)
         p = (unsigned char *)func_A191C0_2(nChr);
         p[23] = 0;
         q = (short *)(p + 142);
-        __asm__ volatile("nop");
+        SCHED_NOP();
     inner:
         cont = i < 12;
         i++;
@@ -2307,9 +2309,9 @@ void MenuTecWaitUp(int nId, int nWait)
     int nMask;
     int nOfs;
     int nextPoint;
-    register unsigned char *q __asm__("$6");
-    register int v __asm__("$3");
-    register int t __asm__("$5");
+    PIN(unsigned char *q, "$6");
+    PIN(int v, "$3");
+    PIN(int t, "$5");
 
     nMask = nId & 0xFFFF;
     pSave = (unsigned char *)MenuTecSaveDataGet(nId);
@@ -2324,7 +2326,7 @@ void MenuTecWaitUp(int nId, int nWait)
     *q = v;
     *(unsigned short *)(nWait * 12 + (int)p + 78) = v & 0xFF;
     t = p->fC - nextPoint;
-    __asm__ volatile("" : "+r"(t));
+    LAUNDER_V(t);
     p->fC = t;
 }
 
@@ -2417,7 +2419,7 @@ extern void ChangeTopLevel(int);
 int MenuSystem(void)
 {
     MENUTECWORK *w;
-    register MENUTECWORK *w2 __asm__("$4");
+    PIN(MENUTECWORK *w2, "$4");
     int st;
     int two;
 
@@ -2864,13 +2866,13 @@ void MenuTecTLevUp(int nId, int nLev)
     unsigned char *pSave;
     PARAOBJ *p;
     int nextPoint;
-    register unsigned char *q __asm__("$6");
-    register int *pPt __asm__("$8");
+    PIN(unsigned char *q, "$6");
+    PIN(int *pPt, "$8");
     unsigned short *pSh;
-    register int v __asm__("$3");
-    register int m __asm__("$7");
-    register int t2 __asm__("$4");
-    register int mm __asm__("$3");
+    PIN(int v, "$3");
+    PIN(int m, "$7");
+    PIN(int t2, "$4");
+    PIN(int mm, "$3");
 
     idx = nId & 0xFFFF;
     pSave = (unsigned char *)MenuTecSaveDataGet(idx);
@@ -2885,11 +2887,11 @@ void MenuTecTLevUp(int nId, int nLev)
     v = *q + 1;
     *q = v;
     m = v & 0xFF;
-    __asm__("" : "+r"(m));
+    LAUNDER(m);
     mm = m * 3 - 3;
     *pSh = mm;
     t2 = *pPt - nextPoint;
-    __asm__ volatile("" : "+r"(t2));
+    LAUNDER_V(t2);
     *pPt = t2;
 }
 
@@ -3372,11 +3374,11 @@ void MenuEtherListMake02(int nIdx)
 {
     MENUTECLISTENT *p2;
     int nM1;
-    register int nOn __asm__("$19");
+    PIN(int nOn, "$19");
     void *ptr;
     MENUTECWORK *w2;
     PARAOBJ *rec;
-    register int n __asm__("$18");
+    PIN(int n, "$18");
     int v;
     int f4;
 
@@ -3717,9 +3719,9 @@ extern int MenuWeaponEquipPosCheck(int, int, int, int);
 /* Build the AGWS pilot list: gray taken/empty pilots, flag the current one */
 void MenuAgwsListMake_Pilot(void)
 {
-    register int *pSort __asm__("$17");
-    register int *pS __asm__("$18");
-    register unsigned char *q __asm__("$16");
+    PIN(int *pSort, "$17");
+    PIN(int *pS, "$18");
+    PIN(unsigned char *q, "$16");
     SHOPWINSP *win;
     MENUTECWORK *w;
     PILOTREC *rec;
@@ -3731,7 +3733,7 @@ void MenuAgwsListMake_Pilot(void)
     win = (SHOPWINSP *)(AgwsList + 0x130);
     MenuSortSet(0, 32, 1);
     MenuListMake(0, 0);
-    __asm__ volatile("" : "+r"(pSort));
+    LAUNDER_V(pSort);
     n = MenuSortCheck(0);
     if (n > 0) {
         pS = pSort;
@@ -3898,8 +3900,8 @@ void MenuParaUp(int nId, int nType)
     char *p;
     PARAOBJ *rec;
     int nextPoint;
-    register int t __asm__("$16");
-    register short t2 __asm__("$16");
+    PIN(int t, "$16");
+    PIN(short t2, "$16");
 
     p = (char *)func_A191C0_2(nId);
     rec = func_A19210(nId);
@@ -4174,7 +4176,7 @@ int MenuCharEquipCalcPointGet(int nChr)
     int buf2[4];
     char *p1;
     char *p2;
-    register int nRet __asm__("$16");
+    PIN(int nRet, "$16");
 
     nRet = 0;
     if (nChr == 0) {

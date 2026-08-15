@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Small menu and Ether-tree subhelpers. */
 
 int subSeisanEtherCheck(void)
@@ -50,8 +52,7 @@ void subListMake01(SUB_LIST *list, int id)
    REGISTER tie-break (sll/addu land in $v0 vs $v1, in-place reuse in the
    original vs a fresh reg here); pinning a fresh local to $2 regressed
    the whole function (4 diffs, cascading register churn). Retried this
-   session with the pin+barrier idiom (register unsigned int idx4
-   __asm__("$2") = index*4; asm("":"+r"(idx4));) on the index*4
+   session with the pin+barrier idiom (PIN(unsigned int idx4, "$2") = index*4; asm("":"+r"(idx4));) on the index*4
    sub-expression: this function is self-tail-recursive, and the barrier
    defeated gcc's tail-call-to-loop transform entirely (9 diffs, shrank
    to 0x2c bytes -- a structurally different, worse function). Reverted

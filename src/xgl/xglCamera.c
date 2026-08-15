@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* xgl camera system: view/travel setup for the 3D camera rig */
 
 typedef int TI __attribute__((mode(TI)));
@@ -243,7 +245,7 @@ void xglCameraTravelScale(void *pCamera)
 int xglCameraTravelProc(void *pCamera)
 {
     XGLCAMERA *p = (XGLCAMERA *)pCamera;
-    register XGLPADDATA *pPad __asm__("$3");
+    PIN(XGLPADDATA *pPad, "$3");
 
     switch (p->nUnk04) {
     case 0:
@@ -251,14 +253,14 @@ int xglCameraTravelProc(void *pCamera)
     case 4:
         break;
     case 2:
-        __asm__("" : "=r"(pPad) : "0"(PadData));
+        PASSTHRU(pPad, PadData);
         if ((pPad[1].nButton & 0x100) != 0) {
             goto press_check;
         }
         xglCameraTravelManual(pCamera);
         goto done;
     case 3:
-        __asm__("" : "=r"(pPad) : "0"(PadData));
+        PASSTHRU(pPad, PadData);
         if ((pPad[1].nButton & 0x100) != 0) {
 press_check:
             if ((pPad[1].nPress & 0x10) == 0) {
@@ -294,7 +296,7 @@ void xglCameraTravelInit(void *pCamera)
     static XGLCAMVEC sChaseRefPos = {{ 0.0f, 1.0f, 0.0f, 1.0f }};
     static XGLCAMVEC sChaseIntPos = {{ 0.0f, 1.0f, 0.0f, 1.0f }};
     char *pBase = (char *)pCamera;
-    register float *pTravel __asm__("$7");
+    PIN(float *pTravel, "$7");
     XGLCAMVEC *pSrc;
     char *pDst;
 
@@ -303,31 +305,31 @@ void xglCameraTravelInit(void *pCamera)
     pTravel[1] = 0.69813174f;
     ((int *)pTravel)[2] = 0;
     ((int *)pTravel)[3] = 0;
-    __asm__("" : "=r"(pSrc) : "0"(&sShootAngleR));
-    __asm__("" : "=r"(pDst) : "0"(pBase + 0xA0));
+    PASSTHRU(pSrc, &sShootAngleR);
+    PASSTHRU(pDst, pBase + 0xA0);
     *(TI *)pDst = *(TI *)pSrc;
-    __asm__("" : "=r"(pSrc) : "0"(&sShootAngleV));
-    __asm__("" : "=r"(pDst) : "0"(pBase + 0xB0));
+    PASSTHRU(pSrc, &sShootAngleV);
+    PASSTHRU(pDst, pBase + 0xB0);
     *(TI *)pDst = *(TI *)pSrc;
-    __asm__("" : "=r"(pSrc) : "0"(&sShootAngleA2));
-    __asm__("" : "=r"(pDst) : "0"(pBase + 0xC0));
+    PASSTHRU(pSrc, &sShootAngleA2);
+    PASSTHRU(pDst, pBase + 0xC0);
     *(TI *)pDst = *(TI *)pSrc;
-    __asm__("" : "=r"(pSrc) : "0"(&sShootPlaceR));
-    __asm__("" : "=r"(pDst) : "0"(pBase + 0xD0));
+    PASSTHRU(pSrc, &sShootPlaceR);
+    PASSTHRU(pDst, pBase + 0xD0);
     *(TI *)pDst = *(TI *)pSrc;
-    __asm__("" : "=r"(pSrc) : "0"(&sShootPlaceV));
-    __asm__("" : "=r"(pDst) : "0"(pBase + 0xE0));
+    PASSTHRU(pSrc, &sShootPlaceV);
+    PASSTHRU(pDst, pBase + 0xE0);
     *(TI *)pDst = *(TI *)pSrc;
-    __asm__("" : "=r"(pSrc) : "0"(&sShootPlaceA2));
-    __asm__("" : "=r"(pDst) : "0"(pBase + 0xF0));
+    PASSTHRU(pSrc, &sShootPlaceA2);
+    PASSTHRU(pDst, pBase + 0xF0);
     *(TI *)pDst = *(TI *)pSrc;
     pTravel[28] = pTravel[5];
     pTravel[29] = pTravel[18];
-    __asm__("" : "=r"(pSrc) : "0"(&sChaseRefPos));
-    __asm__("" : "=r"(pDst) : "0"(pBase + 0x110));
+    PASSTHRU(pSrc, &sChaseRefPos);
+    PASSTHRU(pDst, pBase + 0x110);
     *(TI *)pDst = *(TI *)pSrc;
-    __asm__("" : "=r"(pSrc) : "0"(&sChaseIntPos));
-    __asm__("" : "=r"(pDst) : "0"(pBase + 0x120));
+    PASSTHRU(pSrc, &sChaseIntPos);
+    PASSTHRU(pDst, pBase + 0x120);
     *(TI *)pDst = *(TI *)pSrc;
 }
 

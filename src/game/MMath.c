@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* MMath - the math helper library: scalar float utilities plus VU0
  * macro-mode vector/matrix helpers built on top of the same quadword
  * conventions as xglMatrix.c (see that file for the .set noreorder
@@ -68,7 +70,7 @@ float MMathCalcRotFar(float a, float b)
 /* Scale a vector's XYZ from degrees to radians */
 MC_VECTOR *MMathDeg2RadVector(MC_VECTOR *pDst, MC_VECTOR *pSrc)
 {
-    register float k __asm__("$f8") = 0.01745329238f;
+    PIN(float k, "$f8") = 0.01745329238f;
 
     __asm__ __volatile__(".set noreorder\n"
         "mfc1 $t0, %2\n qmtc2.ni $t0, $vf1\n"
@@ -82,7 +84,7 @@ MC_VECTOR *MMathDeg2RadVector(MC_VECTOR *pDst, MC_VECTOR *pSrc)
 /* Convert an integer vector's XYZ from degrees to radians */
 MC_VECTOR *MMathDeg2RadVectorI(MC_VECTOR *pDst, int *pSrc)
 {
-    register float k __asm__("$f8") = 0.01745329238f;
+    PIN(float k, "$f8") = 0.01745329238f;
 
     __asm__ __volatile__(".set noreorder\n"
         "mfc1 $t0, %2\n qmtc2.ni $t0, $vf1\n"
@@ -97,7 +99,7 @@ MC_VECTOR *MMathDeg2RadVectorI(MC_VECTOR *pDst, int *pSrc)
 /* Scale a vector's XYZ from radians to degrees */
 MC_VECTOR *MMathRad2DegVector(MC_VECTOR *pDst, MC_VECTOR *pSrc)
 {
-    register float k __asm__("$f8") = 57.29578018f;
+    PIN(float k, "$f8") = 57.29578018f;
 
     __asm__ __volatile__(".set noreorder\n"
         "mfc1 $t0, %2\n qmtc2.ni $t0, $vf1\n"
@@ -111,7 +113,7 @@ MC_VECTOR *MMathRad2DegVector(MC_VECTOR *pDst, MC_VECTOR *pSrc)
 /* Convert a vector's XYZ from radians to degrees, truncated to integer */
 int *MMathRad2DegVectorI(int *pDst, MC_VECTOR *pSrc)
 {
-    register float k __asm__("$f8") = 57.29578018f;
+    PIN(float k, "$f8") = 57.29578018f;
 
     __asm__ __volatile__(".set noreorder\n"
         "mfc1 $t0, %2\n qmtc2.ni $t0, $vf1\n"
@@ -508,10 +510,10 @@ unsigned int McMathUnitMatrix[16] = {
 /* Rotate pMat (or identity, if NULL) about X by `angle` radians */
 MC_MATRIX *MMathRotateMatrixX(MC_MATRIX *pDst, MC_MATRIX *pMat, float angle)
 {
-    register MC_MATRIX *r __asm__("$2");
+    PIN(MC_MATRIX *r, "$2");
     __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
     {
-        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        PIN(MC_MATRIX *pDef, "$8") = (MC_MATRIX *)&McMathUnitMatrix;
         pMat = pMat ? pMat : pDef;
     }
     __asm__ __volatile__(".set noreorder\n"
@@ -541,10 +543,10 @@ MC_MATRIX *MMathRotateMatrixX(MC_MATRIX *pDst, MC_MATRIX *pMat, float angle)
 /* Rotate pMat (or identity, if NULL) about Y by `angle` radians */
 MC_MATRIX *MMathRotateMatrixY(MC_MATRIX *pDst, MC_MATRIX *pMat, float angle)
 {
-    register MC_MATRIX *r __asm__("$2");
+    PIN(MC_MATRIX *r, "$2");
     __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
     {
-        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        PIN(MC_MATRIX *pDef, "$8") = (MC_MATRIX *)&McMathUnitMatrix;
         pMat = pMat ? pMat : pDef;
     }
     __asm__ __volatile__(".set noreorder\n"
@@ -574,10 +576,10 @@ MC_MATRIX *MMathRotateMatrixY(MC_MATRIX *pDst, MC_MATRIX *pMat, float angle)
 /* Rotate pMat (or identity, if NULL) about Z by `angle` radians */
 MC_MATRIX *MMathRotateMatrixZ(MC_MATRIX *pDst, MC_MATRIX *pMat, float angle)
 {
-    register MC_MATRIX *r __asm__("$2");
+    PIN(MC_MATRIX *r, "$2");
     __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
     {
-        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        PIN(MC_MATRIX *pDef, "$8") = (MC_MATRIX *)&McMathUnitMatrix;
         pMat = pMat ? pMat : pDef;
     }
     __asm__ __volatile__(".set noreorder\n"
@@ -607,10 +609,10 @@ MC_MATRIX *MMathRotateMatrixZ(MC_MATRIX *pDst, MC_MATRIX *pMat, float angle)
 /* Rotate pMat (or identity, if NULL) about X then Y, pAngle = {angleX, angleY} */
 MC_MATRIX *MMathRotateMatrixXY(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAngle)
 {
-    register MC_MATRIX *r __asm__("$2");
+    PIN(MC_MATRIX *r, "$2");
     __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
     {
-        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        PIN(MC_MATRIX *pDef, "$8") = (MC_MATRIX *)&McMathUnitMatrix;
         pMat = pMat ? pMat : pDef;
     }
     __asm__ __volatile__(".set noreorder\n"
@@ -650,10 +652,10 @@ MC_MATRIX *MMathRotateMatrixXY(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAng
 /* Rotate pMat (or identity, if NULL) about Y then X, pAngle = {angleX, angleY} */
 MC_MATRIX *MMathRotateMatrixYX(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAngle)
 {
-    register MC_MATRIX *r __asm__("$2");
+    PIN(MC_MATRIX *r, "$2");
     __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
     {
-        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        PIN(MC_MATRIX *pDef, "$8") = (MC_MATRIX *)&McMathUnitMatrix;
         pMat = pMat ? pMat : pDef;
     }
     __asm__ __volatile__(".set noreorder\n"
@@ -693,10 +695,10 @@ MC_MATRIX *MMathRotateMatrixYX(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAng
 /* Rotate pMat (or identity, if NULL) about X, Y, then Z; pAngle = {angleX, angleY, angleZ} */
 MC_MATRIX *MMathRotateMatrixXYZ(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAngle)
 {
-    register MC_MATRIX *r __asm__("$2");
+    PIN(MC_MATRIX *r, "$2");
     __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
     {
-        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        PIN(MC_MATRIX *pDef, "$8") = (MC_MATRIX *)&McMathUnitMatrix;
         pMat = pMat ? pMat : pDef;
     }
     __asm__ __volatile__(".set noreorder\n"
@@ -746,10 +748,10 @@ MC_MATRIX *MMathRotateMatrixXYZ(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAn
 /* Rotate pMat (or identity, if NULL) about Y, X, then Z; pAngle = {angleX, angleY, angleZ} */
 MC_MATRIX *MMathRotateMatrixYXZ(MC_MATRIX *pDst, MC_MATRIX *pMat, MC_VECTOR *pAngle)
 {
-    register MC_MATRIX *r __asm__("$2");
+    PIN(MC_MATRIX *r, "$2");
     __asm__ __volatile__("daddu $2, %1, $0" : "=r"(r) : "r"(pDst));
     {
-        register MC_MATRIX *pDef __asm__("$8") = (MC_MATRIX *)&McMathUnitMatrix;
+        PIN(MC_MATRIX *pDef, "$8") = (MC_MATRIX *)&McMathUnitMatrix;
         pMat = pMat ? pMat : pDef;
     }
     __asm__ __volatile__(".set noreorder\n"

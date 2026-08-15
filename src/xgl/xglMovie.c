@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* MPEG/IPU initialization wrappers */
 
 typedef struct {
@@ -106,15 +108,15 @@ void *xglMovieMakeXtxHeader(XGLMOVIEINFO *pInfo, char *pBuf)
     int nBase = pInfo->nUnk4C;
     int nWidth = pInfo->nWidth;
     int nHeight = pInfo->nHeight;
-    register long long nTag __asm__("$8");
-    register long long nGif __asm__("$4");
+    PIN(long long nTag, "$8");
+    PIN(long long nGif, "$4");
 
     __asm__("li %0, 80\n\t"
             "dsll %0, %0, 16\n\t"
             "ori %0, %0, 0x58\n\t"
             "dsll %0, %0, 16\n\t"
             "ori %0, %0, 0x5458" : "=r"(nTag));
-    __asm__("" : "=r"(nGif) : "0"(0x0000001000000001LL));
+    PASSTHRU(nGif, 0x0000001000000001LL);
     q = (int *)(pBuf + 16);
     q[3] = nBase + 2;
     q[0] = 0x40000 + nWidth;

@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Frame rendering environment management for the xgl engine */
 
 typedef unsigned char u_char;
@@ -148,11 +150,11 @@ void xglRenderClearEnvMove(void)
 void xglRenderSwapBase(void)
 {
     /* TODO: Find the natural source shape for this register allocation. */
-    register u_short nTmp __asm__("$7");
-    register u_short nFront __asm__("$6");
-    register u_short nDisp __asm__("$3");
-    register int nSum __asm__("$4");
-    register int nDrop __asm__("$5");
+    PIN(u_short nTmp, "$7");
+    PIN(u_short nFront, "$6");
+    PIN(u_short nDisp, "$3");
+    PIN(int nSum, "$4");
+    PIN(int nDrop, "$5");
     volatile XGLRENDER *pRender;
 
     pRender = &sRender;
@@ -403,8 +405,8 @@ void xglRenderDrawFlip(void)
     XGLRENDER *pPlain = (XGLRENDER *)&sRender;
     u_long *p = (u_long *)0x70000000;
     int nFbw;
-    register u_short nDisp __asm__("$5");
-    register u_short nFront __asm__("$8");
+    PIN(u_short nDisp, "$5");
+    PIN(u_short nFront, "$8");
     u_long nFrame;
 
     nFbw = pPlain->nWidth;

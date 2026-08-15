@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Map unit layer - slot allocation, resource binding, per-frame update and draw */
 
 typedef unsigned char u8;
@@ -421,8 +423,8 @@ int MAP_callUnitGroup(int nGroup, void (*pFunc)(MAPUNIT *))
     int i;
 
     if (pFunc != 0) {
-        register MAPUNIT *pU __asm__("$2");
-        register UNITSEQ *pS __asm__("$3");
+        PIN(MAPUNIT *pU, "$2");
+        PIN(UNITSEQ *pS, "$3");
         pS = unitSequence;
         pU = MapUnit;
         pUnit = pU;

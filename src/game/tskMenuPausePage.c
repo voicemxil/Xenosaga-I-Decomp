@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* tskMenuPausePage - debug pause-menu pages (resource / actor dumps) */
 
 typedef struct PADDATA {
@@ -30,9 +32,9 @@ extern void xglFontDebugPrintf(int x, int y, char *fmt, ...);
  * the base addiu pair and the p init. Fixer-flag candidate (two swaps). */
 void PauseMenuPage0(void)
 {
-    register PAUSEACT *p __asm__("$17");
+    PIN(PAUSEACT *p, "$17");
     int y;
-    register int i __asm__("$16");
+    PIN(int i, "$16");
     char *base;
 
     if (PadData.hTrig & 0x40) {
@@ -42,9 +44,9 @@ void PauseMenuPage0(void)
     y = 64;
     __asm__ volatile("");
     base = actor;
-    __asm__("" : "+r"(base));
+    LAUNDER(base);
     p = (PAUSEACT *)(base + 0x80);
-    __asm__ volatile("" : "+r"(base));
+    LAUNDER_V(base);
     i = 15;
     do {
         i--;

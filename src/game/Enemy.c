@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Enemy layer - field encounter actors: damage reactions, sound, and script commands */
 
 typedef unsigned char u8;
@@ -152,7 +154,7 @@ void Enemy_Damage_Explosion(ACTOR *a)
 {
     ENEPC *p;
     int nFlag;
-    register GAME_LOOP_STATE *pgls __asm__("$3");
+    PIN(GAME_LOOP_STATE *pgls, "$3");
 
     p = &enepc[a->nSerial];
     p->fMove[0] = 0.0f;

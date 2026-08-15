@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Occlusion-culling helpers for the xgl engine */
 
 typedef struct {
@@ -151,25 +153,25 @@ void xglCullingMapCreate(void)
 {
     float *pDst;
     float *pSrc = s_aCullingBase;
-    register float *pArg __asm__("$4");
+    PIN(float *pArg, "$4");
     int n;
 
     n = s_inCulling.nCount;
     pDst = (float *)&s_inCulling.aCell[n];
     if (n < 10) {
-        register float fXY __asm__("$f0");
-        register float fYY __asm__("$f1");
-        register float fZY __asm__("$f2");
-        register float fXZ __asm__("$f3");
-        register float fYZ __asm__("$f4");
-        register float fXX __asm__("$f5");
-        register float fYX __asm__("$f6");
-        register float fZX __asm__("$f7");
-        register float fOne __asm__("$f8");
-        register float fZZ __asm__("$f9");
+        PIN(float fXY, "$f0");
+        PIN(float fYY, "$f1");
+        PIN(float fZY, "$f2");
+        PIN(float fXZ, "$f3");
+        PIN(float fYZ, "$f4");
+        PIN(float fXX, "$f5");
+        PIN(float fYX, "$f6");
+        PIN(float fZX, "$f7");
+        PIN(float fOne, "$f8");
+        PIN(float fZZ, "$f9");
 
         __asm__ __volatile__("" : "=f"(fZZ) : "0"(pSrc[8]));
-        __asm__ __volatile__("" : "=r"(pArg) : "0"(pDst));
+        PASSTHRU_V(pArg, pDst);
         __asm__ __volatile__("" : "=f"(fXX) : "0"(pSrc[0]));
         __asm__ __volatile__("" : "=f"(fYX) : "0"(pSrc[1]));
         __asm__ __volatile__("" : "=f"(fZX) : "0"(pSrc[2]));

@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Sound front-end - wraps the SSD driver with bank slots and CD streaming */
 
 typedef struct {
@@ -113,7 +115,7 @@ void xglSoundSendSwd(void *pData, int nNo)
         }
     }
     {
-        register unsigned short nId2 __asm__("$3") = nId;
+        PIN(unsigned short nId2, "$3") = nId;
         p->nSwd = nId2;
     }
 }
@@ -146,7 +148,7 @@ void xglSoundSendSmd2(void *pData, int nNo)
         }
     }
     {
-        register unsigned short nId2 __asm__("$3") = nId;
+        PIN(unsigned short nId2, "$3") = nId;
         p->nData = nId2;
     }
 }
@@ -185,7 +187,7 @@ void xglSoundSendSed(void *pData, int nNo)
         }
     }
     {
-        register unsigned short nId2 __asm__("$3") = nId;
+        PIN(unsigned short nId2, "$3") = nId;
         p->nData = nId2;
     }
 }
@@ -402,7 +404,7 @@ int xglSoundEffectCheckID(int nCode)
 /* Open a PCM stream file and start it playing on channel 0 */
 void xglSoundStreamOpenPcm(int nChannel, char *pName)
 {
-    register char *pN __asm__("$3");
+    PIN(char *pN, "$3");
     XGL_STREAM *pStream;
     int nResult;
 
@@ -433,7 +435,7 @@ void xglSoundStreamOpenPcm(int nChannel, char *pName)
 /* Open a stereo VAG stream file and start it at the given volume */
 void xglSoundStreamOpenVagStereoParam(int nChannel, char *pName, int nPan, int nVol)
 {
-    register char *pN __asm__("$3");
+    PIN(char *pN, "$3");
     XGL_STREAM *pStream;
     int nResult;
     int nMax;
@@ -472,7 +474,7 @@ void xglSoundStreamOpenVagStereo(int nChannel, char *pName)
 /* Open a mono VAG stream on one channel with panpot, volume and pitch */
 void xglSoundStreamOpenVagMultiParam(int nChannel, char *pName, int nPan, int nVol, int nPanpot)
 {
-    register char *pN __asm__("$3");
+    PIN(char *pN, "$3");
     XGL_STREAM *pStream;
     int nResult;
     int nMax;
@@ -514,7 +516,7 @@ void xglSoundReset(void)
 {
     XGL_STREAM *pStream;
     int i;
-    register int more __asm__("$3");
+    PIN(int more, "$3");
 
     i = 0;
     do {
@@ -640,7 +642,7 @@ void xglSoundStreamStop(int nChannel)
 /* The final drain loop's decrement must land in $v0 (with the slti temp
  * in $v1); every plain source shape allocates them swapped, and a bare
  * register-asm local gets coalesced away. The zero-code empty-asm
- * passthrough (__asm__("" : "=r"(t) : "0"(expr)) with t pinned to $2)
+ * passthrough (PASSTHRU(t, expr) with t pinned to $2)
  * forces the subtraction to compute directly into $v0 without emitting
  * any instruction. */
 /* Flush the stereo VAG stream with silence until its queue drains */
@@ -662,10 +664,10 @@ void xglSoundStreamMute(void)
         ;
     }
     while (nResult >= 256) {
-        register int t __asm__("$2");
+        PIN(int t, "$2");
 
         SsdSetVagStreamDataStereo(0, pBuf, 4096);
-        __asm__("" : "=r"(t) : "0"(nResult - 256));
+        PASSTHRU(t, nResult - 256);
         nResult = t;
     }
 }
@@ -691,16 +693,16 @@ typedef struct {
 void xglMakeSePacket(short nCode, ...)
 {
     va_list ap;
-    register SE_ENTRY *pEnt __asm__("$3");
-    register SE_ENTRY *pEnt2 __asm__("$2");
-    register int ofs __asm__("$2");
+    PIN(SE_ENTRY *pEnt, "$3");
+    PIN(SE_ENTRY *pEnt2, "$2");
+    PIN(int ofs, "$2");
     int *pDst;
     int i;
 
     if (SoundWork.stream.nCount < 65) {
         ofs = SoundWork.stream.nCount << 5;
         pEnt = (SE_ENTRY *)((char *)&SoundWork + ofs);
-        __asm__("" : "=r"(pEnt2) : "0"(pEnt));
+        PASSTHRU(pEnt2, pEnt);
         pEnt->nCode = nCode;
         va_start(ap, nCode);
         pDst = pEnt2->aParam;

@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* HDD / memory-card mount, save-slot and install handling for the xgl engine */
 
 typedef struct {
@@ -265,7 +267,7 @@ int xglHddMcGetFree(void)
     int nZoneFree;
     int nRet;
     int nBuf;
-    register int nQuot __asm__("$16");
+    PIN(int nQuot, "$16");
 
     nRet = xglHddMcLoadMount();
     if (nRet < 0) {
@@ -279,7 +281,7 @@ int xglHddMcGetFree(void)
         } else {
             nFree = sceDevctl(D_004DC370, 20481, 0, 0, 0, 0);
             nZoneFree = sceDevctl(D_004DC370, 20482, 0, 0, 0, 0);
-            __asm__("" : "=r"(nQuot) : "0"(nFree / 1024));
+            PASSTHRU(nQuot, nFree / 1024);
             nFree = ((nZoneFree < 0) ? 0 : nZoneFree) * nQuot;
         }
     }
@@ -333,10 +335,10 @@ int Judge_MakeNewSavedata(void);
  * or an empty savedata block as needed */
 int xglHddMcCheckYourSaves(void *pBuf)
 {
-    register void *p __asm__("$16") = pBuf;
+    PIN(void *p, "$16") = pBuf;
     int nFd;
 
-    __asm__("" : "+r"(p));
+    LAUNDER(p);
     nFd = sceDopen(yoursaves, p);
     if (nFd < 0) {
         if (Judge_MakeNewFolder(nFd) == 1) {
@@ -381,7 +383,7 @@ int xglHddErrorScreen(void)
         0x00008DF700008FF8, 0x0000000000FFFFF0,
     };
     int i;
-    register XGLHDDRENDER *pRender __asm__("$2");
+    PIN(XGLHDDRENDER *pRender, "$2");
 
     sRender.nUnk58 = 1;
     for (i = 30; ; ) {
@@ -395,6 +397,6 @@ int xglHddErrorScreen(void)
         xglSleep();
     }
     xglSoundEffectNormalDirect(1);
-    __asm__("" : "=r"(pRender) : "0"(&sRender));
+    PASSTHRU(pRender, &sRender);
     pRender->nUnk58 = 0;
 }
