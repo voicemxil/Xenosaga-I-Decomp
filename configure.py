@@ -220,14 +220,16 @@ FILE_FIX_FLAGS = {
               "--swap-regs JNT_getRootTrans:2-3 "
               "--swap-regs JNT_getRootRotate:2-3 "
               "--swap-regs JNT_getRootScale:2-3"),
+    # Each flag may appear ONCE per entry: argparse stores rather than
+    # appends, so a repeated flag silently drops the earlier sites --
+    # that regressed three matched functions before fix_cc_asm.py
+    # grew a duplicate-flag guard. Comma-separate every site.
     "Menu.c": ("--barrier-return-store MenuRWeaponCheck2 "
                "--branch-likely MenuFaceEpidGet:3,MenuSkillEquip:2 "
                "--swap-adjacent MenuAgwsListMake_Gun:30,"
-               "MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30 "
+               "MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30,"
+               "MenuModelUnitDispose:15,MenuCfTaikiPush:6 "
                "--swap-slot-target MenuShopModelDisp:6"),
-    # TMENU_addItem: the original orders the li $7,-1 / li $5,1024
-    # MSG_convert argument pair the other way (instruction 4 is the
-    # li $5,1024).
     "TMENU.c": "--swap-adjacent TMENU_addItem:4",
     # xgl delay-slot shapes found by the xgl subagent (all verified):
     "xglTimer.c": "--barrier-return-store xglTimer0Reset",

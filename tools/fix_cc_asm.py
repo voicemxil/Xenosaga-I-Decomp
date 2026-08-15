@@ -16,6 +16,7 @@ and assemble. Transformations:
 import argparse
 import re
 import struct
+import sys
 
 # Loads among MEM_OPS: wrapping these in .set mips1 (to control address
 # expansion) also makes gas honour mips1 LOAD DELAY slots and insert a nop
@@ -1322,6 +1323,27 @@ if __name__ == "__main__":
                              "configure.py asflags_for) -- li.s float "
                              "literals never land in .lit4, so they always "
                              "carry the mtc1 COP1 hazard")
+    # A flag that stores (rather than appends) keeps only its LAST
+    # occurrence, so repeating it silently drops the earlier sites --
+    # that regressed three matched functions once. Reject it loudly.
+    # Genuine append-flags (--omit-hazard, --swap-regs, ...) repeat fine.
+    _appendable = set()
+    for _act in parser._actions:
+        if _act.__class__.__name__ == "_AppendAction":
+            _appendable.update(_act.option_strings)
+    _seen = set()
+    for _a in sys.argv[1:]:
+        if _a.startswith("--"):
+            _name = _a.split("=")[0]
+            if _name in _appendable:
+                continue
+            if _name in _seen:
+                parser.error(
+                    "duplicate flag %s: it stores rather than appends, so "
+                    "only the last occurrence would survive and the earlier "
+                    "sites would be silently dropped. Put every site for "
+                    "this pass in one comma-separated value." % _name)
+            _seen.add(_name)
     args = parser.parse_args()
     def scope(v):
         if v is None:
