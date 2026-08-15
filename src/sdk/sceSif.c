@@ -270,3 +270,129 @@ int sceSifUnloadModule(int modId)
     }
     return _senddata;
 }
+
+/* ------------------------------------------------------------------
+ * SIF RPC server side: the queue/server-data linked lists.
+ *
+ * Two intrusive singly-linked lists, both walked under DIntr/EIntr:
+ *   - all registered queues hang off _data_table_00993280[10]
+ *     (0x00993280 + 40) through SifRpcDataQueue.next;
+ *   - each queue's registered servers hang off its own `link` field
+ *     through SifRpcServerData.link, and its *pending requests* hang
+ *     off `start` through SifRpcServerData.next.
+ * Field offsets are from the original code; the names follow the
+ * public PS2 SDK's sceSifRpc structures. `pad` covers the fields this
+ * translation unit never touches.
+ * ------------------------------------------------------------------ */
+
+typedef struct SifRpcServerData SifRpcServerData;
+typedef struct SifRpcDataQueue SifRpcDataQueue;
+
+struct SifRpcServerData {
+    int   sid;                  /*  0 */
+    void *func;                 /*  4 */
+    void *buff;                 /*  8 */
+    int   size;                 /* 12 */
+    void *cfunc;                /* 16 */
+    void *cbuff;                /* 20 */
+    int   pad[8];               /* 24..55 */
+    SifRpcServerData *link;     /* 56  next server registered on `base` */
+    SifRpcServerData *next;     /* 60  next pending request */
+    SifRpcDataQueue  *base;     /* 64 */
+};
+
+struct SifRpcDataQueue {
+    int   thread_id;            /*  0 */
+    int   active;               /*  4 */
+    SifRpcServerData *link;     /*  8  registered servers */
+    SifRpcServerData *start;    /* 12  pending request list head */
+    SifRpcServerData *end;      /* 16 */
+    SifRpcDataQueue  *next;     /* 20 */
+};
+
+extern int DIntr(void);
+extern int EIntr(void);
+extern void *_data_table_00993280[16];
+extern int _bind_check;
+extern int _lfversion;
+void *memset(void *dst, int c, int n);
+
+/* sceSifLoadFileReset: drop the loadfile RPC binding so the next call
+ * re-binds. */
+int sceSifLoadFileReset(void)
+{
+    _bind_check = -1;
+    memset(&_lfversion, 0, 4);
+    return 0;
+}
+
+/* sceSifGetNextRequest: pop the queue's next pending request, with
+ * interrupts off, and leave `active` set only while one is out.
+ *
+ * Reading `next` into a local BEFORE storing to the queue is
+ * load-bearing: it is what gcc hoists into the branch-likely delay slot
+ * (`bnezl` + `lw v1,60(s1)`).  Written as `q->start = p->next;` last,
+ * the `li v0,1` goes in the slot instead and two words differ. */
+void *sceSifGetNextRequest(SifRpcDataQueue *q)
+{
+    SifRpcServerData *p;
+    SifRpcServerData *next;
+
+    DIntr();
+    p = q->start;
+    if (p == 0) {
+        q->active = 0;
+    } else {
+        next = p->next;
+        q->active = 1;
+        q->start = next;
+    }
+    EIntr();
+    return p;
+}
+
+/* sceSifRemoveRpcQueue: unlink a queue from the global queue list and
+ * return the node that preceded it (0 if it was not found). */
+SifRpcDataQueue *sceSifRemoveRpcQueue(SifRpcDataQueue *q)
+{
+    SifRpcDataQueue *p;
+
+    DIntr();
+    p = (SifRpcDataQueue *)_data_table_00993280[10];
+    if (p == q) {
+        _data_table_00993280[10] = p->next;
+    } else {
+        while (p != 0) {
+            if (p->next == q) {
+                p->next = q->next;
+                break;
+            }
+            p = p->next;
+        }
+    }
+    EIntr();
+    return p;
+}
+
+/* sceSifRemoveRpc: same unlink, one level down -- take a server out of
+ * its queue's registration list. */
+SifRpcServerData *sceSifRemoveRpc(SifRpcServerData *sd, SifRpcDataQueue *q)
+{
+    SifRpcServerData *p;
+
+    DIntr();
+    p = q->link;
+    if (p == sd) {
+        q->link = p->link;
+    } else {
+        while (p != 0) {
+            if (p->link == sd) {
+                p->link = sd->link;
+                break;
+            }
+            p = p->link;
+        }
+    }
+    EIntr();
+    return p;
+}
