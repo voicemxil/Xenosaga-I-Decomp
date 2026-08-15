@@ -1995,3 +1995,5 @@ tskUmnSimulationPas = 0x00A0BAF8, 0x210; // tskUmn.c
 tskUmnPluginPas = 0x00A0DE20, 0x214; // tskUmn.c
 tskUmnDataBasePas = 0x00A09818, 0x254; // tskUmn.c
 xglCullingMapCreate = 0x0023EE18, 0xC0; // xglCulling.c
+unit_suspend = 0x00304748, 0x10; // Java_Unit.c
+unit_resume = 0x00304758, 0x14; // Java_Unit.c

@@ -108,8 +108,14 @@ void UNIT_sclY(int nMode, void *pEnv, JVAL *pArgs, JVAL *pRet);
 void UNIT_sclZ(int nMode, void *pEnv, JVAL *pArgs, JVAL *pRet);
 void MDL_setVisible(void *pModel, int nPart, int nVisible);
 void MAP_callUnitGroup(int nGroup, void *pFunc);
-void unit_suspend(void);
-void unit_resume(void);
+void unit_suspend(void *pUnit)
+{
+    *(int *)pUnit |= 0x10;
+}
+void unit_resume(void *pUnit)
+{
+    *(int *)pUnit &= ~0x10;
+}
 void copyArgs_00303EC8(void *pDst, void *pSrc, int nSize);
 int ACT_jointGetAccessories(void *pParent, int nJoint);
 void UNIT_setUpdate(void *pObject, void *pParent);
