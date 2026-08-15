@@ -125,7 +125,7 @@ void FCV2_resetPack(void *pPack, void *pCurve);
 JNT_ELEMENT *JNT_getStaticVal2(JNT_WORK *pWork, JNT_ELEMENT *pElement);
 
 /* Element count of the model currently loaded in the work area */
-int JNT_hairID_002DA9C0(JNT_WORK *pWork)
+int JNT_hairID(JNT_WORK *pWork)
 {
     return pWork->pModel->nElementNum;
 }

@@ -140,10 +140,16 @@ void MDL_create(int *, int);
 void MAP_drawUnitAt(MAPUNIT *);
 void MAP_updateUnitDefault(MAPUNIT *);
 float Get_Angle(float *, float *);
+extern short D_003386D0[];
 
 void MapInit(void)
 {
     UseTestPath = 0;
+}
+
+int MapGetNo(void)
+{
+    return D_003386D0[0];
 }
 
 /* Select the map data path for the current test-path setting */

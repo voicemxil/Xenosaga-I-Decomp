@@ -22,6 +22,11 @@ typedef struct {
 
 extern PRINT_FUNC PrintFunc[];
 
+int ePrintWHGet(void)
+{
+    return 0;
+}
+
 typedef struct {
     char pad_00[0x11];
     unsigned char type;
