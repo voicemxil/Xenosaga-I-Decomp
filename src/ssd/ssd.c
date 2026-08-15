@@ -1480,6 +1480,10 @@ void RssdSpuRead(RSSD_PACKET *pPkt)
     }
 }
 
+/* Ruled out: a --branch-likely site sweep (0..11) leaves this at 43
+ * diffs at every site, so the missing beqzl is not an annul-bit flip --
+ * the body itself diverges. Do not re-request that flag. */
+
 /* Wake the background-wave thread once its data has arrived */
 void RssdBackgroundNextWave(RSSD_PACKET *pPkt)
 {
