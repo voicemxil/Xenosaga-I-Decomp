@@ -2226,3 +2226,7 @@ sceMcMkdir = 0x0020EE80, 0x34; // sceMc.c
 scePadReqIntToStr = 0x0020BE30, 0x34; // scePad.c
 scePadStateIntToStr = 0x0020BD40, 0x34; // scePad.c
 sceCdGetReadPos = 0x0020DC68, 0x30; // sceCd.c
+RssdFuncCallCompleted = 0x00240250, 0x38; // ssd.c
+SsdGetResultParam = 0x00240328, 0x88; // ssd.c
+SsdNextWaveData = 0x00240818, 0x78; // ssd.c
+SsdQuit = 0x0023FB08, 0x88; // ssd.c

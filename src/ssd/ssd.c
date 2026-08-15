@@ -1488,3 +1488,245 @@ void RssdBackgroundNextWave(RSSD_PACKET *pPkt)
         WakeupThread(RssdWork.nWakeupThreadId);
     }
 }
+
+extern int WaitSema(int);
+extern void RssdSifRpcCallback(void);
+extern int sceSifCallRpc(void *pCd, unsigned int nFno, int nMode,
+                          void *pSend, int nSSize, void *pRecv, int nRSize,
+                          void *pEndFunc, void *pEndArg);
+extern int RssdFuncCallCompleted(int);
+
+/* Marshal one driver command into the IOP request buffer and dispatch it
+ * over the SIF RPC bridge; blocks until the IOP-side call completes.
+ * RssdWork holds an embedded SifRpcClientDataStruct at +0x120, the request
+ * buffer pointer at +0x34 and the guarding semaphore id at +0x1B4 -- none
+ * of these are named fields in RSSD_WORK yet since no other matched
+ * function reaches into them. */
+int RssdCallFunc(int nCmd, RSSD_PACKET *pPacket, void *pData, int nSize)
+{
+    RSSD_WORK *p;
+    int nFlags;
+    RSSD_PACKET *pBuf;
+    int nBufSize;
+    int nRet;
+
+    p = &RssdWork;
+    WaitSema(*(int *)((char *)p + 0x1B4));
+    nFlags = p->nFlags;
+    if (pData == 0) {
+        nSize = 0;
+    }
+    pBuf = *(RSSD_PACKET **)((char *)p + 0x34);
+    p->nResultCode = -1;
+    if (pPacket != 0) {
+        *pBuf = *pPacket;
+    }
+    p->nFlags = nFlags | 8;
+
+    nBufSize = ((nSize + 15) & ~15) + 32;
+    *(short *)((char *)pBuf + 0) = (short)nCmd;
+    *(int *)((char *)pBuf + 12) = nSize;
+    if (0x10020 < nBufSize) {
+        printf("Rssd sif transfer size over !!\n");
+        p->nFlags &= ~8;
+        SignalSema(*(int *)((char *)p + 0x1B4));
+        return -1;
+    }
+
+    if (nSize != 0) {
+        SsdCopyMemory((char *)pBuf + 32, pData, nSize);
+    }
+    FlushCache(0);
+
+    nRet = sceSifCallRpc((char *)p + 0x120, nCmd, 1, pBuf, nBufSize,
+                          pBuf, 32, (void *)RssdSifRpcCallback, p);
+    if (nRet < 0) {
+        p->nFlags &= ~8;
+        SignalSema(*(int *)((char *)p + 0x1B4));
+        return nRet;
+    }
+
+    RssdFuncCallCompleted(1);
+    return nRet;
+}
+
+/* Argument record for RssdBusy: a realtime note-trigger request that
+ * bypasses the RssdCallFunc/sceSifCallRpc round trip entirely. */
+typedef struct {
+    char pad00[0x10];
+    int nVal10;
+    char pad14[0x4];
+    unsigned short nVal18;
+    short nVal1A;
+    int nVal1C;
+} RSSD_BUSY_ARG;
+
+/* Stash a realtime note-trigger request directly into RssdWork and wake
+ * the IOP-side handler via its own (distinct, +0x1B8) semaphore -- no
+ * sceSifCallRpc round trip.
+ * PARKED near-miss (14/20 words): field offsets/logic verified against
+ * tools/disasm.py -- it is a leaf (tail-calls SignalSema via `j`, no other
+ * calls), so nothing constrains gcc's register choice and permute.py's
+ * exhaustive statement-order sweep (720 orderings) could not find one that
+ * reaches 0 diffs; every ordering bottoms out at 14. Not registered in
+ * config/decompiled.txt. */
+void RssdBusy(RSSD_BUSY_ARG *pArg)
+{
+    RSSD_WORK *p = &RssdWork;
+    int nSema = *(int *)((char *)p + 0x1B8);
+
+    p->nFlags |= 2;
+    *(int *)((char *)p + 8) = pArg->nVal10;
+    p->nResolution = pArg->nVal18;
+    *(short *)((char *)p + 0x12) = pArg->nVal1A;
+    *(int *)((char *)p + 0x14) = pArg->nVal1C;
+    SignalSema(nSema);
+}
+
+/* Spin-poll the completion flag; bWait==0 samples it once. */
+int RssdFuncCallCompleted(int bWait)
+{
+    int nCode;
+
+    do {
+        nCode = RssdGetCallCompletedCode();
+    } while (bWait && nCode != 0);
+    return nCode;
+}
+
+/* Same status decode as SsdGetResultValue, but copies the whole 32-byte
+ * response packet (RssdWork+0x80) out instead of just nResultValue. */
+int SsdGetResultParam(void *pDst)
+{
+    int nFlags;
+    int nResult;
+
+    nFlags = RssdWork.nFlags;
+    if (nFlags & 8) {
+        nResult = (nFlags & 0x20) ? -1 : -2;
+    } else if (RssdWork.nResultCode >= 0) {
+        nResult = ((nFlags >> 5) ^ 1) & 1;
+        *(RSSD_PACKET *)pDst = *(RSSD_PACKET *)((char *)&RssdWork + 0x80);
+    } else {
+        nResult = -3;
+    }
+    return nResult;
+}
+
+/* Queue the next streamed-in wave-data block for the SPU DMA. */
+int SsdNextWaveData(void *pData, int nSize, void *pOwner)
+{
+    RSSD_PACKET pkt;
+
+    SsdSpuDmaCompleted(1);
+    pkt.nArg[0] = (int)pData;
+    pkt.nArg[1] = nSize;
+    pkt.nArg[2] = (int)pOwner;
+    RssdWork.nFlags |= 0x24;
+    RssdCallFunc(0x21, &pkt, pData, nSize);
+    return 0;
+}
+
+extern void SleepThread(void);
+
+/* Background thread: streams the wave-DMA staging buffer to the IOP in
+ * <=64KB chunks, forever. nDmaSize/pDmaAddr track how much is left.
+ * PARKED near-miss (27/34 words): logic and field offsets verified against
+ * tools/disasm.py, but gcc schedules the infinite for(;;) very differently
+ * from the original -- the initial SleepThread() call and the 0x10000
+ * chunk-cap constant get relocated/duplicated. Tried: hoisting 0x10000 into
+ * its own persistent local (worse -- flips movz to movn and swaps which
+ * register holds nDmaSize vs the cap). Not registered in
+ * config/decompiled.txt. */
+void RssdBackNextWaveThread(void)
+{
+    RSSD_WORK *p = &RssdWork;
+    RSSD_PACKET pkt;
+    int nDmaSize;
+    int nChunk;
+    char *pDmaAddr;
+    int nLast;
+    int nFlags;
+
+    SleepThread();
+    for (;;) {
+        nChunk = 0x10000;
+        nDmaSize = p->nDmaSize;
+        if (nDmaSize != 0) {
+            if (nDmaSize <= 0x10000) {
+                nChunk = nDmaSize;
+            }
+            pDmaAddr = p->pDmaAddr;
+            nFlags = p->nFlags;
+            nDmaSize -= nChunk;
+            nLast = ((unsigned int)nDmaSize < 1);
+            pkt.nArg[2] = nLast;
+            p->nFlags = nFlags | 0x24;
+            p->pDmaAddr = pDmaAddr + nChunk;
+            pkt.nArg[0] = (int)pDmaAddr;
+            p->nDmaSize = nDmaSize;
+            pkt.nArg[1] = nChunk;
+            RssdCallFunc(0x21, &pkt, pDmaAddr, nChunk);
+        }
+    }
+}
+
+extern void DeleteSema(int);
+extern void sceSifRemoveRpc(void *pCd, void *pQueue);
+extern void TerminateThread(int);
+extern void DeleteThread(int);
+
+/* Shut the driver down: suspend, tear down the SIF RPC server binding and
+ * the two worker threads (the DMA-fill thread at +0x1A4, the wakeup
+ * thread already named p->nWakeupThreadId), then clear the flags. */
+void SsdQuit(void)
+{
+    RSSD_WORK *p = &RssdWork;
+    RSSD_PACKET pkt;
+
+    p->nFlags &= ~0x20;
+    RssdCallFunc(2, &pkt, 0, 0);
+    RssdFuncCallCompleted(1);
+    DeleteSema(*(int *)((char *)p + 0x1B4));
+    sceSifRemoveRpc((char *)p + 0x148, (char *)p + 0x18C);
+    TerminateThread(*(int *)((char *)p + 0x1A4));
+    DeleteThread(*(int *)((char *)p + 0x1A4));
+    TerminateThread(p->nWakeupThreadId);
+    DeleteThread(p->nWakeupThreadId);
+    p->nFlags = 0;
+}
+
+extern void iSignalSema(int);
+
+/* SIF RPC end-callback for RssdCallFunc's request: copy the IOP's 32-byte
+ * response into RssdWork+0x80, and if this wasn't a fire-and-forget call
+ * (p->something0x82 == 0) invoke the registered pFuncFunc callback with
+ * the "error" bit (nFlags bit 5) and the response buffer, then wake
+ * whoever's waiting via iSignalSema and clear pFuncFunc.
+ * PARKED near-miss (only 3/46 words -- the trailing sync/ei -- confirmed
+ * matching): logic and every field offset verified against
+ * tools/disasm.py, but the original's inner null-check on pFuncFunc
+ * compiles to a `beqzl` (branch-likely) whose annulled delay slot feeds
+ * the sema-load for the shared tail, and this compiler will not emit
+ * that form from equivalent C here. Candidate for --branch-likely once
+ * closer; not registered in config/decompiled.txt. */
+void RssdSifRpcCallback(void)
+{
+    RSSD_WORK *p = &RssdWork;
+
+    p->nFlags &= ~8;
+    *(RSSD_PACKET *)((char *)p + 0x80) =
+        **(RSSD_PACKET **)((char *)p + 0x34);
+    if (*(short *)((char *)p + 0x82) == 0) {
+        void *pResp = (char *)p + 0x80;
+        int nBit = (p->nFlags >> 5) & 1;
+        void (*pFunc)(int, void *, void *) = (void (*)(int, void *, void *))p->pFuncFunc;
+
+        if (pFunc != 0) {
+            pFunc(nBit, pResp, p->pFuncArg);
+        }
+    }
+    iSignalSema(*(int *)((char *)p + 0x1B4));
+    p->pFuncFunc = 0;
+    __asm__ __volatile__("sync.l\n\tei\n");
+}
