@@ -234,8 +234,9 @@ reaches memory. The remaining differences to close, in order:
    fails, this is the cause, and the fix is to carry those sections through
    from the original rather than re-emit them.
 3. **Strip before running.** `mips64r5900el-ps2-elf-strip` on the built ELF
-   brings it to roughly retail size and removes any chance of the emulator
-   tripping over the oversized symbol table.
+   takes it from ~4.1 MB to 3,087,108 bytes — *below* the retail 3,441,932,
+   because retail carries the `.DVP` sections the build does not. The stripped
+   ELF still passes `verify_elf.py --strict`, entry point still `0x200008`.
 
 Two routes to actually running it:
 
