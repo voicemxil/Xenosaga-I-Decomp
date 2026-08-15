@@ -615,6 +615,15 @@ def rotate_insns(flat, sites):
     labels and #-comments are not instructions). The window becomes
     (last, first, ..., second-to-last).
 
+    A NEGATIVE LEN rotates the |LEN|-instruction window the other way --
+    (second, ..., last, first) -- which a right rotation cannot express
+    with a single non-overlapping window (it would need |LEN|-1 of them,
+    and the site index advances past the whole window once one fires).
+    MenuTecL1R1Main:44:-4 is the motivating case: gcc gives the trailing
+    `li 2` of a state store top scheduling priority (its consumer is the
+    branch delay slot at the very end of the block) and issues it before
+    the three constants the retail build put first.
+
     Why this exists: --swap-adjacent can only express independent
     2-element transpositions -- its sites are resolved against the
     pre-swap order and consumed two at a time, so a 3-element rotation
@@ -646,13 +655,17 @@ def rotate_insns(flat, sites):
             idx = 0
         if RE_INSN.match(line):
             span = starts.get((cur, idx))
-            if span and span >= 2 and i + span <= len(flat):
-                window = flat[i:i + span]
+            if span and abs(span) >= 2 and i + abs(span) <= len(flat):
+                window = flat[i:i + abs(span)]
                 if all(RE_INSN.match(w) for w in window):
-                    res.append(window[-1])
-                    res.extend(window[:-1])
-                    idx += span
-                    i += span
+                    if span < 0:
+                        res.extend(window[1:])
+                        res.append(window[0])
+                    else:
+                        res.append(window[-1])
+                        res.extend(window[:-1])
+                    idx += abs(span)
+                    i += abs(span)
                     continue
             idx += 1
         res.append(line)

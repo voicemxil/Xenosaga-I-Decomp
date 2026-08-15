@@ -240,6 +240,7 @@ FILE_FIX_FLAGS = {
                "--swap-adjacent MenuAgwsListMake_Gun:30,"
                "MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30,"
                "MenuModelUnitDispose:15,MenuCfTaikiPush:6 "
+               "--rotate MenuTecL1R1Main:43:-4,MenuEtherL1R1Main:43:-4,MenuSkillL1R1Main:43:-4 "
                "--swap-slot-target MenuShopModelDisp:6"),
     "TMENU.c": "--swap-adjacent TMENU_addItem:4",
     # xgl delay-slot shapes found by the xgl subagent (all verified):

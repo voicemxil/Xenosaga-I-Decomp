@@ -2246,3 +2246,6 @@ JNT_getStaticVal2 = 0x00310C10, 0xF8; // JNT.c
 UmnHistoryTreeGet = 0x00A0F128, 0x24; // Umn.c
 sceCdInitEeCB = 0x0020CB60, 0xD4; // sceCd.c
 sceSifUnloadModule = 0x00207D40, 0x90; // sceSif.c
+MenuTecL1R1Main = 0x002B0960, 0x220; // Menu.c
+MenuEtherL1R1Main = 0x002AB480, 0x220; // Menu.c
+MenuSkillL1R1Main = 0x002B8110, 0x220; // Menu.c

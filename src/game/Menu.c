@@ -2274,12 +2274,27 @@ void MenuEtherCapSet(void)
     }
 }
 
-/* --- Game-state push (actor snapshot) --- */
+/* --- Game-state push/pop (actor snapshot) ---
+   The actor slot is 0xA70 bytes and is copied wholesale with ld/sd pairs,
+   so the leading quadword array is what pins the struct's 8-byte alignment;
+   the named fields are the handful MenuGameDataPop touches. */
 typedef struct {
-    long long d[0x14E];        /* 0xA70 bytes */
+    long long d000[0x10];      /* 0x000 */
+    char pad080[6];
+    short nFace;               /* 0x086: party face/portrait id, 0 = empty */
+    char pad088[0x70A - 0x88];
+    unsigned short nMotBank;   /* 0x70A: which motion bank pair is live */
+    char pad70C[0x824 - 0x70C];
+    int f824;                  /* 0x824 */
+    int f828;                  /* 0x828 */
+    int f82C;                  /* 0x82C */
+    int f830;                  /* 0x830 */
+    char pad834[0xA70 - 0x834];
 } MENUGAMEDATA;
 typedef struct {
-    char pad0[0x10];
+    char pad0[4];
+    MENUGAMEDATA *pCur;        /* 0x004: the actor slot the player drives */
+    char pad8[0x10 - 8];
     long long f10;             /* 0x10 */
     char pad18[0x250 - 0x18];
     MENUGAMEDATA aKeep[64];    /* 0x250 */
@@ -2287,6 +2302,8 @@ typedef struct {
 extern GAMELOOPSTATE GameLoopState;
 extern MENUGAMEDATA actor[];
 extern void GameStateSave(void);
+
+typedef char MENUGAMEDATA_size_check[sizeof(MENUGAMEDATA) == 0xA70 ? 1 : -1];
 
 /* Snapshot all 64 actor slots into the game-loop keep area, then save state */
 void MenuGameDataPush(void)
@@ -2297,6 +2314,92 @@ void MenuGameDataPush(void)
         GameLoopState.aKeep[i] = actor[i];
     }
     GameStateSave();
+}
+
+typedef struct {
+    char pad00[0x2C];
+    unsigned short nFace;      /* 0x2C */
+} MENUPARTYDATA;
+extern void GameStateRestore(void);
+extern void ACT_setModelWrapper(MENUGAMEDATA *, int);
+extern void ACT_setHumanHand(MENUGAMEDATA *, int);
+extern void ACT_setMotion2(MENUGAMEDATA *, int, int);
+extern void ACT_updateMotion(MENUGAMEDATA *);
+
+/* Flip the actor's double-buffered motion-bank pointer pair */
+static __inline__ void MenuGameDataMotionFlip(MENUGAMEDATA *p)
+{
+    int a;
+    int b;
+
+    a = p->f824;
+    b = p->f82C;
+    p->f824 = p->f828;
+    p->f828 = a;
+    p->f82C = p->f830;
+    p->f830 = b;
+    p->nMotBank = (p->nMotBank + 1) & 1;
+}
+
+/* TODO: near-miss (47 diffs, length now exact at 125) - every block, the
+   struct copy, the two motion flips and the whole tail from the second flip
+   onward line up. What is left: the head's address add comes out base-first
+   (addu $a0,$s5,$s1) where the retail build has offset-first
+   (addu $v1,$s1,$s5), which also costs the two delay-slot rematerialisations
+   of that address, and pd/bReload land in $a1/$a2 instead of $a0/$a1 (which
+   shifts the struct-copy temporaries by one register). Needs an operand-order
+   lever on the induction add, not a C-level change. */
+/* Restore the saved game state, then bring every actor slot back in sync:
+   the slot the player currently drives is re-seeded from the keep area (with
+   the live party face patched in) and re-primed through the motion pipeline;
+   every other populated slot just gets its motion stepped. */
+void MenuGameDataPop(void)
+{
+    MENUPARTYDATA *pd;
+    MENUGAMEDATA *p;
+    MENUGAMEDATA *pActor;
+    short i;
+    int bReload;
+
+    /* base-launder: the retail build hoists a full %hi+%lo actor base out
+       of the loop for the head comparison (so the address recompute fits a
+       delay slot) while re-materialising %lo from the kept %hi in the tail;
+       without the launder gcc keeps only the %hi and re-adds %lo twice. */
+    /* base-launder: the retail build hoists a full %hi+%lo actor base out of
+       the loop for the head comparison (so the address recompute is a single
+       addu that fits a delay slot) while re-materialising %lo from the kept
+       %hi in the tail; without it gcc keeps only %hi and re-adds %lo twice. */
+    pActor = actor;
+    LAUNDER(pActor);
+    GameStateRestore();
+    for (i = 0; i < 64; i++) {
+        pd = (MENUPARTYDATA *)PartyDataGet();
+        bReload = 0;
+        if (&pActor[i] == GameLoopState.pCur) {
+            if (GameLoopState.aKeep[i].nFace != 0) {
+                if (GameLoopState.aKeep[i].nFace != pd->nFace) {
+                    GameLoopState.aKeep[i].nFace = pd->nFace;
+                    pActor[i] = GameLoopState.aKeep[i];
+                    bReload = 1;
+                }
+            }
+        }
+        if (actor[i].nFace != 0) {
+            p = &actor[i];
+            if (bReload) {
+                ACT_setModelWrapper(p, 0);
+                ACT_setHumanHand(p, 0);
+                ACT_setMotion2(p, 0, 8);
+                ACT_updateMotion(p);
+                MenuGameDataMotionFlip(p);
+                ACT_setMotion2(p, 0, 8);
+                ACT_updateMotion(p);
+                MenuGameDataMotionFlip(p);
+            } else {
+                ACT_updateMotion(p);
+            }
+        }
+    }
 }
 
 /* Mark a technique's wait-up slot used: bump its level and deduct the cost.
@@ -2456,7 +2559,9 @@ typedef struct {
     unsigned char b44;         /* 0x44 */
 } MENUSAVEWORK;
 typedef struct {
-    char pad0[0x32];
+    char pad0[0x2A];
+    unsigned short hHeld;      /* 0x2A */
+    char pad2C[0x32 - 0x2C];
     unsigned short h32;        /* 0x32: repeat/level mirror of trig */
     unsigned short trig;       /* 0x34 */
     char pad36[0x56 - 0x36];
@@ -4432,4 +4537,251 @@ void MenuSkillListChange01(void)
     WindowSPItemChange(win);
     WindowSPSetSelect(win, &D_0036C200[20]);
     WindowSPSelect(win, 0);
+}
+
+/* ================= Wave 6: L1/R1 tab indicators ================= */
+
+/* A 0x28-byte eSprite object. The Menu screens keep the position and
+   colour fields hot and let eSpriteMain do the drawing. */
+typedef struct {
+    char pad00[4];
+    short nX;                  /* 0x04 */
+    short nY;                  /* 0x06 */
+    int nColor;                /* 0x08 */
+    char pad0C[0x28 - 0x0C];
+} ESPRITE;
+
+extern void eSpriteSet(ESPRITE *pSpr, short nId);
+extern void eSpriteMain(ESPRITE *pSpr);
+extern void MoveSlide(short *pPos, short *pTarget, float fSpeed);
+
+/* The L1/R1 page-flip arrows drawn at the left and right screen edges.
+   Each screen family (Tec / Ether / Skill) owns one of these work blocks
+   through a small-data pointer. nStep is the one-shot "button pressed"
+   nudge: it kicks the arrow off its resting X and then decays back to 0
+   one unit a frame (+1 for the left arrow, -1 for the right). */
+typedef struct {
+    unsigned char nState;      /* 0x00 */
+    char pad01;
+    signed char nStep[2];      /* 0x02: left / right press nudge */
+    int nColor;                /* 0x04 */
+    ESPRITE spr[2];            /* 0x08: left arrow, right arrow */
+} MENU_L1R1_WORK;
+
+extern MENU_L1R1_WORK *MenuTecL1R1;
+
+/* Tec screen L1/R1 arrows: slide in when the sub-menu is on page 32,
+   kick on a shoulder press, otherwise park off-screen.
+
+   The case-2 label sits inside case 0's block on purpose: the retail frame
+   gives nId, nTarget and nDecay three separate 16-byte stack slots, which
+   only happens while all three scopes are live at once. Closing case 0's
+   block before the per-frame code lets gcc recycle nId's slot for nTarget
+   and the whole frame shrinks by 16. */
+void MenuTecL1R1Main(void)
+{
+    MENU_L1R1_WORK *w;
+    signed char *pStep;
+    int i;
+
+    w = MenuTecL1R1;
+    switch (w->nState) {
+    case 0:
+    {
+        short nId[2] = { 274, 272 };
+        short nTarget[2];
+
+        w->nColor = 0xFFFFFF;
+        for (i = 0; i < 2; i++) {
+            eSpriteSet(&w->spr[i], nId[i]);
+            w->spr[i].nColor = w->nColor;
+            w->spr[i].nY = 140;
+        }
+        w->spr[0].nX = -45;
+        w->spr[1].nX = 528;
+        w->nStep[1] = 0;
+        pStep = w->nStep;
+        w->nStep[0] = 0;
+        w->nState = i;
+    case 2:
+        nTarget[0] = -45;
+        nTarget[1] = 528;
+        if (MenuWork.state == 32) {
+            nTarget[0] = 8;
+            nTarget[1] = 475;
+            if (PadData.hHeld & 4) {
+                w->nStep[0] = -6;
+            } else if (PadData.hHeld & 8) {
+                w->nStep[1] = 6;
+            }
+        }
+        pStep = w->nStep;
+        {
+            /* pin: the retail decay loop keeps its own copy of the nStep
+               base in $a2 instead of reusing the $s4 the draw loop walks. */
+            PIN(signed char *pDec, "$6");
+            signed char nDecay[2] = { 1, -1 };
+
+            i = 0;
+            pDec = pStep;
+            for (; i < 2; i++) {
+                if (pDec[i] != 0) {
+                    pDec[i] = pDec[i] + nDecay[i];
+                }
+            }
+        }
+        for (i = 0; i < 2; i++) {
+            MoveSlide(&w->spr[i].nX, &nTarget[i], 3.0f);
+            w->spr[i].nX = w->spr[i].nX + w->nStep[i];
+            eSpriteMain(&w->spr[i]);
+        }
+        break;
+    }
+    default:
+        return;
+    }
+}
+
+extern MENU_L1R1_WORK *MenuEtherL1R1;
+
+/* Ether screen L1/R1 arrows: slide in when the sub-menu is on page 32,
+   kick on a shoulder press, otherwise park off-screen.
+
+   Byte-identical to MenuTecL1R1Main apart from the work pointer and the
+   arrow Y; see that function for why the case-2 label lives inside case
+   0's block. */
+void MenuEtherL1R1Main(void)
+{
+    MENU_L1R1_WORK *w;
+    signed char *pStep;
+    int i;
+
+    w = MenuEtherL1R1;
+    switch (w->nState) {
+    case 0:
+    {
+        short nId[2] = { 274, 272 };
+        short nTarget[2];
+
+        w->nColor = 0xFFFFFF;
+        for (i = 0; i < 2; i++) {
+            eSpriteSet(&w->spr[i], nId[i]);
+            w->spr[i].nColor = w->nColor;
+            w->spr[i].nY = 214;
+        }
+        w->spr[0].nX = -45;
+        w->spr[1].nX = 528;
+        w->nStep[1] = 0;
+        pStep = w->nStep;
+        w->nStep[0] = 0;
+        w->nState = i;
+    case 2:
+        nTarget[0] = -45;
+        nTarget[1] = 528;
+        if (MenuWork.state == 32) {
+            nTarget[0] = 8;
+            nTarget[1] = 475;
+            if (PadData.hHeld & 4) {
+                w->nStep[0] = -6;
+            } else if (PadData.hHeld & 8) {
+                w->nStep[1] = 6;
+            }
+        }
+        pStep = w->nStep;
+        {
+            /* pin: the retail decay loop keeps its own copy of the nStep
+               base in $a2 instead of reusing the $s4 the draw loop walks. */
+            PIN(signed char *pDec, "$6");
+            signed char nDecay[2] = { 1, -1 };
+
+            i = 0;
+            pDec = pStep;
+            for (; i < 2; i++) {
+                if (pDec[i] != 0) {
+                    pDec[i] = pDec[i] + nDecay[i];
+                }
+            }
+        }
+        for (i = 0; i < 2; i++) {
+            MoveSlide(&w->spr[i].nX, &nTarget[i], 3.0f);
+            w->spr[i].nX = w->spr[i].nX + w->nStep[i];
+            eSpriteMain(&w->spr[i]);
+        }
+        break;
+    }
+    default:
+        return;
+    }
+}
+
+extern MENU_L1R1_WORK *MenuSkillL1R1;
+
+/* Skill screen L1/R1 arrows: slide in when the sub-menu is on page 32,
+   kick on a shoulder press, otherwise park off-screen.
+
+   Byte-identical to MenuTecL1R1Main apart from the work pointer and the
+   arrow Y; see that function for why the case-2 label lives inside case
+   0's block. */
+void MenuSkillL1R1Main(void)
+{
+    MENU_L1R1_WORK *w;
+    signed char *pStep;
+    int i;
+
+    w = MenuSkillL1R1;
+    switch (w->nState) {
+    case 0:
+    {
+        short nId[2] = { 274, 272 };
+        short nTarget[2];
+
+        w->nColor = 0xFFFFFF;
+        for (i = 0; i < 2; i++) {
+            eSpriteSet(&w->spr[i], nId[i]);
+            w->spr[i].nColor = w->nColor;
+            w->spr[i].nY = 214;
+        }
+        w->spr[0].nX = -45;
+        w->spr[1].nX = 528;
+        w->nStep[1] = 0;
+        pStep = w->nStep;
+        w->nStep[0] = 0;
+        w->nState = i;
+    case 2:
+        nTarget[0] = -45;
+        nTarget[1] = 528;
+        if (MenuWork.state == 32) {
+            nTarget[0] = 8;
+            nTarget[1] = 475;
+            if (PadData.hHeld & 4) {
+                w->nStep[0] = -6;
+            } else if (PadData.hHeld & 8) {
+                w->nStep[1] = 6;
+            }
+        }
+        pStep = w->nStep;
+        {
+            /* pin: the retail decay loop keeps its own copy of the nStep
+               base in $a2 instead of reusing the $s4 the draw loop walks. */
+            PIN(signed char *pDec, "$6");
+            signed char nDecay[2] = { 1, -1 };
+
+            i = 0;
+            pDec = pStep;
+            for (; i < 2; i++) {
+                if (pDec[i] != 0) {
+                    pDec[i] = pDec[i] + nDecay[i];
+                }
+            }
+        }
+        for (i = 0; i < 2; i++) {
+            MoveSlide(&w->spr[i].nX, &nTarget[i], 3.0f);
+            w->spr[i].nX = w->spr[i].nX + w->nStep[i];
+            eSpriteMain(&w->spr[i]);
+        }
+        break;
+    }
+    default:
+        return;
+    }
 }
