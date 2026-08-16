@@ -1809,6 +1809,65 @@ extern void eMessageCat(char *pText);
 extern char *MenuNumberTextGet(int nValue, int nDigits, int nMode);
 extern void *memset(void *pDst, int nVal, unsigned int nSize);
 
+/* ------------------------------------------------------------------
+ * RECONNAISSANCE for the two remaining unwritten mail screens.  Both
+ * were fully disassembled and their work areas solved; neither is
+ * written yet.  Recorded so the next pass starts from the layout
+ * rather than from the raw overlay.
+ *
+ * tskUmnMailDisp @ 0x00A06EB0, 0xC88 (802 insns), 81-arm jump table at
+ * 0x00A12870 (default 0xA078B8 = the `if (w->bReady)` trailer):
+ *   arm  0 -> 0xA070C0   arm 10 -> 0xA070CC   arm 20 -> 0xA070E8
+ *   arm 30 -> 0xA07178   arm 40 -> 0xA07258   arm 50 -> 0xA07680
+ *   arm 60 -> 0xA07738   arm 70 -> 0xA07798   arm 80 -> 0xA07870
+ * Arm 40 carries a NESTED 5-arm table at 0x00A129C0 indexed by
+ * (w->nMove - 3): {0xA07588, 0xA07588, 0xA075D8, 0xA075E8, 0xA07600}.
+ * Work area (the task's second argument):
+ *   0x000 u8 nState        0x001 u8 bReady      0x002 u8 nMailNo
+ *   0x003 s8 nLine         0x004 s8 nSel        0x005 s8 nMove
+ *   0x006 s8 bCur0         0x007 s8 bCur1
+ *   0x008 short nX         0x00A short nY       0x00C int nColor
+ *   0x010 short nHalfW     0x012 short nHalfH   (the two MoveSlide
+ *         targets; win.nW/nH are 2*these and the uml box 2*these - 6)
+ *   0x014 WINDOWDX win     0x1A8 tyaUml block (tyaUmlDispParamReset)
+ *     0x1A8 int nMail   0x1B0/0x1B2 short x,y   0x1B4/0x1B6 short w,h
+ *     0x1B8 long long colour   0x1C0 short   0x1C2 short nScroll
+ *     0x1C6 short nTotalH      0x1D0 u8 nPages  0x1D2 short a[]
+ *   0x1E8 short nArrowY (MoveSlide target)
+ *   0x1EC cursor[2], stride 0x24 (byte +0 = 32, int +8 = 0x00F00010,
+ *         short nX +4 / nY +6) -- eCursolSet(&cur[i], i + 1)
+ *   0x234 EMSG msg (nFont 32, colour 0x00F00000)
+ *   0x278 int nTex = UmnTexAddr, passed to endPrintExtFunc(0, 14, &it)
+ *   0x27C sprite[4], stride 40 (colour +8 = 0x00F00000); their ids come
+ *         from a LOCAL `short aId[4] = {0x1901, 0x1900, 0x1902, 0x1903}`
+ *         -- the initialiser list is what gives retail's unaligned
+ *         ldl/ldr copy out of rodata (see LEVERS).
+ *   0x31C s8 aOfs[4]
+ * Constants: colour 0x00F00000, win 528x300 at (528,112), uml page
+ * 256x259, xglFontDebugPrintf(16,128,"scrol_type : %2d",w->nMove) and
+ * (16,136,"now_page : %2d",w->nLine).  PadData needs two more named
+ * halfwords: +0x30 and +0x32 (the arm-40 scroll tests read 0x30/0x32/
+ * 0x34 as well as the existing trig.b.h at 0x2A).
+ *
+ * tskUmnMailFolder @ 0x00A05F40, 0xF6C (987 insns), 91-arm table at
+ * 0x00A126D0 (default 0xA067D4):
+ *   0 -> 0xA060E0   10 -> 0xA060EC   20 -> 0xA061D0   30 -> 0xA062A0
+ *   32 -> 0xA06314  34 -> 0xA06398   40,42 -> 0xA06430 45 -> 0xA064F8
+ *   50 -> 0xA06550  60 -> 0xA06640   70 -> 0xA066A0   80 -> 0xA066F8
+ *   90 -> 0xA06760
+ * Work area: 0x000 nState, 0x001 bReady, 0x003 nNum, 0x004/6 nX/nY,
+ * 0x008 nColor (0x00FF0000), 0x00C row[6] stride 0x2C8 (row+8/+0x0A =
+ * nX/nY, row+0x0C = WINDOWDX, win.nW 440, win.nH 54), 0x10BC cursor
+ * (+8 = nColor+2), 0x10E0 int, 0x10E4 cursor (+8 = nColor+8), 0x1108
+ * cursor (+8 = nColor+8), 0x112C int bFrame, 0x1130 PRINTBOX, 0x113C
+ * int nTex.  The init loop counts s6 5->0 with `bgez` at the latch.
+ * WARNING: the draw trailer at 0xA06B58 keeps ELEVEN parallel induction
+ * pointers in stack slots 44..84(sp) and steps every one of them at the
+ * latch -- that is the same giv-GROUPING problem tskUmnPluginExWin is
+ * parked on, and it is the whole risk in this function.  Everything
+ * before 0xA06B58 is ordinary state-machine work.
+ * ------------------------------------------------------------------ */
+
 /* --- Database screen: the two-column grid of monster NAME buttons --- */
 
 extern unsigned short monster_folder[];
