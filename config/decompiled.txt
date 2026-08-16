@@ -2806,3 +2806,4 @@ _ApplyMatrix33 = 0x0023F8B0, 0x2C; // nmlModel.c
 _ApplyMatrix = 0x0023F8E0, 0x30; // nmlModel.c
 _ApplyMatrix2Mat = 0x0023F910, 0x50; // nmlModel.c
 queue_next = 0x0021CF98, 0x94; // xglCd.c
+GameResourceReset = 0x0024D8E8, 0x11C; // GameResource.c

@@ -97,7 +97,7 @@ def cc_for(name):
 # stride stays 8 bytes/reg (2.96), ruling out the SDK 2.9-ee compiler --
 # this is a lone -G threshold difference, not a compiler-family swap.
 FILE_CFLAGS_OVERRIDE = {
-    "sceVif1PkRefLoadImage.c": "-O2 -G0 -mgpopt",
+    "sceVif1PkRefLoadImage.c": "-O2 -G0",
     "sceMpegDec.c": "-O2 -G0",
     "sceTty.c": "-O2 -G0",
     "sceFs.c": "-O2 -G0",

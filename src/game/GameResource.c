@@ -127,3 +127,51 @@ int GameResourceRealloc(int nId, unsigned int nSize)
     }
     return nId;
 }
+
+extern void GameResourceDump(int nNo);
+extern void xglSoundSendEffect(int a, int b, int c);
+extern int arcfilepreload;
+
+typedef struct {
+    short nUnk00;   /* 0x00 */
+    char  nUnk02;   /* 0x02 */
+    char  nPad03;
+    char  nUnk04;   /* 0x04 */
+    char  nPad05[15];
+} ENEMY_SE_BANK;    /* 0x14 */
+
+extern ENEMY_SE_BANK EnemySeBank[];
+
+/* Release every resource entry from nNo upwards: fold their sizes back into
+ * entry nNo, mark it free, blank the rest, and silence the eight enemy SE
+ * banks that referenced them. */
+void GameResourceReset(int nNo)
+{
+    int i;
+    int nTotal;
+    ENEMY_SE_BANK *pBank;
+
+    nTotal = 0;
+    for (i = nNo; i < 128; i++) {
+        nTotal += GameResource[i].nUnk04;
+    }
+    GameResource[nNo].nUnk04 = nTotal;
+    GameResource[nNo].nUnk0C = -1;
+    GameResource[nNo].nUnk08 = 0;
+    for (i = nNo + 1; i < 128; i++) {
+        GameResource[i].nId = 0;
+        GameResource[i].nUnk04 = 0;
+        GameResource[i].nUnk08 = 0;
+        GameResource[i].nUnk0C = -1;
+    }
+    pBank = EnemySeBank;
+    for (i = 0; i < 8; i++) {
+        pBank->nUnk00 = 0;
+        pBank->nUnk02 = 0;
+        pBank->nUnk04 = 0;
+        xglSoundSendEffect(0, 0, i + 4);
+        pBank++;
+    }
+    GameResourceDump(0);
+    arcfilepreload = 0;
+}
