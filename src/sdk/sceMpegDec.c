@@ -86,7 +86,8 @@ typedef struct {
     char pad824[0x4];
     long long llUnk828;          /* 0x828 */
     long long llUnk830;          /* 0x830 */
-    char pad838[0x8];
+    int nUnk838;                 /* 0x838 */
+    int nUnk83C;                 /* 0x83C */
     int nUnk840;                 /* 0x840 */
     int nUnk844;                 /* 0x844 */
     char pad848[0x4];
@@ -623,4 +624,53 @@ int _nextHeader(MPEGSTREAM *pStream)
             return 0;
         }
     }
+}
+
+/* ---- bit buffer ------------------------------------------------------- */
+
+extern long long _waitIpuIdle64(MPEGSTREAM *pStream);
+
+/* Drop nBits from the bit buffer, refilling the 32-bit peek window. */
+void _flushBuf(MPEGSTREAM *pStream, u_int nBits)
+{
+    u_int nCmd;
+    int nTop;
+    int i;
+
+    i = 0;
+    while ((IPU_CTRL & 0x80004000) == 0x80000000) {
+        if (i++ > 5000) {
+            _dispatchMpegCbNodata(pStream->pUnk858);
+            i = 0;
+        }
+    }
+    nCmd = nBits | 0x40000000;
+    IPU_CMD = nCmd;
+    pStream->nUnk818 = D_004AD680[nCmd >> 28];
+    nTop = _waitIpuIdle64(pStream);
+    pStream->nUnk838 = nTop;
+    pStream->nUnk83C = 32;
+}
+
+/* Look at the next nBits without consuming them. */
+u_int _peepBit(MPEGSTREAM *pStream, u_int nBits)
+{
+    int nTop;
+    int i;
+
+    if (pStream->nUnk818 != 0 || pStream->nUnk83C < (int)nBits) {
+        i = 0;
+        while ((IPU_CTRL & 0x80004000) == 0x80000000) {
+            if (i++ > 5000) {
+                _dispatchMpegCbNodata(pStream->pUnk858);
+                i = 0;
+            }
+        }
+        IPU_CMD = 0x40000000;
+        pStream->nUnk818 = D_004AD680[0x40000000 >> 28];
+        nTop = _waitIpuIdle64(pStream);
+        pStream->nUnk838 = nTop;
+        pStream->nUnk83C = 32;
+    }
+    return (u_int)pStream->nUnk838 >> (32 - nBits);
 }

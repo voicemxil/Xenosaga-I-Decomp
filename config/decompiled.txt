@@ -2787,3 +2787,5 @@ _sliceA0 = 0x00212AD0, 0x12C; // sceMpegDec.c
 sefInitScheduler = 0x002E4F78, 0xC4; // sef.c
 _nextHeader = 0x00213E00, 0x10C; // sceMpegDec.c
 nmlPacketAddExecProg = 0x00238BA8, 0x1FC; // nmlPacket.c
+_flushBuf = 0x00213AD8, 0xF0; // sceMpegDec.c
+_peepBit = 0x002139D0, 0x108; // sceMpegDec.c
