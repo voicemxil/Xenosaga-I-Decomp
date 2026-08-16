@@ -111,3 +111,36 @@ void HddTestHddFull(void)
     r = sceClose(fd);
     printf("close:%d\n", r);
 }
+
+/* Fill the common partition with 256 numbered directories.
+
+   The three digits must be produced by REPEATEDLY dividing a running
+   value by 10, not by i%10 / i/10%10 / i/100%10: the latter lets gcc
+   compute i/100 directly (an extra div/div1 pair). The loop also has to
+   exit through a `break` on the sceMkdir failure rather than a compound
+   `while (r >= 0 && i < 256)` -- the compound form rotates the loop, and
+   a rotated loop has loop-invariant motion off, so the shared `li 10`
+   divisor is rematerialised three times inside instead of once above. */
+void HddTestDummyFolder(void)
+{
+    static char name[] = "pfs1:/000";
+    int i;
+    int n;
+    int r;
+
+    HddTestMountCommon();
+    for (i = 0; i < 256; i++) {
+        n = i;
+        name[8] = n % 10 + '0';
+        n = n / 10;
+        name[7] = n % 10 + '0';
+        n = n / 10;
+        name[6] = n % 10 + '0';
+        r = sceMkdir(name, 511);
+        printf("%s:%d\n", name, r);
+        if (r < 0) {
+            break;
+        }
+    }
+    HddTestUnmountCommon();
+}

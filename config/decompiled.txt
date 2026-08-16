@@ -2702,3 +2702,4 @@ GameResourceSearch = 0x0024A7D0, 0xC8; // GameResource.c
 sdvAllocSpecialWork = 0x002ED350, 0x7C; // sdv.c
 sceGetstat = 0x00206238, 0x1A0; // sceFs.c
 sefSetLightFlag = 0x002E6738, 0x64; // sefIs.c
+HddTestDummyFolder = 0x00255F08, 0xC8; // HddTest.c
