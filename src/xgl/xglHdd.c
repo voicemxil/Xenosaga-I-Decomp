@@ -330,14 +330,31 @@ int Judge_MakeNewSavedata(void);
  * $v0; ours schedules it after, so hi+lo fold into $a0. The $16 pin +
  * barrier reproduces the original pBuf staging through $s0 (was 25/25
  * wrong: branch polarity was also inverted -- fd<0 goes to
- * Judge_MakeNewFolder, fd>=0 to Judge_MakeNewSavedata). */
+ * Judge_MakeNewFolder, fd>=0 to Judge_MakeNewSavedata).
+ * Wave-4 sweep, every one still 6 diffs: staging yoursaves through a
+ * separate pointer variable, pinning that pointer to $2, laundering it,
+ * ordering it before/after the pBuf save, and a tied passthrough for
+ * pBuf.  Dropping the LAUNDER regresses to 23/26.  Also tested and
+ * REJECTED: the hypothesis that sceDopen takes ONE argument and pBuf is
+ * really Judge_MakeNewFolder's second -- which would explain the
+ * original's `move $a1,$s0` sitting after the jal rather than in its
+ * delay slot -- that shape is 14 diffs, so the original really does
+ * hoist the `move $a1,$s0` above the branch.  What is left is that gcc
+ * emits lui/addiu of yoursaves into ONE register while the original
+ * keeps the %hi in $v0 and folds the %lo into the delay-slot addiu that
+ * writes $a0.  No C spelling reaches that, and no reorder flag can
+ * express a move that also renames a register. */
 /* Ensure the memory card has a "Your Saves" folder, creating the folder
  * or an empty savedata block as needed */
 int xglHddMcCheckYourSaves(void *pBuf)
 {
-    PIN(void *p, "$16") = pBuf;
+    /* Split declaration and assignment: matching.h warns that gcc 2.9x
+     * has been observed to drop the address computation of an
+     * initialised PIN across a branch. */
+    PIN(void *p, "$16");
     int nFd;
 
+    p = pBuf;
     LAUNDER(p);
     nFd = sceDopen(yoursaves, p);
     if (nFd < 0) {
