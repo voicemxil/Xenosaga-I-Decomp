@@ -1702,36 +1702,6 @@ typedef struct {
     SPROW row[4];                       /* 0xF2C */
 } UMN_MAILMENU;
 
-/* TODO: PARKED at 30 diffs of 268 words.  The length is right and EVERY
- * branch lands on the same offset as the original, so the control flow
- * and the state split are confirmed.  Three clusters remain:
- *
- *  - the nine header stores between the two WindowDXSet calls schedule
- *    in a different order (the original emits pTitle, nH, pChoices,
- *    pMsg, pPrompt, nColumns, nColor, nW, pFunc; we swap nH/pChoices and
- *    nColor/nW), which drags the 86/169/3 constants into different
- *    registers.  Three source orders swept, all >= this one.
- *  - the row[2] grey test: the original duplicates `li $v0,1' into both
- *    `beqz' delay slots and shares a single `sb', we keep one `li' in a
- *    joined block and take a likely-branch instead.  Swept: nested
- *    if/else-if in both operand orders, `||', and `&&' with the arms
- *    swapped (272 words).
- *  - the page-49 arm materialises the constant 1 twice ($a2 and $a3)
- *    where the original uses one $a2 for both win2.nState and bVisible2.
- *    All 16 orderings of the two arms' three stores were swept; the one
- *    kept (bVisible before nState in the page-83 arm only) is worth 133
- *    diffs on its own.
- *
- * The state-10 dispatch is a `switch (UmnWork.nPage)', NOT an if/else-if
- * chain: a switch puts both case bodies out of line behind the compare
- * chain, an if/else-if inlines the first body and costs four words.
- *
- * Mail screen: two select windows sharing one task.
- *
- * The four-row menu (Read / History / Download / Cancel) slides in from
- * the left when the screen reaches page 49; the yes/no confirmation
- * slides in from the right on page 83.  Rows 1 and 2 grey out when the
- * mail cursor is off a real slot and when a reply is not available. */
 void tskUmnMailMenu(TSK_TASK *pTask, UMN_MAILMENU *w)
 {
     static char *msg00[] = { "Is this okay?", "Yes\nNo" };
@@ -1934,24 +1904,31 @@ typedef struct {
 extern void eSpriteSet(DBEXSPR *pSpr, int nId);
 extern void eSpriteMain(DBEXSPR *pSpr);
 
-/* TODO: PARKED at 19 differing words of 249.  Length, frame layout and
- * every branch offset are right; what is left is three register/order
- * tie-breaks:
+/* TODO: PARKED at 17 differing words of 249.  Length, frame layout and
+ * every branch offset are right.  Two clusters remain:
  *
- *  - the init arm materialises the caption y (288) before the invariant
- *    x (-196), and the sprite x (-45) before the emsg colour base
- *    w+16; retail does both the other way round.
- *  - the page-49 arm loads PadData's trigger halfword three times where
- *    retail loads it twice and widens each with `andi 0xffff'.  Reading
- *    the field at each use (rather than caching it in an int) is what
- *    produced the two `andi's and took this function from 25 to 19;
- *    caching it after the bShow xor instead costs a word back (28).
+ *  - the sprite loop hoists its invariants in the order -45, &spr,
+ *    214, &nSlide; retail emits -45 LAST, after the other three.
+ *  - the page-49 arm loads PadData's trigger halfword three times
+ *    where retail loads it twice and widens each with `andi 0xffff'.
+ *    The andi is a zero-extend that survives only when the loaded
+ *    HImode value has more than one user, i.e. retail holds the
+ *    widened value in one register across both equality tests while
+ *    gcc reloads before the second.
+ *
+ * Fixed since: the row loop's -196 and the sprite loop's -45 shared one
+ * `nX' local.  One C local is one pseudo, so the shared register made
+ * gcc materialise 288 before -196; separate locals, with the row x
+ * assigned first, put `li -196' ahead of `li 288' as retail has it
+ * (19 -> 17).
  *
  * Swept: all six orders of the three sprite-header stores crossed with
- * both orders of the caption x/y stores (twelve builds: nX-first on the
- * sprite header is worth 6 words, the caption order is worth nothing);
- * the trigger halfword as `unsigned short' + `int', as one `int', read
- * once before the test, once after, and at every use. */
+ * both orders of the caption x/y stores (twelve builds); the trigger
+ * halfword as `unsigned short' + `int', as one `int', read once before
+ * the test, once after the bShow xor, re-read inside the xor arm, and
+ * at every use (every cached form costs six words); `nSprX = -45'
+ * before the nId block, inside it, in the for-init, and block-scoped
+ * with the array (no effect on the hoist order). */
 void tskUmnDataBaseExWin(TSK_TASK *pTask, UMN_DBEX *w)
 {
     static char *text[] = {
@@ -2120,28 +2097,37 @@ typedef struct {
 extern void tyaUmlDispParamReset(void *pUml, int nMode);
 extern signed char tyaUmlDatabaseMain(void *pUml);
 
-/* TODO: PARKED at 216 built words against 210 original.  Behaviour,
- * every constant, every struct offset and both dispatch shapes are
- * recovered; the six extra words are all register-allocation:
+/* TODO: PARKED at 216 built words against 210 original (185 differing
+ * words by tools/scratch_diff.py; checkfile.py still prints 191,
+ * because for a length-mismatched function its count is dominated by
+ * the tail shift rather than by the real divergences).
+ * Behaviour, every constant, every struct offset and both dispatch
+ * shapes are recovered; the six extra words are all register
+ * allocation:
  *
  *  - the init arm computes the two record pointers into $t4/$t5 and
  *    then `move's them into $a2/$a3 for eRibbonSet, where retail builds
- *    them in $a2/$a3 once and stores from there (2 words).  Swept: all
- *    six group rotations of the eleven header stores (the emitted order
- *    is a left-rotation of the source order by three GROUPS, which is
- *    how the block got from an 11-store scramble to the two pointer
- *    stores being the only ones out of place); the pointers as locals,
- *    as casts, and read back out of the struct; eRibbonSet prototyped
- *    and unprototyped.
- *  - the trailer materialises the constants 48 and 3 twice each and
- *    loads tag.nY/tag.nColor once per use, where retail keeps each in
- *    the argument register across the store.  Swept: locals for both
- *    constants and both fields (costs two `move's instead, same
- *    length), the stores before and after the argument setup, and
- *    nDigits/nAlign in both orders.
+ *    them in $a2/$a3 once and stores from there (2 words).
+ *  - the trailer materialised the constants 48 and 3 twice each and
+ *    loaded tag.nY/tag.nColor once per use.  Naming each of them once
+ *    (n48, n3, nNumY, nNumColor) is worth six differing words and is
+ *    kept below; it did not shorten the function, so the extra length
+ *    is entirely in the init arm.
  *
- * Whoever picks this up should look for what puts the loaded value in
- * $a1/$a2 directly rather than for another statement order. */
+ * Measured this run: for THIS block the emitted store order is a
+ * left-rotation of the source order by SIX groups, and it is stable --
+ * writing the eleven header stores in retail's own emission order
+ * produced exactly that order rotated by six.  The two pointer stores
+ * are the one exception: whatever the rotation, gcc pushes them three
+ * to four slots later than the pure rotation predicts, which is the
+ * same fact as the two `move's.  So the next thing to try is not
+ * another statement order -- it is whatever makes the pointer that is
+ * ALSO a call argument keep one register for both roles.
+ *
+ * Swept: source order = retail emission order, = that rotated by one,
+ * and the original order; the pointers as `void *' locals, as casts,
+ * and read back out of the struct; eRibbonSet prototyped and
+ * unprototyped. */
 void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
 {
     if (UmnWork.nScene != 2) {
@@ -2223,6 +2209,16 @@ void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
         if (w->bSlide) {
             short nTarget;
             int nTagY;
+            /* One local per value the original keeps in ONE register:
+               the 48 is stored twice and passed to eRibbonMain, the 3
+               is stored twice and passed to eNumberMain, and the two
+               tag fields are stored into `num' AND passed.  Written as
+               repeated literals/field reads gcc materialises each of
+               them a second time for the argument. */
+            int n48;
+            int n3;
+            unsigned short nNumY;
+            int nNumColor;
 
             nTarget = -272;
             if ((UmnWork.nPage >> 4) == 5) {
@@ -2232,23 +2228,27 @@ void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
             if (w->nUmlX == -272) {
                 w->bSlide = 0;
             }
-            w->nUmlY = 48;
+            n48 = 48;
+            w->nUmlY = n48;
             w->rib.nColor = w->nColor;
-            w->rib.nY = 48;
+            w->rib.nY = n48;
             w->rib.nX = w->nUmlX;
-            eRibbonMain(&w->rib, 48);
+            eRibbonMain(&w->rib, n48);
             w->tag.nX = w->nUmlX + 166;
             nTagY = w->nUmlY + 4;
             w->tag.nY = nTagY;
             w->tag.nColor = w->rib.nColor + 1;
             eTagFontMain(&w->tag, nTagY);
+            nNumY = w->tag.nY;
+            nNumColor = w->tag.nColor;
+            n3 = 3;
             w->num.nX = w->tag.nX + 41;
-            w->num.nY = w->tag.nY;
-            w->num.nColor = w->tag.nColor;
+            w->num.nY = nNumY;
+            w->num.nColor = nNumColor;
             w->num.nValue = (w->nUmlTotalI << 16) + (unsigned short)w->nUmlSelI;
-            w->num.nDigits = 3;
-            w->num.nAlign = 3;
-            eNumberMain(&w->num, w->tag.nY, w->tag.nColor, 3);
+            w->num.nDigits = n3;
+            w->num.nAlign = n3;
+            eNumberMain(&w->num, nNumY, nNumColor, n3);
         }
         break;
     }
