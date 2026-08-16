@@ -1169,21 +1169,30 @@ extern void *D_0036D7D8[];
 extern int MenuScenarioNoGet(void);
 
 /* Return a character's display-name pointer, special-cased for Shion pre-scenario-108 */
-/* TODO: near-miss (LOGIC) - the inner assignment compiles to a movn
- * (conditional move) instead of the original's explicit branch; every
- * if-shape tried (nested if, early-return chain) gives the same or worse
- * diff count. Parked after 2 attempts. */
+/* TODO: near-miss (8 diffs). The movn the old note blamed is gone -- the
+ * early-return chain plus the LAUNDER_V below give the retail branch shape,
+ * and dropping the scenario temp removes its pin. Two things remain, and
+ * both resist the reordering passes:
+ *   - the prologue order [li 5, sd s0, sd ra, lui, addu, lw] comes out as
+ *     [sd s0, li 5, lui, addu, lw, sd ra]. --rotate-seq
+ *     MenuCharNameGet:2:2,MenuCharNameGet:4:4 fixes the first four and gets
+ *     to 6 diffs, but the last step (rotating `sd ra` back in front of the
+ *     lui/addu/lw triple) never fires: that window is not contiguous
+ *     instruction lines, so rotate skips it. Not worth two config sites for
+ *     a function that still would not match.
+ *   - the scenario compare writes its result to $v1; the retail build
+ *     overwrites $v0 (the scenario itself, dead after). It is a compiler
+ *     temp, so there is nothing to pin, and a whole-function 2-3 swap would
+ *     break the `li v1,5` and the return value. */
 void *MenuCharNameGet(int nId)
 {
     void *p;
-    PIN(int sc, "$2");
 
     p = D_0036D760[nId];
     if (nId != 5) {
         return p;
     }
-    sc = MenuScenarioNoGet();
-    if (sc >= 108) {
+    if (MenuScenarioNoGet() >= 108) {
         return p;
     }
     p = D_0036D7D8[0];
