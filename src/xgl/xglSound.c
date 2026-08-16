@@ -8,7 +8,9 @@ typedef struct {
 } SOUND_SLOT;
 
 typedef struct {
-    char pad000[0x1C];              /* 0x00 */
+    char pad000[0x8];               /* 0x00 */
+    unsigned char nFill;            /* 0x08 */
+    char pad009[0x13];              /* 0x09 */
     int nRingSize;                  /* 0x1C */
     char *pRead;                    /* 0x20 */
     int nSize;                      /* 0x24 */
@@ -712,4 +714,37 @@ void xglMakeSePacket(short nCode, ...)
         }
         SoundWork.stream.nCount++;
     }
+}
+
+/* Stream watchdog: while fewer than six pre-fill blocks have been
+ * pushed, zero the next 4 KB of the ring and advance; afterwards report
+ * whether the consumer has caught up */
+int stream_check(int nArg, XGL_STREAM *pStr)
+{
+    char *p;
+    int i;
+
+    nArg >>= 8;
+    if (nArg == 0) {
+        return 0;
+    }
+    if (pStr->nFill == 0) {
+        goto one;
+    }
+    if (pStr->nFill < 6) {
+        p = pStr->pRead + pStr->nPos;
+        for (i = 0; i < 4096; i++) {
+            *p = 0;
+            p++;
+        }
+        pStr->nPos = (pStr->nPos + 4096) % pStr->nSize;
+        pStr->nFill++;
+        goto one;
+    }
+    if (pStr->nSent != pStr->nPos) {
+        goto one;
+    }
+    return (nArg == 3) ? -1 : 0;
+one:
+    return 1;
 }
