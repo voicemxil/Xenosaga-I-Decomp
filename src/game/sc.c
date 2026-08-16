@@ -634,13 +634,13 @@ extern int scWaitMissileScript();
 /* State out of range resets the machine; otherwise the handler decides.
  * A nonzero handler result clears the "waiting" flag bit and is returned
  * narrowed to short. */
-int scWaitParseScript(SCTASK *o)
+short scWaitParseScript(SCTASK *o)
 {
     static int (*waitHandlerTbl[])() = {
         scWaitParseNopScript, scWaitParseCntScript, scWaitParseEveScript,
         scWaitParseEftScript, scWaitParseMovieScript, scWaitParseMovScript,
     };
-    short r;
+    int r;
     if (o->waitState >= 6) {
         o->waitState = 0;
         return 1;
@@ -652,12 +652,12 @@ int scWaitParseScript(SCTASK *o)
     return r;
 }
 
-int scMoveParseScript(SCTASK *o)
+short scMoveParseScript(SCTASK *o)
 {
     static int (*moveHandlerTbl[])() = {
         scWaitParseNopScript, scWaitMissileScript,
     };
-    short r;
+    int r;
     if (o->moveState >= 2) {
         o->moveState = 0;
         return 1;

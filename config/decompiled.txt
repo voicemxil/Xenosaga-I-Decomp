@@ -2615,3 +2615,5 @@ MenuShopSortSet = 0x002A36D0, 0x1C8; // Menu.c
 scWaitParseNopScript = 0x002EBD90, 0x8; // sc.c
 scONGOSUBScript = 0x002EAAE0, 0x54; // sc.c
 scWaitParseEftScript = 0x002EBDF0, 0x74; // sc.c
+scWaitParseScript = 0x002EBEA0, 0x6C; // sc.c
+scMoveParseScript = 0x002EC2A0, 0x6C; // sc.c
