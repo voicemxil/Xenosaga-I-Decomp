@@ -3480,17 +3480,23 @@ void MenuEtherListMake00(void)
     }
 }
 
-/* TODO: near-miss (SCHEDULING, 2; was 4) - nOn/n pins fixed the old
-   16-rename swap and the >= arm-swap fixed the branch-likely polarity.
-   --rotate-seq MenuEtherListMake02:35:-3 now puts the f4 store back ahead
-   of the second call's argument load. The last pair is the MenuEtherWhoCheck
-   delay slot: gcc fills it with the f4 store where the retail build fills it
-   with the pointer increment, and the two are not adjacent, so neither
-   --swap-into-slot (which only reaches the instruction immediately before
-   the jal) nor a rotate window (which cannot cross the jal without moving
-   it) can express the exchange. --unfill-gcc-slots is far worse (86 vs 72
-   instructions). Wants a "swap the delay slot with the Nth instruction
-   before the branch" pass. */
+/* TODO: near-miss (SCHEDULING, 4). Everything matches except the four-insn
+   window around the MenuEtherWhoCheck call:
+       retail: lh v1,8(v0) / sw v1,4(s0) / lh a0,0(s1) / jal / [addiu s1,4]
+       ours:   lh a0,0(s1) / lh v1,8(v0) / addiu s1,4  / jal / [sw v1,4(s0)]
+   gcc hoists the second `*(short *)ptr` read above the `p2->f4` store
+   (different alias sets: int store vs short load) and then fills the slot
+   with the store instead of the pointer bump. Swept: moving the ptr++ to
+   the end of the loop body, and the earlier agent's pin/arm-swap set.
+   NOTE the old `--rotate-seq MenuEtherListMake02:35:-3` that used to sit
+   in configure.py was REMOVED: it produced `addiu s1,s1,4` BEFORE the
+   `lh a0,0(s1)` that feeds MenuEtherWhoCheck, i.e. it passed the NEXT
+   entry's id -- a real miscompile that audit_swaps.py cannot see because
+   the instruction multiset is unchanged.
+   Reachable with the fixer only if --swap-into-slot grows a depth field:
+   with `--rotate MenuEtherListMake02:36:-3` to get (lh v1, addiu, lh a0)
+   and then a slot exchange against the SECOND instruction before the jal
+   (rather than the first), the window becomes exactly retail's. */
 /* Build one ether sub-list: points per entry, enable by owner/ep checks */
 void MenuEtherListMake02(int nIdx)
 {
@@ -3520,7 +3526,6 @@ void MenuEtherListMake02(int nIdx)
             p2->f4 = *(short *)((char *)func_A1A488(*(short *)ptr) + 8);
             v = MenuEtherWhoCheck(*(short *)ptr);
             f4 = p2->f4;
-            ptr = (int *)ptr + 1;
             if (f4 == 0) {
                 p2->b8 = nOn;
                 p2->f4 = nM1;
@@ -3533,6 +3538,7 @@ void MenuEtherListMake02(int nIdx)
             }
             n--;
             p2++;
+            ptr = (int *)ptr + 1;
         } while (n != 0);
     }
 }
@@ -3680,12 +3686,18 @@ int MenuFaceEpidGet(int nType, int nFlag)
 /* --- Shop list window work --- */
 typedef struct {
     unsigned char nPage;       /* 0x00: page id the help bar keys off */
-    char pad01[0x10];
+    char pad01[0x10 - 1];
+    unsigned char nBusy;       /* 0x10: non-zero while the page is changing */
     unsigned char nSel;        /* 0x11: hint-slot cursor */
     char pad12[0x20 - 0x12];
     int nCur;                  /* 0x20: sort-list cursor row */
-    char pad24[0x48 - 0x24];
+    char pad24[2];
+    short nModelSel;           /* 0x26: row the model window is showing */
+    int nModelId;              /* 0x28: unit id to display */
+    int nModelReq;             /* 0x2C: model-change request flag */
+    char pad30[0x48 - 0x30];
     signed char b48;           /* 0x48 */
+    signed char b49;           /* 0x49: model window enabled */
 } SHOPWORK;
 typedef struct {
     char pad0[1];
@@ -4468,8 +4480,127 @@ void MenuAgwsCameraMove(void)
     }
     pVec = (float *)((char *)&keep + nIdx * 16);
     pCam[0] = pCam[0] + (pVec[0] - pCam[0]) * rate;
-    pCam[1] = pCam[1] + (pVec[1] - pCam[1]) * rate;
-    pCam[2] = pCam[2] + (pVec[2] - pCam[2]) * rate;
+    pCam[1] = pCam[1] + (*(float *)(nIdx * 16 + (int)&keep + 4) - pCam[1]) * rate;
+    pCam[2] = pCam[2] + (*(float *)(nIdx * 16 + (int)&keep + 8) - pCam[2]) * rate;
+}
+
+/* --- Back-model (party silhouettes) task set-up --- */
+typedef struct {
+    int f00;                       /* 0x00: camera active */
+    int f04;                       /* 0x04 */
+    char pad08[0x94 - 0x08];
+    float f94;                     /* 0x94: field of view */
+    char pad98[0xA0 - 0x98];
+    int fA0;                       /* 0xA0..0xA8: target vector */
+    int fA4;
+    int fA8;
+    float fAC;
+    char padB0[0xD0 - 0xB0];
+    int fD0;                       /* 0xD0..0xDC: eye vector */
+    int fD4;
+    float fD8;
+    float fDC;
+} MENUBACKCAM;
+typedef struct MENUBACKTASK {
+    char pad00[0x08];
+    struct MENUBACKTASK *pLast;    /* 0x08: queue tail / node prev */
+    char pad0C[0x10 - 0x0C];
+    unsigned char b10;             /* 0x10 */
+    char pad11[0x13 - 0x11];
+    unsigned char b13;             /* 0x13: slot index */
+    char pad14[0x18 - 0x14];
+    int f18;                       /* 0x18: matrix slot (party members) */
+    int f1C;                       /* 0x1C: matrix slot (pointer model) */
+    int f20;                       /* 0x20 */
+} MENUBACKTASK;
+extern MENUBACKTASK *MenuTask_XMX;
+extern MENUBACKTASK *xglTaskEntryNext(MENUBACKTASK *, void (*)(void), MENUBACKTASK *);
+extern void tskMenuTaiPointa(void);
+extern void tskMenuTai(void);
+extern int MenuVecMat;
+extern float D_004D7D9C;
+extern int PartyDataGet(void);
+
+/* Point the back-model camera at the party line-up, carve the vector-matrix
+   block out of the work area and spawn one task per pointer model plus one
+   per living party member; returns the end of the block it claimed */
+int MenuBackModelSet(int nAddr)
+{
+    MENUBACKCAM *pCam;
+    int nBase;
+    int nRet;
+    int i;
+    int n;
+    int nOfs;
+    unsigned int nId;
+
+    i = 0;
+    pCam = (MENUBACKCAM *)xglStudioGetCamera2_2(2);
+    xglCameraInit(pCam);
+    pCam->fD0 = 0;
+    pCam->fD8 = 4.0f;
+    pCam->f00 = 1;
+    pCam->fAC = 1.0f;
+    pCam->f94 = D_004D7D9C;
+    pCam->fD4 = 0;
+    pCam->fDC = 1.0f;
+    pCam->fA0 = 0;
+    pCam->fA4 = 0;
+    pCam->fA8 = 0;
+    pCam->f04 = 1;
+    /* gcc's post-reload scheduler hoists the +0x7F above both calls, which
+       forces the rounded base into a callee-saved register the original
+       does not need; the fence keeps it here, in $v1. */
+    LAUNDER_V(nAddr);
+    nBase = (nAddr + 0x7F) & ~0x7F;
+    nRet = nBase + 0x800;
+    MenuVecMat = nBase;
+    do {
+        MENUBACKTASK *pTask;
+        MENUBACKTASK *pRef;
+
+        pRef = 0;
+        if (MenuTask_XMX != 0) {
+            pRef = MenuTask_XMX->pLast;
+        }
+        pTask = xglTaskEntryNext(MenuTask_XMX, tskMenuTaiPointa, pRef);
+        if (pTask != 0) {
+            pTask->b10 = 0;
+            pTask->b13 = i;
+            pTask->f1C = MenuVecMat + 0x80;
+            pTask->f20 = MenuVecMat + (i << 7) + 0x280;
+        }
+        i++;
+    } while (i < 4);
+    n = 0;
+    nOfs = 0x30;
+    do {
+        if (*(unsigned short *)((char *)PartyDataGet() + nOfs) == 0) {
+            return nRet;
+        }
+        nId = *(unsigned short *)((char *)PartyDataGet() + nOfs);
+        nOfs += 4;
+        if (nId >= 0x11) {
+            break;
+        }
+        {
+            MENUBACKTASK *pTask;
+            MENUBACKTASK *pRef;
+
+            pRef = 0;
+            if (MenuTask_XMX != 0) {
+                pRef = MenuTask_XMX->pLast;
+            }
+            pTask = xglTaskEntryNext(MenuTask_XMX, tskMenuTai, pRef);
+            if (pTask != 0) {
+                pTask->b10 = 0;
+                pTask->b13 = n;
+                pTask->f18 = MenuVecMat + (n << 7) + 0x80;
+            }
+        }
+        n++;
+    } while (n < 3);
+    return nRet;
 }
 
 /* --- AGWS parameter window set --- */
@@ -6975,4 +7106,162 @@ void MenuShopEx2(MENU_TSK *pTask, MENU_SHOP_EX2_WORK *w)
     default:
         return;
     }
+}
+
+/* --- Shop model window task --- */
+
+/* Half of a CAMKEEP: the ld/sd-copied position or target vector */
+typedef union {
+    float f[4];
+    long long ll[2];
+} CAMVEC8;
+
+typedef struct {
+    char pad000[0x10];
+    unsigned char nState;      /* 0x10 */
+    char pad011[0x1C - 0x11];
+    int nModelId;              /* 0x1C: id of the model on screen */
+} MENU_SHOP_MODEL_TSK;
+
+extern CAMVEC8 D_004C7390;
+extern void *MenuModelOut[];
+extern void MenuModelCreate(void **ppOut, int nId, void *pParam);
+
+/* TODO: near-miss (10 diffs of 110 words, length exact). Everything is
+   recovered: the two camera vectors as ld/sd block copies (CAMVEC8 must be
+   long-long aligned; a char[16] cast gives ldl/ldr), MenuModelOut declared
+   as an incomplete array so it is reached by lui/%lo instead of $gp, the
+   0x30/0xA0/0xA2/0xA4 switch tree and both copies of the nModelReq store.
+   What is left is one 12-instruction window in case 0: retail reuses $v0
+   for %hi(MenuModelOut) after the D_004C7390 loads have consumed it and
+   defers `li s1,1` to just before the memset call, while gcc hoists the
+   lui into a fresh register ($a3) and materialises the constant early.
+   Swept: all six orders of the three opening statements, both orders of
+   the nModelReq/*pId store pair, an explicit `nOn` constant variable,
+   block-scoping the case-0 temporaries. Best combination is kept. This is
+   a register/schedule coupling, not a shape error -- permuter work.
+   Second site: retail schedules the redundant `lw a2, MenuShopWork($gp)`
+   reload first in its block, gcc last. */
+/* Set up the shop's model camera once, then keep the displayed unit in
+   step with the row the shop cursor is on */
+void MenuShopModelMain(MENU_SHOP_MODEL_TSK *t)
+{
+    SHOPWORK *p;
+    CAMVEC8 vAt;
+    CAMVEC8 vPos;
+    char *pCam;
+    char *pCam2;
+    int *pId;
+    int nId;
+
+    pId = &t->nModelId;
+    p = MenuShopWork;
+    if (p->b49 == 0) {
+        return;
+    }
+    switch (t->nState) {
+    case 0:
+        vAt = D_004C7390;
+        *pId = 0;
+        MenuModelOut[0] = 0;
+        memset(&vPos, 0, 16);
+        vPos.f[3] = 1.0f;
+        pCam = xglStudioGetCamera2_2(0);
+        xglCameraInit(pCam);
+        *(int *)(pCam + 4) = 1;
+        *(CAMVEC8 *)(pCam + 0xA0) = vPos;
+        *(CAMVEC8 *)(pCam + 0xD0) = vAt;
+        pCam2 = xglStudioGetCamera2_2(2);
+        *(int *)pCam2 = 1;
+        *(int *)(pCam2 + 4) = 1;
+        break;
+    case 2:
+        if (p->nBusy != 0) {
+            return;
+        }
+        switch (p->nPage) {
+        case 0x30:
+        case 0xA0:
+        case 0xA2:
+        case 0xA4:
+            if (p->nSel != 7) {
+                p->nModelReq = 1;
+                break;
+            }
+            if (p->nModelSel != 7) {
+                return;
+            }
+            if (*pId != p->nModelId) {
+                *pId = p->nModelId;
+                p->nModelReq = 1;
+            }
+            nId = MenuShopWork->nModelId;
+            if (nId == 0) {
+                break;
+            }
+            if (MenuModelOut[0] != 0) {
+                return;
+            }
+            MenuShopWork->nModelReq = 0;
+            MenuModelCreate(&MenuModelOut[0], nId, MenuShopWork);
+            MenuModelExtFuncSet((EXTFUNC *)MenuModelOut[0],
+                                (void *)MenuShopModelDisp, 0);
+            *pId = MenuShopWork->nModelId;
+            break;
+        default:
+            p->nModelReq = 1;
+            break;
+        }
+        break;
+    default:
+        return;
+    }
+}
+
+/* --- Number-to-text formatting --- */
+
+/* Render a 64-bit value as decimal digit strings concatenated into a
+   static buffer. nDigits < 0 counts the digits first; nZero == 1 keeps
+   the leading zeroes, anything else suppresses them. */
+char *MenuNumberTextGet(long long nVal, int nDigits, int nZero)
+{
+    static char msg[16];
+    char *num[10] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+    long long nDiv;
+    long long nRem;
+    int i;
+    int j;
+    int n;
+
+    strcpy(msg, "");
+    if (nDigits < 0) {
+        nDiv = 10;
+        n = 1;
+        while (nVal / nDiv != 0) {
+            nDiv = nDiv * 10;
+            n++;
+        }
+        nDigits = n;
+    }
+    i = (nDigits < 11) ? nDigits : 10;
+    nZero = nZero == 1;
+    nRem = nVal;
+    while (i > 0) {
+        nDiv = 10;
+        if (i > 1) {
+            j = i - 1;
+            do {
+                nDiv = nDiv * 10;
+                j--;
+            } while (j != 0);
+        }
+        if (nZero != 0 || nRem / nDiv != 0) {
+            nZero = 1;
+            strcat(msg, num[(int)(nRem / nDiv)]);
+        }
+        nRem = nRem % nDiv;
+        i--;
+    }
+    strcat(msg, num[(int)(nRem % 10)]);
+    return msg;
 }
