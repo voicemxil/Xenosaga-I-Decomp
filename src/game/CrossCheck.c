@@ -78,6 +78,25 @@ int CrossCheckMapUnitAt(VECTOR *pPos, void *pOther, MAPUNIT_CC *pUnit)
    spent; leaving as TODO. */
 /* Scan every map unit for one whose Y band, flags and shape make it cross
    the pPos/pOther segment; returns the matching index or -1 */
+/* TODO: near-miss (16 of 53 words) but the delta is ONE instruction and the
+   loop body is byte-identical (words 18-39 all line up). The original builds
+   the loop base in two steps:
+       lui   v0, %hi(X)
+       addiu v0, v0, %lo(X)      <- X resolves to 0x0048AEC0
+       addiu s0, v0, -416        <- s0 = 0x0048AD20 = &MapUnit[0]
+   i.e. it materialises a symbol 0x1A0 bytes PAST MapUnit and then backs off,
+   where we fold straight to `addiu s0,v0,%lo(MapUnit)`. That extra addiu is
+   the whole difference: it pushes the eight prologue register saves one slot
+   each, which is what the other 15 diffs are.
+   So the question is only "what symbol lives at MapUnit+0x1A0, and why does
+   the original address MapUnit through it". Since checkfile masks %hi/%lo,
+   the immediates above are the LINKED values, so X is a real distinct symbol
+   in the original, not a folding artefact. Whoever picks this up: find the
+   0x0048AEC0 symbol in the ELF symbol table; the source almost certainly
+   names that one and reaches MapUnit as a negative offset from it (or
+   declares the two adjacently in one TU so gcc CSEs the page address).
+   Do NOT go looking for a scheduling lever -- there is nothing wrong with
+   the schedule. */
 int CrossCheckMapUnit(VECTOR *pPos, void *pOther)
 {
     int i;

@@ -509,11 +509,18 @@ ACTOR *ACT_createChr(int nId, int nArg)
 
     /* TODO: near-miss (5 diffs, SCHEDULING) - the nFlags/nSignal/nVMObject
        stores and the pUpdate/fScale[3] stores are transposed against the
-       original; no permutation of the source statements reproduces the
-       original order. Retried this session with p->f00 interleaved between
-       fScale[0] and nUnk088 (matching the disassembly's literal store
-       order) -- regressed to 10 diffs, worse than leaving statements in
-       field-grouped order. Revert any interleaving attempt here. */
+       original. All 22 stores here are order-independent, so this is purely
+       a search over statement permutations, and 22! cannot be exhausted.
+       Hand permutation attempts failed (interleaving p->f00 between
+       fScale[0] and nUnk088, "matching the disassembly's literal store
+       order", regressed to 10). A hill-climbing search over pairwise swaps
+       and single-element moves, scored by diff count, DID reach a local
+       minimum of 2 diffs after ~900 compiles -- so a 2-diff (and plausibly a
+       0-diff) ordering exists. The run was cut off by its time budget before
+       it printed the winning order, so the ordering itself is not recorded
+       here. Next attempt: re-run that search with a bigger budget rather
+       than permuting by hand. Same lever matched container_init (24
+       orderings), WindowDXSet (504) and Get_MiddlePoint. */
     if (a != 0) {
         p = &actSequence[a->nSerial];
         a->nShadowSize = 0x50;

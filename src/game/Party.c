@@ -272,7 +272,15 @@ void *PartyTimeUpDate(void)
     return D_00491818;
 }
 
-/* TODO: Matches except an irreducible a0/a1 alias-copy register tie-break. */
+/* TODO: near-miss (11 diffs, 13 orig vs 11 built words). The original emits
+ * two register copies we cannot reproduce: `move a1,a0` at entry (the struct
+ * pointer vacates $a0) and `move a0,v0` in the branch delay slot (nMonth,
+ * loaded into $v0, is copied into $a0). Pinning those roles ($a1 pointer,
+ * $a0 month, $v0 for the raw load, with and without an explicit two-step
+ * copy through the temp, and with a separate nDay temp -- 8 shapes) buys the
+ * first copy back (12 words) but never the second, and the diff count stays
+ * at 11 throughout. The original also loads nDay BEFORE the multiply chain
+ * where we load it in the middle. Parked. */
 /* Roll a display day/month pair forward by one in-game "tick" */
 void PartyTimeDispChange(PARTY_TIME_DISP *pDisp)
 {
