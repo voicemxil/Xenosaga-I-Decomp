@@ -416,6 +416,12 @@ int s_nRenderReset3;
  * Parked per budget rule after 2 attempts. */
 /* One-time render subsystem bring-up: reset the GS path/graph, init
  * vsync + resolution, and clear the per-frame render state */
+/* The volatile MMIO store before sceGsResetGraph() must not be stolen
+   into the call's delay slot -- retail leaves a nop there, which is
+   --barrier-branch-move's volatile-store rule; that one word also
+   restores the .p2align pad ahead of the aUnk24 loop.  The clear order
+   is nUnk48, nUnk50, nDrop, nUnk54, nUnk58 (76 and 80 swap if written
+   the other way round). */
 void xglRenderInit(void)
 {
     int i;
@@ -429,10 +435,12 @@ void xglRenderInit(void)
     s_nRenderReset1 = 0;
     s_nRenderReset2 = 1;
     s_nRenderReset3 = 0;
-    sRender.nFade = 0;
+    /* nFade is NOT cleared here -- xglRenderGlobalFadeInit() below owns
+       it; retail stores 72,80,76,84,88 only. */
     sRender.nUnk48 = 0;
-    sRender.nDrop = 0;
     sRender.nUnk50 = 0;
+    sRender.nDrop = 0;
+    sRender.nUnk54 = 0;
     sRender.nUnk58 = 0;
     for (i = 7; i >= 0; i--) {
         sRender.aUnk24[i] = 0;

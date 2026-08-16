@@ -2901,3 +2901,4 @@ UmnSimulation = 0x00A0C1C8, 0x2BC; // tskUmn.c
 xglCameraSetWindow = 0x0022C168, 0xE4; // xglCamera.c
 fillBuff = 0x00221C80, 0xB0; // xglMovie.c
 xglHddMcCheckCore = 0x00227BA0, 0x134; // xglHdd.c
+xglRenderInit = 0x0022D7F8, 0xD0; // xglRender.c

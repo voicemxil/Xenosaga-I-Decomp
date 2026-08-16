@@ -210,7 +210,7 @@ FILE_FIX_FLAGS = {
     "tskUmnBgCube.c": " --as-g0 --fp-pair-hazard tskUmnBgCubeMain",
     "sdv.c": "--branch-unlikely sdvScheduleSound:1",
     "File.c": "--branch-unlikely FileObjectJpegDecChange:1 --swap-adjacent FileObjectJpegDecChange:3",
-    "xglRender.c": "--fp-pair-hazard xglRenderGlobalFadeSet",
+    "xglRender.c": "--fp-pair-hazard xglRenderGlobalFadeSet --barrier-branch-move xglRenderInit",
     "Calc.c": "--mtc1-nop CalcNearCrossPointCircle:0",
     "kernel.c": "--swap-adjacent PatchIsNeeded:8,PatchIsNeeded:10",
     "sceMpeg.c": "--swap-adjacent sceMpegReset:3",
