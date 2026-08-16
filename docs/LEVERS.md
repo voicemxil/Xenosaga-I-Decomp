@@ -224,6 +224,26 @@ variable on whichever address expression the body forms FIRST. Writing
 is what "phantom symbols at sym+K" in prologues actually are — there is
 no missing symbol.
 
+**An LSR-built giv's init lands in the loop PREHEADER; a source-walked
+pointer's copy lands in the ENTRY BLOCK.** `pTbl[i]` makes loop.c create
+the giv and emit its initial value after the loop's guard branch;
+`p = pTbl; ... *p++` puts the copy in the function's first block. That
+changes two things at once: where the callee-save of that register
+appears in the prologue, and -- because the pseudo's live range now
+starts at the guard instead of at entry -- its `global_alloc` priority,
+so it can swap registers with an unrelated whole-loop value. A `PIN` can
+force the register but NOT the placement; only the giv does both.
+(subTreeLineDraw: `pType[i]` vs `*pt++` was the whole function.)
+
+**A block-local pointer declared INSIDE the loop body is what makes gcc
+keep the base register on the loop's own biv.** `for (...) { OUT *q =
+&p->out[i]; q->a = ...; f(q); }` gives one address giv plus one
+value-form giv for the call; writing `p->out[i].a` throughout leaves the
+base fixed and gcc invents a separate giv for each PAIR of stores --
+six extra words in subLine2_DrawType_1. Same edit, opposite direction
+from the "scope block-local pointers to the block" register lever, and
+it is the first thing to try on any "too many induction variables" diff.
+
 **Address-form vs value-form givs.** A pointer used only as a VALUE (a
 call argument) becomes its own accumulator plus a hoisted base; used as
 a MEM base it folds into the offset. Worth 6-7 instructions per site.
@@ -368,6 +388,21 @@ loses it — the difference between a bound constant hoisted into `$s3`
 and rematerialised every iteration. (The goto-loop lever cuts both ways;
 see above.)
 
+**A dispatch whose arms are laid out AFTER the join is a `switch`.**
+`beq v,K1,A / beq v,K2,B / b JOIN` followed by the A and B blocks is the
+switch layout; an `if/else-if` chain inlines the first arm and reaches
+the second with a second test after it. Worth checking before assuming a
+register or scheduling problem -- in subPosSet it was 120 diffs.
+
+**Literal case labels are what let LICM hoist a loop's constants.**
+Comparing against `int` locals initialised to the case values keeps them
+in callee-saved registers, but their `li` is emitted where the
+declaration is -- ABOVE the loop's guard branch. Spelled as literals,
+loop.c hoists the `li` into the preheader instead, and (in the same
+pass) hoists every float constant in the body into $f20+ as well. If a
+loop's FP constants are being rematerialised in each arm, look for a
+nearby named integer constant that has turned LICM off.
+
 **`switch` vs `if/else-if`.** gcc sorts the case TESTS but emits the
 BODIES in source order — that asymmetry is often the whole layout
 difference. Case-label order decides block layout.
@@ -446,6 +481,26 @@ retail's `ldl/ldr` + `sdl/sdr`; two `nAdd[k] = ...` statements give two
 **A nested struct whose last field is 4 bytes but which contains an
 8-byte field is rounded up to a multiple of 8**, pushing everything
 after it. Spell the block out inline to land on retail's offsets.
+
+**Chain a second struct copy off the first.** `a = src; b = src;` where
+`a` and `b` are in the same alias set as `src` RELOADS src for the second
+copy -- the first copy's stores kill it. `a = src; b = a;` lets cse
+forward the just-stored value, which is two loads and four stores instead
+of four and four. (subTreeLineDraw_type_2's segment pairs.)
+
+**A `char`/`unsigned char` store aliases every load in gcc's model.**
+When a float re-read straddles a byte store for no visible reason, that
+is why -- and it is a scheduling barrier you can place deliberately:
+sub2ObjectLampDraw needs the sprite width and height written BEFORE the
+alpha byte and the position AFTER it, which is what splits the tree
+scale into two loads.
+
+**A sum stored untruncated but tested as a narrower type wants the local
+to keep the WIDE type and the tests to carry the cast.** `p->nPhase`
+(`unsigned short`) `= n; if ((short)n < 0) ... else if ((short)n >= 129)`
+gives one `sll`/`sra` feeding both branches and stores the raw `addu`
+result. Declaring the local `short` stores the truncated value and costs
+three words.
 
 **Check the struct's own ALIGNMENT when a `char pad[]` stops working.**
 Giving one struct a leading `int *` rounded its size 0x12 -> 0x14 and
