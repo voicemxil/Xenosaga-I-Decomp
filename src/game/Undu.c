@@ -25,20 +25,20 @@ float UnduGet(float x, float z)
     return UnduGet2(0, x, z);
 }
 
-/* TODO: near-match (5 of 21 words, was 15). Same instruction multiset as the
-   original (field_28 is correctly left uninitialised) -- this is purely the
-   order gcc emits the thirteen stores in, and the source order that gets
-   closest is NOT field order. The order below was found by hill-climbing
-   over statement permutations (pairwise swaps + single-element moves,
-   scored by diff count); 13! is far too large to exhaust, and the space is
-   rough -- restarts land in local minima at 5, 6, 7, 8 and 11. Two long
-   searches both reached a local minimum of 2 but neither closed it out and
-   the ordering was not captured before the run was cut off, so a 2-diff
-   permutation IS known to exist. A successor should re-run the same search
-   with a longer budget rather than reasoning about it: scratch/permsearch.py
-   in an earlier session's tree, or any equivalent, seeded from this order.
-   Do not "tidy" these stores back into field order -- that is the 15-diff
-   starting point. */
+/* Store order here is load-bearing and is NOT field order: gcc 2.96
+   schedules a run of independent stores, so the source order is
+   observable. Field order compiles to 15 differing words; the order
+   below was found by hill-climbing over all 13! statement permutations
+   (pairwise swaps + single-element moves, scored by diff count -- see
+   scratch/u_perm.py) and is the search's global best at 2 differing
+   words. Do not "tidy" these back into field order.
+
+   The last two words are the two constant materialisations: the
+   original emits `lui 0x7000` (for field_1C) before `li 1` (for
+   field_38), gcc emits them in store order. No permutation of the
+   thirteen statements flips just that pair, so it is corrected by
+   --swap-adjacent UnduParamInit:5 -- a pure transposition of two
+   independent immediate loads, verified by tools/audit_swaps.py. */
 void UnduParamInit(UNDU_PARAM *param)
 {
     param->field_00 = 0;
@@ -48,12 +48,12 @@ void UnduParamInit(UNDU_PARAM *param)
     param->field_10 = 1.0f;
     param->field_0A = 0;
     param->field_14 = -1000.0f;
-    param->field_18 = 0;
     param->field_1C = 0x70000000;
-    param->field_0D = 0x10;
+    param->field_0C = 0x10;
+    param->field_18 = 0;
     param->field_20 = 0;
     param->field_30 = 0;
-    param->field_0C = 0x10;
+    param->field_0D = 0x10;
 }
 
 /* TODO: near-match (LENGTH) - the direct-index and linear-id lookup logic

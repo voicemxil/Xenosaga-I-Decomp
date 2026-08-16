@@ -7,7 +7,7 @@ extern void subPrintSprite(void *info, void *sprite);
 extern void PrintCircleCore(int texture, void *data, int type);
 extern void xglFontReloadTexture(void *context, int mode);
 extern void endPrintInit(void);
-extern void eMessageSpriteReset(void *context);
+extern void eMessageSpriteReset(void);
 typedef struct {
     void *value;
     int field_04;
@@ -55,18 +55,32 @@ void PrintSprite00(void *info, PRINT_SPRITE *sprite)
     subPrintSprite(info, sprite);
 }
 
-/* TODO: near-match (LENGTH) - callback iteration is recovered, but the
- * compiler emits a different loop/save schedule (28 original vs 30 built
- * instructions). Find the original iterator/source-control-flow shape. */
+/* Run every registered print callback, then reset for the next frame.
+ *
+ * The loop is written with an explicit goto, and that is load-bearing:
+ * a `while`/`for` here carries a NOTE_INSN_LOOP_BEG, and gcc 2.9x's
+ * jump.c duplicate_loop_exit_test() then copies the exit test into the
+ * preheader and inverts the loop (bnel at the bottom, one extra register
+ * copy). The original build has the test at the TOP of the loop with an
+ * unconditional branch back to it -- the shape you only get when there
+ * is no loop note at all. Every `while (1) { ... break; ... }` and
+ * `for (;;)` spelling still inverts; only the goto form does not. */
 void PrintFlush(void *context)
 {
     PRINT_FUNC *func;
+    void (*f)(void *, void *);
 
     xglFontReloadTexture(context, 2);
-    for (func = PrintFunc; func->func != 0; func++) {
-        func->func(context, func->arg);
+    func = PrintFunc;
+    f = func->func;
+loop:
+    if (f != 0) {
+        f(context, func->arg);
+        func++;
+        f = func->func;
+        goto loop;
     }
     endPrintInit();
     xglFontReloadTexture(context, 1);
-    eMessageSpriteReset(context);
+    eMessageSpriteReset();
 }

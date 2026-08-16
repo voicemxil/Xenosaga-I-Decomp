@@ -186,7 +186,9 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
-    "xglFont.c": "",
+    "Undu.c": "--swap-adjacent UnduParamInit:5",
+    "SEQ.c": "--mtc1-nop SEQ_motion:3",
+    "xglFont.c": "--swap-adjacent xglFontAscii2Euc:47",
     # JS_classLight_setDirection2: the li/lw pair is a scheduling
     # tie-break, and the $f0/$f1 assignment across the three
     # load-store pairs is an allocator naming tie-break -- the loads and
@@ -255,9 +257,7 @@ FILE_FIX_FLAGS = {
     # chain-tracking NOTE in fix_cc_asm.py's main). Site-indexed nops:
     # FadeIn's mtc1 $1,$f1 (site 1), FogPara's mtc1 $0,$f1 (2) and
     # mtc1 $1,$f3 (3).
-    "nmlModel.c": ("--barrier-return-store nmlModelSetFadeInInterrupt "
-                   "--mtc1-nop nmlModelSetFadeIn:1,nmlModelFogPara:2,"
-                   "nmlModelFogPara:3"),
+    "nmlModel.c": ("--barrier-return-store nmlModelSetFadeInInterrupt --mtc1-nop nmlModelSetFadeIn:1,nmlModelFogPara:2,nmlModelFogPara:3 --pin-slot-nop nmlModelSetGlobalPointLightPos:0"),
     # ungetc's CHECK_INIT tail and the mprec leaf returns keep their
     # copies out of the delay slots, same class as fabs in libm.c.
     "newlib_ungetc.c": "--barrier-return-store ungetc",
@@ -541,6 +541,20 @@ def generate_ninja(asm_files, src_files, asset_files):
         f.write(f"build {stamp}: verify_elf | {ELF_PATH} tools/verify_elf.py "
                 f"{CONFIG_DIR / 'SLUS_204.69.rom'}\n")
         f.write(f"build check: phony {stamp}\n")
+
+        # Regenerate build.ninja whenever configure.py changes. Without
+        # this, editing configure.py and running `ninja` rebuilds nothing
+        # -- the old build.ninja still carries the old per-file flags, so
+        # a file keeps its stale object and verify.py reports a PHANTOM
+        # REGRESSION in a file the reader never touched. That has cost
+        # several agents hours of chasing failures that recompiled to
+        # MATCH from source. `generator = 1` also tells ninja not to
+        # treat this edge as dirty work during -n/-t clean.
+        f.write("\nrule configure\n")
+        f.write("  command = python3 configure.py --no-split\n")
+        f.write("  description = CONFIGURE\n")
+        f.write("  generator = 1\n\n")
+        f.write("build build.ninja: configure | configure.py\n")
 
     print(f"Generated {ninja_path}")
     print(f"  Assembly files: {len(asm_files)}")
