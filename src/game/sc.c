@@ -563,7 +563,8 @@ typedef struct {
     short eftNo;               /* 0x44 */
     char pad46[14];
     short field54;             /* 0x54 */
-    char pad56[4];
+    short field56;             /* 0x56 */
+    char pad58[2];
     unsigned short waitState;  /* 0x5A */
     unsigned short moveState;  /* 0x5C */
     char pad5E[2];
@@ -965,6 +966,45 @@ int scMOVIEScript(SCOBJ *o)
     if (nEvent == 0) {
         sprintf(buf, D_004DBB48, D_004CC898, s);
         func_A32FA8(buf);
+    }
+    return 1;
+}
+
+extern int srsGetEffect2Idx(short nEftNo);
+
+/* EFFECT2: the script table entry to run is chosen by effect number --
+ * numbers 2900..2998 always use table entry 1, everything else asks the
+ * effect system which variant to play. */
+int scEFFECT2Script(SCOBJ *o)
+{
+    SCTASK *t = (SCTASK *)o;
+    int *cmd = &o->cmdBuf[0];
+    int nCmd = scGetCmdScript(o);
+    int nIdx = srsGetEffect2Idx(t->eftNo);
+    unsigned int nEft = (unsigned short)t->eftNo;
+    int sel = (nEft >= 2900 && nEft < 2999) ? 1 : nIdx;
+    int *p0 = (int *)((int)cmd + o->field54 * 4);
+    void *pAdr = 0;
+    int next = *p0 + nCmd;
+    int *slot;
+    if (sel < nCmd) {
+        int adr = scGetAdrIdx(o, sel);
+        /* The redundant else arm is load-bearing: with it gcc lays the
+           body out AFTER the join and reaches it with `bnez`+`b`, which is
+           what the original does; a bare `if` inlines the body and costs
+           ten words. */
+        if (adr == 0) {
+            pAdr = 0;
+        } else {
+            pAdr = (char *)D_0041E7D0[_nowScript].pTable + adr * 2;
+        }
+    }
+    slot = (int *)((int)cmd + (short)(unsigned short)o->field54 * 4);
+    *slot = next;
+    if (pAdr != 0) {
+        t->field56 = sefCreateScheduler(pAdr, (char *)o + 0x30, (char *)o + 0x20,
+                                        D_0041E7D0[_nowScript].pTable, -1);
+        sefCreateBattleActorTbl(t->eftNo);
     }
     return 1;
 }

@@ -2686,3 +2686,4 @@ GameModeCfEvent = 0x00245AF8, 0xB0; // Game.c
 scMOVIEScript = 0x002EB7F8, 0xE8; // sc.c
 Check_InsideFan_Wooo = 0x002D83B8, 0xAC; // Check.c
 sceDclose = 0x00205F78, 0x168; // sceFs.c
+scEFFECT2Script = 0x002EB568, 0x12C; // sc.c
