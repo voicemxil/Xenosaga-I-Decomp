@@ -1677,3 +1677,70 @@ void sefGetCubePos(void *pDst, void *pSize)
     VU_SUB(&vRnd, &vRnd, &vSize);
     VU_SCALE(pDst, &vRnd, 0.1f);
 }
+
+/* --- sefGetOfsRange: pick a random offset inside the shape named by
+ * nType, using the three integer parameters at pPrm. The identity
+ * matrix for the cylinder case is built by rotating $vf0 with vmr32,
+ * which is why it costs no constant loads. --- */
+extern void MMathRotateMatrixX(void *pDst, void *pSrc, float fAng);
+extern void MMathRotateMatrixZ(void *pDst, void *pSrc, float fAng);
+extern void MMathApplyMatrix(void *pDst, void *pMtx, void *pSrc);
+extern void tracePrint(char *pFmt, int nArg);
+
+void sefGetOfsRange(void *pDst, void *pPrmArg, int nType)
+{
+    int *pPrm;
+
+    float aMtx[16];
+    SEF_VEC4 vTmp;
+    float fSize;
+    float fP0;
+    unsigned int nSeed;
+
+    pPrm = (int *) pPrmArg;
+    PS2_ASM("sqc2 $vf0, 0(%0)" : : "r"(pDst) : "memory");
+    if (nType == 0) {
+        if (pPrm[0] != 0) {
+            fSize = (float) pPrm[0] * 0.1f;
+            sefGetSpherePos(pDst, fSize * sefRandf());
+        }
+    } else if (nType == 1) {
+        if (pPrm[0] != 0) {
+            sefGetSpherePos(pDst, (float) pPrm[0] * 0.1f);
+        }
+    } else if (nType == 2) {
+        sefGetCubePos(pDst, pPrm);
+    } else if (nType == 3) {
+        ((void (*)(void *)) sefGetCubePosTop)(pDst);
+    } else if (nType == 4) {
+        sefGetCubePosBtm(pDst, pPrm);
+    } else if (nType == 5) {
+        sefGetCirclePos(&vTmp, (float) pPrm[0] * 0.1f);
+        PS2_ASM(".set noreorder\n"
+            "vmr32.xyzw $vf1, $vf0\n"
+            "vmr32.xyzw $vf2, $vf1\n"
+            "vmr32.xyzw $vf3, $vf2\n"
+            "sqc2 $vf0, 48(%0)\n"
+            "sqc2 $vf1, 32(%0)\n"
+            "sqc2 $vf2, 16(%0)\n"
+            "sqc2 $vf3, 0(%0)\n"
+            ".set reorder" : : "r"(aMtx) : "memory");
+        if (pPrm[1] != 0) {
+            MMathRotateMatrixX(aMtx, aMtx, (float) pPrm[1] * 0.017453292f);
+        }
+        if (pPrm[2] != 0) {
+            MMathRotateMatrixZ(aMtx, aMtx, (float) pPrm[2] * 0.017453292f);
+        }
+        MMathApplyMatrix(pDst, aMtx, &vTmp);
+    } else if (nType == 6) {
+        fP0 = (float) pPrm[0];
+        nSeed = sefRandSeed * 1103515245 + 12345;
+        sefRandSeed = nSeed;
+        sefGetCirclePos(pDst,
+            (float) (int) ((nSeed >> 16) & 0x7FFF) * (1.0f / 32767.0f) *
+            fP0 * 0.1f);
+        ((SEF_VEC4 *) pDst)->y = sefRandf() * (float) pPrm[1] * 0.1f;
+    } else {
+        tracePrint("bad range prm : %d\n", nType);
+    }
+}
