@@ -2833,3 +2833,6 @@ SEQ_scaleUnit = 0x0031FCE0, 0x2A0; // SEQ.c
 smAlloc = 0x002EECC8, 0x124; // sdv.c
 sceSifGetIopAddr = 0x002082F8, 0xEC; // sceSif.c
 subJoutoPosSet = 0x002BA4A8, 0x15C; // sub.c
+SGsInitGifPacket = 0x002E0DC0, 0x1C; // sef.c
+SGsAddGifXYZ2 = 0x002E0EC8, 0x70; // sef.c
+culling_matrix = 0x0023E0E0, 0x1D8; // nmlModel.c

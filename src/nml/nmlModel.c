@@ -2841,3 +2841,94 @@ float _CheckLine(float *pV0, float *pV1, float *pP0, float *pP1,
     VEC_SUB(&vD, pSphere, &vA);
     return vC.f[0] * vD.f[0] + vC.f[1] * vD.f[1] + vC.f[2] * vD.f[2];
 }
+
+void xglMatrixStackUnit(void);
+void xglMatrixStackTrans(void *pVec);
+void xglMatrixStackRotX(float fAngle);
+void xglMatrixStackRotY(float fAngle);
+void xglMatrixStackRotZ(float fAngle);
+void xglMatrixStackScale(void *pVec);
+void xglMatrixStackSave(void *pMtx);
+void xglMatrixStackInverse(void);
+
+#define APPLY_MATRIX33(d, m, s)                                 \
+    PS2_ASM(".set noreorder\n"                                  \
+            "lqc2 $vf31, 0x0(%2)\n"                             \
+            "lqc2 $vf27, 0x0(%1)\n"                             \
+            "lqc2 $vf28, 0x10(%1)\n"                            \
+            "lqc2 $vf29, 0x20(%1)\n"                            \
+            "lqc2 $vf30, 0x30(%1)\n"                            \
+            "vmulax.xyz $ACC, $vf27, $vf31x\n"                  \
+            "vmadday.xyz $ACC, $vf28, $vf31y\n"                 \
+            "vmaddz.xyz $vf31, $vf29, $vf31z\n"                 \
+            "sqc2 $vf31, 0x0(%0)\n"                             \
+            ".set reorder"                                      \
+            : : "r"(d), "r"(m), "r"(s) : "memory")
+
+#define APPLY_MATRIX(d, m, s)                                   \
+    PS2_ASM(".set noreorder\n"                                  \
+            "lqc2 $vf31, 0x0(%2)\n"                             \
+            "lqc2 $vf27, 0x0(%1)\n"                             \
+            "lqc2 $vf28, 0x10(%1)\n"                            \
+            "lqc2 $vf29, 0x20(%1)\n"                            \
+            "lqc2 $vf30, 0x30(%1)\n"                            \
+            "vmulax.xyz $ACC, $vf27, $vf31x\n"                  \
+            "vmadday.xyz $ACC, $vf28, $vf31y\n"                 \
+            "vmaddaz.xyz $ACC, $vf29, $vf31z\n"                 \
+            "vmaddw.xyz $vf31, $vf30, $vf0w\n"                  \
+            "sqc2 $vf31, 0x0(%0)\n"                             \
+            ".set reorder"                                      \
+            : : "r"(d), "r"(m), "r"(s) : "memory")
+
+/* Occlusion cell work area built by culling_matrix. */
+typedef struct {
+    VEC4 vTrans;            /* 0x00 */
+    VEC4 vAngle;            /* 0x10 */
+    VEC4 vScale;            /* 0x20 */
+    VEC4 vDir;              /* 0x30 */
+    VEC4 aMtx[4];           /* 0x40 */
+    VEC4 aMtxInv[4];        /* 0x80 */
+    VEC4 aCorner[4];        /* 0xC0 */
+} CULLCELL;
+
+/* Five separate objects, not an array: retail rematerialises a %hi/%lo
+ * pair for each one, which an array base held in a register would not. */
+static const VEC4 s_vCullFront = {{ 0.0f,  0.0f, 1.0f, 1.0f}};
+static const VEC4 s_vCullLT    = {{-1.0f, -1.0f, 0.0f, 1.0f}};
+static const VEC4 s_vCullRT    = {{ 1.0f, -1.0f, 0.0f, 1.0f}};
+static const VEC4 s_vCullRB    = {{ 1.0f,  1.0f, 0.0f, 1.0f}};
+static const VEC4 s_vCullLB    = {{-1.0f,  1.0f, 0.0f, 1.0f}};
+
+/* Build a cell's local matrix, its inverse, its facing direction and the
+ * four corner directions of its view volume. */
+void culling_matrix(CULLCELL *pCell)
+{
+    VEC4 v0;
+    VEC4 v1;
+    VEC4 v2;
+    VEC4 v3;
+    VEC4 v4;
+
+    xglMatrixStackUnit();
+    xglMatrixStackTrans(&pCell->vTrans);
+    xglMatrixStackRotY(pCell->vAngle.f[1]);
+    xglMatrixStackRotX(pCell->vAngle.f[0]);
+    xglMatrixStackRotZ(pCell->vAngle.f[2]);
+    xglMatrixStackScale(&pCell->vScale);
+    xglMatrixStackSave(pCell->aMtx);
+    xglMatrixStackInverse();
+    xglMatrixStackSave(pCell->aMtxInv);
+
+    v0 = s_vCullFront;
+    APPLY_MATRIX33(&pCell->vDir, pCell->aMtx, &v0);
+    xglVectorNormal(&pCell->vDir, &pCell->vDir);
+
+    v1 = s_vCullLT;
+    v2 = s_vCullRT;
+    v3 = s_vCullRB;
+    v4 = s_vCullLB;
+    APPLY_MATRIX(&pCell->aCorner[0], pCell->aMtx, &v1);
+    APPLY_MATRIX(&pCell->aCorner[1], pCell->aMtx, &v2);
+    APPLY_MATRIX(&pCell->aCorner[2], pCell->aMtx, &v3);
+    APPLY_MATRIX(&pCell->aCorner[3], pCell->aMtx, &v4);
+}
