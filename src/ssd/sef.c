@@ -1744,3 +1744,40 @@ void sefGetOfsRange(void *pDst, void *pPrmArg, int nType)
         tracePrint("bad range prm : %d\n", nType);
     }
 }
+
+/* Local-data slot allocator: a 256-entry ring of particle-allocator
+ * handles starting at 0x600, with the round-robin cursor at 0x80E.
+ * Scan forward from the cursor for a slot holding a negative (free)
+ * handle, stopping one short of where we started; the post-loop
+ * `i == nEnd` retest is the original's, and it is what makes gcc rotate
+ * the loop the way retail did. */
+typedef struct {
+    char pad0[0x600];
+    short tbl[263];
+    short nCur;
+} SEF_LOCAL_DATA;
+
+extern int sevAllocPtAllocator(void);
+
+int sefAllocLocalData(SEF_LOCAL_DATA *p)
+{
+    int i;
+    int nEnd;
+    int h;
+
+    i = p->nCur;
+    nEnd = (i - 1) & 0xFF;
+    while (i != nEnd && p->tbl[i] >= 0) {
+        i = (i + 1) & 0xFF;
+    }
+    if (i == nEnd) {
+        return -1;
+    }
+    h = sevAllocPtAllocator();
+    if (h < 0) {
+        return -1;
+    }
+    p->tbl[i] = h;
+    p->nCur = (i + 1) & 0xFF;
+    return i;
+}
