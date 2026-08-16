@@ -163,12 +163,34 @@ typedef struct {
     float fPos[4];                  /* 0x10 */
 } INITACTOR;
 
+/* The game-loop work block. It is a single very large object: the
+ * per-scene reset writes a float at +0x29F44, which the original
+ * reaches as a large constant offset from the same base register (gas
+ * expands it to lui/addu/swc1), so the whole 172KB really is one
+ * struct and not a run of separate globals. */
 typedef struct {
-    u8 pad000[0x4];                 /* 0x00 */
-    INITACTOR *pPlayer;             /* 0x04 */
-    u8 pad008[0x4C];                /* 0x08 */
-    MAPPARTSRES *pParts;            /* 0x54 */
+    u8 pad000[0x4];                 /* 0x00000 */
+    INITACTOR *pPlayer;             /* 0x00004 */
+    u8 pad008[0x8];                 /* 0x00008 */
+    int nFlags;                     /* 0x00010 */
+    int nUnk14;                     /* 0x00014 */
+    int nUnk18;                     /* 0x00018 */
+    u8 pad01C[0x4];                 /* 0x0001C */
+    int nUnk20;                     /* 0x00020 */
+    u8 pad024[0x30];                /* 0x00024 */
+    MAPPARTSRES *pParts;            /* 0x00054 */
+    u8 pad058[0x188];               /* 0x00058 */
+    int nUnk1E0;                    /* 0x001E0 */
+    u8 pad1E4[0x29D60];             /* 0x001E4 */
+    float fUnk29F44;                /* 0x29F44 */
 } INITGAMELOOP;
+
+/* Sound driver work area */
+typedef struct {
+    u8 pad000[0xA0];                /* 0x000 */
+    int nUnk0A0;                    /* 0x0A0 */
+    u8 aUnk0A4[0x800];              /* 0x0A4 */
+} SOUNDWORK;
 
 /* GS clear-environment block */
 typedef struct {
@@ -238,6 +260,13 @@ extern int *pDrillFlag;
 extern INITACTOR *tActor;
 extern CLEARENV ClearEnv;
 extern int WorkEnd;
+extern SOUNDWORK SoundWork;
+extern char GameIdLight[];
+extern int UseVMFlag;
+extern int saveEffe;
+extern int shopEffe;
+extern int evsEffe;
+extern int retEffe;
 extern int uwares_tbl[];
 extern int xtxres_tbl[];
 extern char printflg;
@@ -279,8 +308,8 @@ void DrillResetFlag(MAPUNIT *);
 void SetContainer(int);
 INITCAMERA *xglStudioGetActiveCamera(void);
 SEFEFFECT *sefCreateEffectCf(int, int, int);
-void xglStudioGetLight(int *);
-void xglLightSetDefault(int);
+void xglStudioGetLight(void **);
+void xglLightSetDefault(void *);
 void xglRenderClearFrame(void);
 void xglCdInitial(void);
 void xglCdReset(void);
@@ -321,7 +350,20 @@ void xglPacketInit(void);
 void xglRenderInit(void);
 void xglFontInitial(void);
 void xglMovieInit(void);
+void *memset(void *, int, unsigned int);
 void xglMenuInitial(void);
+void xglFontLoad(int, int);
+void Vibration_Stop(void);
+void xglPadRead(void);
+void EnemySound_StopAll(int);
+void UwamonoBgmFadeOut(void);
+void GameCameraReset(void);
+void XTK_setWindowOwner(int);
+void ResetShootSys(void);
+void sefInitEffectCf(void);
+void *xglStudioGetLight2(void);
+void Player_System_Init(INITACTOR *);
+void xglRenderCopyDisp2Draw(void);
 
 /* Event symbol (the "!" marker over an event trigger) */
 void InitEvsSymbol(MAPUNIT *pUnit)
@@ -698,7 +740,7 @@ void InitDrill(MAPUNIT *pUnit)
  * the player actor itself */
 void InitCf(void)
 {
-    int light[4];
+    void *light[4];
 
     xglStudioGetLight(light);
     xglLightSetDefault(light[0]);
@@ -875,4 +917,84 @@ void InitItemBox(MAPUNIT *pUnit)
             pEffect++;
         }
     }
+}
+
+/* TODO: near-miss (18/128 words).  Two residuals:
+ *  - the `GameLoopState.fUnk29F44 = 3.0f` store.  The original
+ *    materialises the constant at the very top of the flags block but
+ *    stores it AFTER the nUnk20/nUnk14 stores; putting the assignment
+ *    early reproduces the early lui/mtc1 (56 -> 18 diffs) but also
+ *    moves the store early.  A --rotate of the three-line window cannot
+ *    fire because fix_cc_asm wraps the `s.s` macro in .set mips1/mips3
+ *    and --rotate requires contiguous instruction lines.
+ *  - the 32-word descending clear.  The original addresses it as
+ *    &GameLoopState then a SEPARATE `addiu +480`, gcc folds the 480
+ *    into the %lo; the extra instruction also shifts the loop-head
+ *    alignment pad, so the one folded addiu costs three words.
+ *    Swept: pointer-plus-index, char* offset and two index-range loop
+ *    forms, all much worse.
+ * Everything else, including the thirteen-mask flag chain, matches.
+ *
+ * Per-battle/per-scene system reset: reload the font for the current
+ * disc region, silence sound and vibration, rebuild the actor and map
+ * layers, clear the run-time half of the game-loop flags, and reset all
+ * sixteen id-lights. */
+void InitCfSystem(void)
+{
+    char *pLight;
+    int *pWork;
+    int i;
+
+    if ((GameLoopState.nUnk18 & 0xF0000000) == 0) {
+        xglFontLoad(1, 0);
+    } else {
+        xglFontLoad(0, 0);
+    }
+    Vibration_Stop();
+    xglPadRead();
+    SoundWork.nUnk0A0 = 0;
+    memset(SoundWork.aUnk0A4, 0, 2048);
+    EnemySound_StopAll(1);
+    UwamonoBgmFadeOut();
+    ACT_init();
+    MAP_initUnit();
+    GameCameraReset();
+    GameLoopState.fUnk29F44 = 3.0f;
+    GameLoopState.nFlags &= ~0x10000;
+    GameLoopState.nFlags &= ~0x20000;
+    GameLoopState.nFlags &= ~0x4000;
+    GameLoopState.nFlags &= ~0x8000;
+    GameLoopState.nFlags &= ~0x40000;
+    GameLoopState.nFlags &= ~0x400000;
+    GameLoopState.nFlags &= ~0x800000;
+    GameLoopState.nFlags &= ~0x20000000;
+    GameLoopState.nFlags &= ~0x40000000;
+    GameLoopState.nFlags &= ~0x1000;
+    GameLoopState.nFlags &= ~0x2000;
+    GameLoopState.nFlags &= ~0x100000;
+    GameLoopState.nFlags &= ~0x1;
+    GameLoopState.nUnk20 |= 0xF;
+    GameLoopState.nUnk14 = GameLoopState.nFlags;
+    GameLoopState.nFlags |= 0x80000;
+    UseVMFlag = 0;
+    XTK_setWindowOwner(0);
+    ResetShootSys();
+    sefInitEffectCf();
+    saveEffe = 0;
+    shopEffe = 0;
+    evsEffe = 0;
+    retEffe = 0;
+    xglLightSetDefault(xglStudioGetLight2());
+    Player_System_Init(GameLoopState.pPlayer);
+    pLight = GameIdLight;
+    for (i = 15; i >= 0; i--) {
+        xglLightSetDefault(pLight);
+        pLight += 240;
+    }
+    pWork = &GameLoopState.nUnk1E0;
+    for (i = 31; i >= 0; i--) {
+        *pWork = 0;
+        pWork--;
+    }
+    xglRenderCopyDisp2Draw();
 }
