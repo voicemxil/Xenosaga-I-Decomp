@@ -496,3 +496,56 @@ void CheckNearPoint(VECTOR *pOrigin, VECTOR *pA, VECTOR *pB, VECTOR *pOut)
         *pOut = *pB;
     }
 }
+
+/* True when segment p1->p2 and segment p3->p4 cross in the XZ plane.
+
+   PARKED at 59 of 65 words.  The original RECOMPUTES `p2->x - p1->x` and
+   `p2->z - p1->z` in the second block (and `p4->x - p3->x` / `p4->z -
+   p3->z` in the third) although both are still live from the first
+   block; every spelling tried here has gcc reuse them instead, which is
+   the whole 6-word shortfall.  Swept: separate vs shared flip/return
+   variable, block-scoped named delta locals, both mul operand orders,
+   early returns vs a result variable in the tail, and -fno-gcse as a
+   per-file flag (no effect at all -- this is cse_main, not gcse, so a
+   flag is not the answer either).  The other 18 functions in this file
+   are unaffected by that flag, so it is cheap to re-test if someone
+   finds the shape. */
+int CheckIntersect(VECTOR *p1, VECTOR *p2, VECTOR *p3, VECTOR *p4)
+{
+    float d;
+    float t;
+    int nRet;
+
+    nRet = 0;
+    if ((p4->x - p3->x) * (p2->z - p1->z) == (p2->x - p1->x) * (p4->z - p3->z)) {
+        return nRet;
+    }
+    d = (p4->x - p3->x) * (p2->z - p1->z) - (p2->x - p1->x) * (p4->z - p3->z);
+    if (d < 0.0f) {
+        nRet = 1;
+        d = -d;
+    }
+    t = (p3->z - p1->z) * (p2->x - p1->x) - (p3->x - p1->x) * (p2->z - p1->z);
+    if (nRet != 0) {
+        t = -t;
+    }
+    if (t < 0.0f) {
+        return 0;
+    }
+    if (d < t) {
+        return 0;
+    }
+    t = (p3->z - p1->z) * (p4->x - p3->x) - (p3->x - p1->x) * (p4->z - p3->z);
+    if (nRet != 0) {
+        t = -t;
+    }
+    nRet = 0;
+    if (t < 0.0f) {
+        return nRet;
+    }
+    nRet = 1;
+    if (d < t) {
+        nRet = 0;
+    }
+    return nRet;
+}
