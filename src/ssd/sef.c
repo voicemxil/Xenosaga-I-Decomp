@@ -1524,3 +1524,34 @@ void sefDeleteEffectWait(int nWaitID)
         }
     }
 }
+
+/* --- VU0 sin/cos: the angle's bit pattern goes to $vf4, a fixed
+ * microprogram entry is called, and the result comes back out of $vf1.
+ * Genuine hardware, not a compiler idiom -- a port must supply its own
+ * sinf/cosf here. --- */
+#define VU_SIN(dst, src) \
+    PS2_ASM(".set noreorder\n mfc1 $8, %1\n qmtc2 $8, $vf4\n" \
+            "vcallms 0xe8\n qmfc2.i $8, $vf1\n mtc1 $8, %0\n" \
+            ".set reorder" : "=f"(dst) : "f"(src) : "$8")
+#define VU_COS(dst, src) \
+    PS2_ASM(".set noreorder\n mfc1 $8, %1\n qmtc2 $8, $vf4\n" \
+            "vcallms 0x20\n qmfc2.i $8, $vf1\n mtc1 $8, %0\n" \
+            ".set reorder" : "=f"(dst) : "f"(src) : "$8")
+
+extern float sefRandf(void);
+
+/* A random point on a circle of radius fRadius in the XZ plane. */
+void sefGetCirclePos(SEF_VEC4 *pDst, float fRadius)
+{
+    float fAng;
+    float fSin;
+    float fCos;
+
+    fAng = sefRandf() * 360.0f * 0.017453292f;
+    VU_SIN(fSin, fAng);
+    pDst->x = fSin * fRadius;
+    VU_COS(fCos, fAng);
+    pDst->y = 0.0f;
+    pDst->w = 1.0f;
+    pDst->z = fCos * fRadius;
+}
