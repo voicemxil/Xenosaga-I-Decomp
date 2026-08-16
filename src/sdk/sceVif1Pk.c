@@ -454,54 +454,49 @@ void sceVif1PkAddUpkData128N(Vif1Packet *pkt, const long *src, unsigned int coun
 }
 
 /* Initialize a VIF1 packet for an UNPACK code block */
-void sceVif1PkOpenUpkCode(Vif1Packet *pkt, unsigned int a1, unsigned int a2, unsigned int a3, unsigned int t0)
+/* Open an UNPACK code block: writes a VIF STCYCL (CL=cl, WL=wl) followed by
+   the UNPACK VIFcode itself, and stashes the element/format parameters that
+   sceVif1PkCloseUpkCode needs to patch the NUM field later. */
+void sceVif1PkOpenUpkCode(Vif1Packet *pkt, unsigned int addr, unsigned int upk,
+                          unsigned int cl, unsigned int wl)
 {
-    /* TODO: near-miss (28 words, was 34).  Two causes were fixed here: the
-       original walks the pointer (`*cur = w0; cur++; *cur = w1;
-       pkt->current = cur + 1; pkt->openDirect = cur;`) rather than indexing
-       cur[0]/cur[1], and `a3 | 0x1000000` must be its own statement or gcc
-       reassociates it into `(t0 << 8 | 0x1000000) | a3`.  What is left is
-       scheduling: the original defers `sw` of the second word and of
-       pkt->current to the end of the block (after the mult/movn group) and
-       materialises the 256 constant early into its own register, copying it
-       twice (`move t4,t2` / `move t3,t2`) - we folded one copy away, so we
-       were one instruction short.  FIXED by pinning lo/hi/k256 to $11/$12/
-       $10 and laundering k256: the length now matches exactly (36 words).
-       Remaining 29 words are a whole-block scheduling and allocation
-       divergence, not a tie-break -- every instruction is present but the
-       order and register roles differ throughout.  Ruled out: pinning
-       `current` to $9/$13/$8 (all leave 29), -fno-strength-reduce and
-       -fno-unroll-loops (both regress the sibling *N functions).  This one
-       needs the block rebuilt against the disassembly rather than nudged. */
-    unsigned int *current = pkt->current;
-    unsigned int vl, vn;
-    unsigned int size, code, c0;
-    /* The original keeps 256 in $t2 (which mult later reuses) and copies
-       it into both $t3 and $t4, so BOTH copies are forced; folding either
-       one away leaves the function an instruction short. */
+    unsigned int *current;
+    unsigned int *next;
+    unsigned int vl, code, c0, w1;
+    PIN(unsigned int vn, "$4");
     PIN(unsigned int lo, "$11");
     PIN(unsigned int hi, "$12");
-    PIN(unsigned int k256, "$10");
+    /* One scratch local really is reused for the "0 means 256" CL/WL default
+       and then for the element size.  That is not cosmetic: it is why the
+       multiply lands in $t2, the register the 256 lived in.  Giving the two
+       roles separate locals puts the product in $a0 (the register vn dies in)
+       and costs three words. */
+    unsigned int size;
 
-    c0 = a3 | 0x1000000;
-    *current = (t0 << 8) | c0;
+    current = pkt->current;
+    c0 = cl | 0x1000000;
+    *current = (wl << 8) | c0;      /* STCYCL */
     current++;
-    vn = (a2 >> 2) & 3;
-    vl = a2 & 3;
-    *current = (a2 << 24) | (a1 & 0xFFFF);
-    pkt->current = current + 1;
+
+    vn = (upk >> 2) & 3;
+    w1 = (upk << 24) | (addr & 0xFFFF);
+    vl = upk & 3;
+    next = current + 1;
+
+    size = 0x100;
+    lo = cl ? cl : size;
+    hi = wl ? wl : size;
+    size = (0x20 >> vl) * (vn + 1);
+
+    *current = w1;                  /* UNPACK VIFcode */
+    pkt->current = next;
     pkt->openDirect = current;
 
-    size = (0x20 >> vl) * (vn + 1);
-    k256 = 0x100;
-    LAUNDER(k256);
-    lo = a3 ? a3 : k256;
-    hi = t0 ? t0 : k256;
-    if (lo < hi) {
+    if (lo >= hi) {
+        code = 0x10000;
+    } else {
         size = size * lo;
         code = hi << 16;
-    } else {
-        code = 0x10000;
     }
     pkt->unk1 = code | size;
 }

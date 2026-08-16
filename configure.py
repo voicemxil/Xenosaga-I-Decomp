@@ -186,6 +186,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "Check.c": "--lis-hazard-nop CheckDoorDist",
     "Undu.c": "--swap-adjacent UnduParamInit:5",
     "SEQ.c": "--mtc1-nop SEQ_motion:3",
     "xglFont.c": "--swap-adjacent xglFontAscii2Euc:47",
@@ -215,7 +216,7 @@ FILE_FIX_FLAGS = {
     # swap flag", which --swap-adjacent now is. NOTE all sites for one
     # pass must be a single comma-separated value (argparse stores, not
     # appends; fix_cc_asm.py rejects duplicates).
-    "sceVif1Pk.c": ("--swap-adjacent sceVif1PkCnt:9,sceVif1PkEnd:9,sceVif1PkAddUpkData128:10,sceVif1PkAddUpkData128:15!,sceVif1PkAlign:6,sceVif1PkAlign:22"),
+    "sceVif1Pk.c": ("--swap-adjacent sceVif1PkCnt:9,sceVif1PkEnd:9,sceVif1PkAddUpkData128:10,sceVif1PkAddUpkData128:15!,sceVif1PkAlign:6,sceVif1PkAlign:22,sceVif1PkOpenUpkCode:16 --rotate sceVif1PkOpenUpkCode:15:-3"),
     # an lwc1 in a jal delay slot followed by mov.s trips a bogus hazard nop
     "MAP.c": "--omit-hazard mov.s",
     # ACT_setArms: gcc annuls the arm-slot compare's branch because it
