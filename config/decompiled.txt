@@ -2592,3 +2592,4 @@ GetBSplineLoop = 0x002D8CD8, 0x1E0; // Get.c
 sceCdStPause = 0x0020E790, 0x50; // sceCd.c
 sceCdStResume = 0x0020E7E0, 0x54; // sceCd.c
 sceCdStStat = 0x0020E838, 0x48; // sceCd.c
+eNumberSet = 0x00276C48, 0x30; // eNumber.c
