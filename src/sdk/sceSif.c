@@ -833,3 +833,38 @@ int _sceSifLoadElfPart(const char *path, const char *sec, void *dest, int mode)
     result[1] = _senddata.pad;
     return 0;
 }
+
+/* sceSifLoadIopHeap: copy a module path into the load-into-heap RPC block
+ * and fire opcode 3 on the heap client.  The name is copied by hand (not
+ * strncpy) with a 252-byte cap, and the request size sent is the copied
+ * length plus the 4-byte address word plus the terminator. */
+typedef struct SifLihData {
+    int  addr;          /*   0 */
+    char name[252];     /*   4..255 */
+} SifLihData;
+
+extern SifLihData _lih_data;
+
+int sceSifLoadIopHeap(const char *name, int addr)
+{
+    int i;
+
+    if (_bind < 0)
+        return 0;
+
+    for (i = 0; i < 252; i++)
+        if ((_lih_data.name[i] = name[i]) == 0)
+            break;
+    if (i == 252)
+    {
+        i = 251;
+        _lih_data.name[251] = 0;
+    }
+    _lih_data.addr = addr;
+    _lih_data.name[251] = 0;
+
+    if (sceSifCallRpc(&cd_00994680, 3, 0, &_lih_data, i + 5,
+                      &rdata_009946C0, 4, 0, 0) < 0)
+        return -1;
+    return rdata_009946C0;
+}
