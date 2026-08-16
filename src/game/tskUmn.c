@@ -67,7 +67,7 @@ typedef struct {
         } mail;
     } u54;
     signed char nMailSel;               /* 0x5C: mail hint-slot cursor */
-    char pad5D[1];
+    signed char nDataBaseHit;           /* 0x5D: keyword-search result */
     signed char nDataBaseOpen;          /* 0x5E: pop-up may be opened */
     signed char nDataBaseBusy;          /* 0x5F: pop-up must stay open */
     char pad60[0x80 - 0x60];
@@ -958,12 +958,17 @@ typedef struct {
     EXNUMBER num;                       /* 0x0A0 */
 } UMN_EXWIN;
 
-extern void eRibbonSet(EXRIBBON *pRib, int nId, int nX, int nY);
+/* Unprototyped: the keyword screen passes two record pointers where the
+   plugin screen passes coordinates. */
+extern void eRibbonSet();
 extern void eRibbonMain(EXRIBBON *pRib, int nColor);
 extern void eTagFontSet(EXTAGFONT *pTag, char *pText);
 extern void eTagFontMain(EXTAGFONT *pTag, int nColor);
 extern void eNumberSet(EXNUMBER *pNum, int nValue);
-extern void eNumberMain(EXNUMBER *pNum, int nY, int nAlign);
+/* Unprototyped on purpose: the real eNumberMain takes four arguments
+   (object, y, colour, digits) and the plugin screen only ever passes
+   three, exactly as retail's object does. */
+extern void eNumberMain();
 
 /* TODO: PARKED at 107/134 words (136 orig), all inside the per-frame
  * loop. Behaviour, constants, struct offsets and the loop SHAPE are
@@ -1539,7 +1544,9 @@ void tskUmnPluginList(TSK_TASK *pTask, UMN_PLIST *w)
 /* eMessage object as this screen lays it out: the header the mail list
    shares, 0x44 bytes, position at +4 rather than +0. */
 typedef struct {
-    char pad00[4];
+    char pad00[1];
+    unsigned char nFont;                /* 0x01 */
+    char pad02[2];
     short nX;                           /* 0x04 */
     short nY;                           /* 0x06 */
     int nColor;                         /* 0x08 */
@@ -1870,4 +1877,335 @@ void tskUmnMailMenu(TSK_TASK *pTask, UMN_MAILMENU *w)
         }
     }
     xglFontDebugPrintf(0, 40, "yn : %2d", w->nState);
+}
+
+/* --- Database screen: the button-guide strip (five captions + two
+   L1/R1 sprites) --- */
+
+/* One caption row: its own slide position followed by the eMessage
+   object that draws it.  Five of them tile the work object end to end,
+   so row 0's header doubles as the work object's own header. */
+/* The drawn half of an eMessage: everything past its four-byte header.
+   Retail keeps the address of this sub-object live in a register while
+   it recolours row 4, which is why it is spelled out as its own type. */
+typedef struct {
+    short nX;                           /* 0x04 */
+    short nY;                           /* 0x06 */
+    int nColor;                         /* 0x08 */
+    char pad0C[4];                      /* 0x0C */
+    signed char nRgb[3];                /* 0x10 */
+    char pad0F[0x38 - 0x0F];            /* 0x0F */
+} DBEXPOS;
+
+typedef struct {
+    char pad00[4];                      /* 0x00 */
+    DBEXPOS p;                          /* 0x04 */
+} DBEXMSG;
+
+typedef struct {
+    unsigned char nMode;                /* 0x00 */
+    unsigned char bReady;               /* 0x01 */
+    char pad02[1];                      /* 0x02 */
+    unsigned char bShow;                /* 0x03 */
+    int nColor;                         /* 0x04 */
+    short nX;                           /* 0x08 */
+    short nY;                           /* 0x0A */
+    DBEXMSG emsg;                       /* 0x0C */
+} DBEXROW;
+
+/* The L1/R1 shoulder-button sprites. */
+typedef struct {
+    char pad00[4];                      /* 0x00 */
+    short nX;                           /* 0x04 */
+    short nY;                           /* 0x06 */
+    int nColor;                         /* 0x08 */
+    char pad0C[0x28 - 0x0C];            /* 0x0C */
+} DBEXSPR;
+
+typedef struct {
+    DBEXROW row[5];                     /* 0x000 */
+    char pad168[8];                     /* 0x168 */
+    int nSlide[2];                      /* 0x170 */
+    DBEXSPR spr[2];                     /* 0x178 */
+} UMN_DBEX;
+
+extern void eSpriteSet(DBEXSPR *pSpr, int nId);
+extern void eSpriteMain(DBEXSPR *pSpr);
+
+void tskUmnDataBaseExWin(TSK_TASK *pTask, UMN_DBEX *w)
+{
+    static char *text[] = {
+        "\036\066\241\247Zoom out",
+        "\036\065\241\247Zoom in",
+        "\036\064\241\247Rotate",
+        "\036\000\241\247Turn menu off",
+        "\036\001\241\247Analysis info",
+        0
+    };
+    int i;
+
+    if (UmnWork.nScene != 2) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0: {
+        int nY;
+        int nX;
+
+        w->row[0].nColor = 0x00FFFFF0;
+        nY = 288;
+        for (i = 0; i < 5; i++) {
+            w->row[i].nY = nY;
+            nY += 24;
+            w->row[i].nX = -196;
+            eMessageSet(&w->row[i].emsg, text[i]);
+            eMessageModeChange(&w->row[i].emsg, 32);
+        }
+        {
+            short nId[2] = { 274, 272 };
+
+            nX = -45;
+            for (i = 0; i < 2; i++) {
+                eSpriteSet(&w->spr[i], nId[i]);
+                w->spr[i].nX = nX;
+                nX += 573;
+                w->spr[i].nColor = w->row[0].nColor;
+                w->spr[i].nY = 214;
+                w->nSlide[i] = 0;
+            }
+        }
+        w->row[0].bReady = 0;
+        w->row[0].bShow = 1;
+        w->row[0].nMode = 0;
+        break;
+    }
+    case 2: {
+        short nTarget[5];
+        /* Five entries, not two: retail's slot for this array is a full
+           16 bytes, which is what keeps it from reusing the sprite-id
+           array's freed four-byte temp slot in the init arm. */
+        short nSprTarget[5];
+        DBEXPOS *e;
+
+        for (i = 0; i < 5; i++) {
+            nTarget[i] = -196;
+        }
+        nSprTarget[0] = -45;
+        nSprTarget[1] = 528;
+        if (UmnWork.nPage == 49) {
+            int nTrig;
+
+            for (i = 0; i < 5; i++) {
+                nTarget[i] = 16;
+            }
+            nTrig = PadData.trig.b.h;
+            if (nTrig & 0x80) {
+                w->row[0].bShow ^= 1;
+                nTrig = PadData.trig.b.h;
+            }
+            nSprTarget[0] = 8;
+            nSprTarget[1] = 475;
+            if (nTrig == 4) {
+                w->nSlide[0] = -6;
+            }
+            if (nTrig == 8) {
+                w->nSlide[1] = 6;
+            }
+        } else {
+            w->row[0].bShow = 1;
+        }
+        e = &w->row[4].emsg.p;
+        for (i = 0; i < 5; i++) {
+            MoveSlide(&w->row[i].nX, &nTarget[i], 3.0f);
+            w->row[i].emsg.p.nX = w->row[i].nX;
+            w->row[i].emsg.p.nY = w->row[i].nY;
+            w->row[i].emsg.p.nColor = w->row[0].nColor;
+            if (i == 4) {
+                if (UmnWork.nDataBaseOpen) {
+                    e->nRgb[2] = -128;
+                    e->nRgb[1] = -128;
+                    e->nRgb[0] = -128;
+                } else {
+                    e->nRgb[2] = 64;
+                    e->nRgb[1] = 64;
+                    e->nRgb[0] = 64;
+                }
+            }
+            if (w->row[0].bShow) {
+                eMessageMain(&w->row[i].emsg);
+            }
+        }
+        for (i = 0; i < 2; i++) {
+            if (w->nSlide[i]) {
+                int nAdd[2] = { 1, -1 };
+
+                w->nSlide[i] += nAdd[i];
+            }
+            MoveSlide(&w->spr[i].nX, &nSprTarget[i], 3.0f);
+            w->spr[i].nX = w->spr[i].nX + w->nSlide[i];
+            eSpriteMain(&w->spr[i]);
+        }
+        break;
+    }
+    }
+}
+
+/* --- Database screen: the keyword ("Index Search") viewer --- */
+
+/* The keyword viewer's work area.  The tyaUml display object at 0x7E0
+   is spelled out inline rather than as its own struct: it ends with a
+   four-byte field at 0x848 but contains an eight-byte one at 0x7F0, so
+   a nested struct would be rounded up to 0x70 and push the ribbon and
+   tag objects four bytes past where retail puts them. */
+typedef struct {
+    unsigned char nMode;                /* 0x000 */
+    unsigned char bReady;               /* 0x001 */
+    unsigned char bSlide;               /* 0x002 */
+    unsigned char bInfo;                /* 0x003 */
+    int nColor;                         /* 0x004 */
+    char aList[0x19C - 0x008];          /* 0x008 */
+    char aRec[0x794 - 0x19C];           /* 0x19C */
+    char aName[0x7B8 - 0x794];          /* 0x794 */
+    char aText[0x7E0 - 0x7B8];          /* 0x7B8 */
+    char aUml[8];                       /* 0x7E0 */
+    short nUmlW;                        /* 0x7E8 */
+    short nUmlW2;                       /* 0x7EA */
+    short nUmlH;                        /* 0x7EC */
+    short nUmlH2;                       /* 0x7EE */
+    long long nUmlColor;                /* 0x7F0 */
+    char pad7F8[0x820 - 0x7F8];         /* 0x7F8 */
+    void *pUmlList;                     /* 0x820 */
+    void *pUmlRec;                      /* 0x824 */
+    void *pUmlName;                     /* 0x828 */
+    void *pUmlText;                     /* 0x82C */
+    short nUmlStep;                     /* 0x830 */
+    char pad832[0x838 - 0x832];         /* 0x832 */
+    short nUmlTotal;                    /* 0x838 */
+    short nUmlSel;                      /* 0x83A */
+    char pad83C[0x840 - 0x83C];         /* 0x83C */
+    short nUmlX;                        /* 0x840 */
+    short nUmlY;                        /* 0x842 */
+    int nUmlSelI;                       /* 0x844 */
+    int nUmlTotalI;                     /* 0x848 */
+    EXTAGFONT tag;                      /* 0x84C */
+    EXRIBBON rib;                       /* 0x86C */
+    EXNUMBER num;                       /* 0x8DC */
+    char pad960[0x96C - 0x960];         /* 0x960 */
+    EMSG msg;                           /* 0x96C */
+} UMN_KEYWORD;
+
+extern void tyaUmlDispParamReset(void *pUml, int nMode);
+extern signed char tyaUmlDatabaseMain(void *pUml);
+
+void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
+{
+    if (UmnWork.nScene != 2) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0: {
+        static char msg00[16] = "\036\000Index Search:";
+
+        w->nColor = 0x00F00000;
+        tyaUmlDispParamReset(w->aUml, 0);
+        w->pUmlName = w->aName;
+        w->pUmlText = w->aText;
+        w->nUmlW = 1808;
+        w->nUmlH = 480;
+        w->nUmlW2 = 1920;
+        w->nUmlColor = (unsigned int)w->nColor;
+        w->nUmlH2 = 314;
+        w->nUmlX = -272;
+        w->nUmlY = 48;
+        w->pUmlList = w->aList;
+        w->pUmlRec = w->aRec;
+        eRibbonSet(&w->rib, 3, w->aName, w->aText);
+        w->rib.nW = 256;
+        w->rib.nH = 24;
+        eTagFontSet(&w->tag, "\001Num");
+        eNumberSet(&w->num, 0);
+        eMessageSet(&w->msg, msg00);
+        w->msg.nFont = 32;
+        w->nMode = 0;
+        w->bReady = 0;
+        break;
+    }
+    case 2:
+        switch (w->nMode) {
+        case 0:
+            w->bReady = 0;
+            w->nUmlStep = 0;
+            /* fallthrough */
+        case 1:
+            if (UmnWork.nPage == 81) {
+                w->nMode = 10;
+            }
+            break;
+        case 10:
+            w->bReady = 1;
+            w->nMode = 11;
+            w->bSlide = 1;
+            w->bInfo = 1;
+            /* fallthrough */
+        case 11:
+            if (UmnWork.nPage == 17) {
+                if (UmnWork.nDataBaseHit == 1) {
+                    w->nMode = 0;
+                }
+            }
+            break;
+        }
+        if (w->bReady) {
+            if (w->nUmlSel >= 0) {
+                if (PadData.trig.b.h & 0x20) {
+                    w->bInfo = 0;
+                }
+                if (PadData.trig.b.h & 0x40) {
+                    w->bInfo = 1;
+                }
+            }
+            UmnWork.nDataBaseHit = tyaUmlDatabaseMain(w->aUml);
+            w->nUmlSelI = w->nUmlSel;
+            w->nUmlTotalI = w->nUmlTotal;
+            if (w->bInfo) {
+                w->msg.nX = 48;
+                w->msg.nY = 416;
+                w->msg.nColor = w->nColor + 15;
+                eMessageMain(&w->msg);
+            }
+        }
+        if (w->bSlide) {
+            short nTarget;
+            int nTagY;
+
+            nTarget = -272;
+            if ((UmnWork.nPage >> 4) == 5) {
+                nTarget = 0;
+            }
+            MoveSlide(&w->nUmlX, &nTarget, 3.0f);
+            if (w->nUmlX == -272) {
+                w->bSlide = 0;
+            }
+            w->nUmlY = 48;
+            w->rib.nColor = w->nColor;
+            w->rib.nY = 48;
+            w->rib.nX = w->nUmlX;
+            eRibbonMain(&w->rib, 48);
+            w->tag.nX = w->nUmlX + 166;
+            nTagY = w->nUmlY + 4;
+            w->tag.nY = nTagY;
+            w->tag.nColor = w->rib.nColor + 1;
+            eTagFontMain(&w->tag, nTagY);
+            w->num.nX = w->tag.nX + 41;
+            w->num.nY = w->tag.nY;
+            w->num.nColor = w->tag.nColor;
+            w->num.nValue = (w->nUmlTotalI << 16) + (unsigned short)w->nUmlSelI;
+            w->num.nAlign = 3;
+            w->num.nDigits = 3;
+            eNumberMain(&w->num, w->tag.nY, w->tag.nColor, 3);
+        }
+        break;
+    }
 }
