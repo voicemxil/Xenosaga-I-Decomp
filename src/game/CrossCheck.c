@@ -9,9 +9,9 @@ typedef struct {
 
 typedef struct {
     int nFlags;             /* 0x000 */
-    char pad04[0x10];       /* to 0x014 */
-    float fY;                /* 0x014 */
-    char pad18[0x68];       /* to 0x080 */
+    char pad04[0x0C];       /* to 0x010 */
+    VECTOR pos;             /* 0x010 */
+    char pad20[0x60];       /* to 0x080 */
     unsigned char nIdx80;    /* 0x080 */
     char pad81[5];           /* to 0x086 */
     short nUnk86;             /* 0x086 */
@@ -24,14 +24,25 @@ typedef struct {
 
 extern ACTOR_CC actor[];
 
+/* The collision-shape sub-object every map unit carries at +0x1A0. The
+   original code reaches its fields through a pointer to the sub-struct
+   rather than through the unit, which is visible in the machine code all
+   over this family: CrossCheckMapUnitAt does `addiu v1,v1,416` then
+   `lb v1,45(v1)`, and CheckBrokenMapUnit does `addiu a1,a0,416` then
+   `lb a0,4(a1)` / `lw v0,68(a1)`. */
+typedef struct {
+    char pad00[0x2D];        /* to 0x02D */
+    signed char nType;        /* 0x02D  -- 1 = circle, 2 = box */
+} MAPUNIT_SHAPE;
+
 typedef struct {
     int nFlags;              /* 0x000 */
     char pad04[0x10];        /* to 0x014 */
     float fY;                 /* 0x014 */
     char pad18[0x8C];        /* to 0x0A4 */
     short nUnkA4;              /* 0x0A4 */
-    char padA6[0x127];       /* to 0x1CD */
-    signed char nByte1CD;   /* 0x1CD */
+    char padA6[0xFA];        /* to 0x1A0 */
+    MAPUNIT_SHAPE shape;     /* 0x1A0 */
     char pad1CE[0x132];      /* to 0x300 */
 } MAPUNIT_CC;
 
@@ -42,67 +53,42 @@ extern int CheckCrossCircle(void *a0, void *a1, void *a2, float radius);
 extern int CrossCheckMapUnitCircle(VECTOR *pPos, void *pOther, MAPUNIT_CC *pUnit);
 extern int CrossCheckMapUnitBox(VECTOR *pPos, void *pOther, MAPUNIT_CC *pUnit);
 
-/* TODO: near-miss - the fabsf/compare block and switch dispatch are logically
-   right and register-correct (v1==m copy confirmed via the `MAPUNIT_CC *m`
-   local), but the "int nRet = 0;" default only gets materialized right after
-   the branch here, while the original hoists "move v0,zero" to right after
-   the prologue (before any of the float loads). Declaration order of
-   nRet/m did not change this. Two attempts spent; leaving as TODO. */
 /* True when a target point sits close enough to a map unit's Y level and the
    unit's shape check (circle or box) reports a crossing hit */
 int CrossCheckMapUnitAt(VECTOR *pPos, void *pOther, MAPUNIT_CC *pUnit)
 {
     MAPUNIT_CC *m = pUnit;
-    int nRet = 0;
+    MAPUNIT_SHAPE *s = &m->shape;
 
     if (fabsf(pPos->y - m->fY) > 0.6f) {
-        return nRet;
+        return 0;
     }
-    switch (m->nByte1CD) {
+    switch (s->nType) {
     case 1:
         return CrossCheckMapUnitCircle(pPos, pOther, m);
     case 2:
         return CrossCheckMapUnitBox(pPos, pOther, m);
     }
-    return nRet;
+    return 0;
 }
 
-/* TODO: near-miss - only 1 real logic diff (nByte1CD now signed char, fixed)
-   plus a prologue-scheduling diff: the original computes s0 as a big
-   constant (lui+addiu) minus 0x1A0 (416) in a 3rd addiu, implying the base
-   value it starts from is some OTHER symbol/field 0x1A0 bytes past MapUnit's
-   element 0 (maybe the uwamono sub-struct typed as the loop pointer), not
-   MapUnit itself; our direct `&MapUnit[i]` gives the same runtime address
-   but a different (masked-irrelevant since immediate, not relocation)
-   0-vs-416 addiu operand and different sd-interleaving order. Two attempts
-   spent; leaving as TODO. */
 /* Scan every map unit for one whose Y band, flags and shape make it cross
-   the pPos/pOther segment; returns the matching index or -1 */
-/* TODO: near-miss (16 of 53 words) but the delta is ONE instruction and the
-   loop body is byte-identical (words 18-39 all line up). The original builds
-   the loop base in two steps:
-       lui   v0, %hi(X)
-       addiu v0, v0, %lo(X)      <- X resolves to 0x0048AEC0
-       addiu s0, v0, -416        <- s0 = 0x0048AD20 = &MapUnit[0]
-   i.e. it materialises a symbol 0x1A0 bytes PAST MapUnit and then backs off,
-   where we fold straight to `addiu s0,v0,%lo(MapUnit)`. That extra addiu is
-   the whole difference: it pushes the eight prologue register saves one slot
-   each, which is what the other 15 diffs are.
-   So the question is only "what symbol lives at MapUnit+0x1A0, and why does
-   the original address MapUnit through it". Since checkfile masks %hi/%lo,
-   the immediates above are the LINKED values, so X is a real distinct symbol
-   in the original, not a folding artefact. Whoever picks this up: find the
-   0x0048AEC0 symbol in the ELF symbol table; the source almost certainly
-   names that one and reaches MapUnit as a negative offset from it (or
-   declares the two adjacently in one TU so gcc CSEs the page address).
-   Do NOT go looking for a scheduling lever -- there is nothing wrong with
-   the schedule. */
+   the pPos/pOther segment; returns the matching index or -1.
+
+   The shape pointer has to be formed BEFORE the unit pointer: gcc's loop
+   strength reduction anchors the induction variable on whichever address
+   expression it sees first, so `s` first makes it materialise
+   %hi/%lo(MapUnit+0x1A0) and reach the unit base with a second
+   `addiu s0,v0,-416`, which is exactly what the original does. Deriving
+   `s` from `m` instead folds the +0x1A0 away and loses that addiu. */
 int CrossCheckMapUnit(VECTOR *pPos, void *pOther)
 {
     int i;
     MAPUNIT_CC *m;
+    MAPUNIT_SHAPE *s;
 
     for (i = 0; i < 64; i++) {
+        s = &MapUnit[i].shape;
         m = &MapUnit[i];
         if (m->nUnkA4 == -1) {
             continue;
@@ -110,7 +96,7 @@ int CrossCheckMapUnit(VECTOR *pPos, void *pOther)
         if ((m->nFlags & 0x100000) != 0) {
             continue;
         }
-        if (m->nByte1CD == 0) {
+        if (s->nType == 0) {
             continue;
         }
         if ((m->nFlags & 0x10000) == 0) {
@@ -123,42 +109,38 @@ int CrossCheckMapUnit(VECTOR *pPos, void *pOther)
     return -1;
 }
 
-/* TODO: near-miss (LENGTH, 64 orig vs 58 built) - the original tracks the
-   CheckCrossCircle third argument via a SEPARATE zero-initialized
-   accumulator (s3, stride 0xA70) added to a fixed base (s5 = actor+0x10)
-   computed once outside the loop, rather than `(char *)pA + 0x10` computed
-   fresh each iteration from the loop pointer -- same runtime address, but
-   6 fewer instructions get emitted our way. This is the
-   "pointer-into-pool, parallel accumulator" shape noted for
-   CrossCheckMapUnitAim; have not found the source form that reproduces two
-   independently-incremented pointers into the same array. One attempt
-   spent; leaving as TODO. */
 /* Scan every actor for one (other than pRef itself) within 0.3 Y units of
    pRef whose circle crosses the pRef/arg segment; returns the matching
-   index or -1 */
+   index or -1.
+
+   Everything here indexes actor[i] directly rather than through a cached
+   pointer. That is what splits the third CheckCrossCircle argument off into
+   its own induction variable: the field reads become address-form givs that
+   share one register, while `&actor[i].pos` is a value-form giv, which
+   gcc 2.9x materialises as (actor+0x10) hoisted out of the loop plus a
+   separate i*0xA70 accumulator. A cached `pA` pointer folds that into one
+   `addiu a2,pA,16` and loses seven instructions. */
 int CrossCheckActor(ACTOR_CC *pRef, void *arg)
 {
     int i;
-    ACTOR_CC *pA;
 
     for (i = 0; i < 64; i++) {
-        pA = &actor[i];
-        if (fabsf(pRef->fY - pA->fY) > 0.3f) {
+        if (fabsf(pRef->pos.y - actor[i].pos.y) > 0.3f) {
             continue;
         }
-        if (pA->nUnk86 < 0) {
+        if (actor[i].nUnk86 < 0) {
             continue;
         }
-        if ((pA->nFlags & 8) != 0) {
+        if ((actor[i].nFlags & 8) != 0) {
             continue;
         }
-        if (pA->nUnk8D0 == 0) {
+        if (actor[i].nUnk8D0 == 0) {
             continue;
         }
         if (i == pRef->nIdx80) {
             continue;
         }
-        if (CheckCrossCircle((char *)pRef + 0x10, arg, (char *)pA + 0x10, pA->f9E8)) {
+        if (CheckCrossCircle(&pRef->pos, arg, &actor[i].pos, actor[i].f9E8)) {
             return i;
         }
     }
