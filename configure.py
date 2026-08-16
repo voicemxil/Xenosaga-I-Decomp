@@ -192,7 +192,7 @@ FILE_FIX_FLAGS = {
     "Font.c": "--branch-likely FontTestP1:2",
     "Drill.c": "--mtc1-nop DrillZMoveFunc:1,DrillPowerOffFunc:1",
     "eMessage.c": "--rotate eMessageNextGyouMaxGet:2:-5",
-    "INIT.c": "--rotate InitEvsSymbol:33:-3,InitRetSymbol:33:-3 --rotate-seq InitShopSymbol:39:-4,InitShopSymbol:39:-3,InitSaveSymbol:39:-4,InitSaveSymbol:39:-3 --barrier-lo-load InitItemSymbol",
+    "INIT.c": "--rotate InitEvsSymbol:33:-3,InitRetSymbol:33:-3 --rotate-seq InitShopSymbol:39:-4,InitShopSymbol:39:-3,InitSaveSymbol:39:-4,InitSaveSymbol:39:-3 --barrier-lo-load InitItemSymbol,InitItemBox",
     "Get.c": "--swap-adjacent Get_Rnd:5",
     "Check.c": "--mtc1-nop CheckDoorDist:0",
     "Undu.c": "--swap-adjacent UnduParamInit:5",
@@ -242,7 +242,7 @@ FILE_FIX_FLAGS = {
     "Ether.c": ("--branch-unlikely EtherTreeRightDraw:2,"
                 "EtherTreeLine2SelectChange:1"),
     # many util natives do lwc1->cvt.s.w with no hazard nop in the original
-    "Java_util.c": ("--omit-hazard cvt.s.w --mtc1-nop Java_xeno_util_Spline_getValue__I:0 --swap-adjacent Java_xeno_util_Runtime_jumpCF__II:7,Java_xeno_util_Format_toString__Z:27! --rotate Java_xeno_util_Runtime_setLocation__III:15:2,Java_xeno_util_Runtime_setLocation__III:17:3"),
+    "Java_util.c": ("--omit-hazard cvt.s.w --mtc1-nop Java_xeno_util_Spline_getValue__I:0 --swap-adjacent Java_xeno_util_Runtime_jumpCF__II:7,Java_xeno_util_Format_toString__Z:27! --rotate Java_xeno_util_Runtime_setLocation__III:15:2,Java_xeno_util_Runtime_setLocation__III:17:3,Java_xeno_util_Format_toString__F:32:2,Java_xeno_util_Format_toString__F:34:-4 --swap-into-slot Java_xeno_util_Format_toString__F:3"),
     "xglVector.c": ("--omit-hazard mul.s --omit-hazard sub.s "
                     "--omit-hazard c.lt.s --omit-hazard mov.s"),
     # EXM's original object schedules independent FP work into load-delay
@@ -361,11 +361,7 @@ FILE_FIX_FLAGS = {
     # FUNC in asm order; see flip_branch_likely in fix_cc_asm.py).
     # scalbn needs one flip in EACH direction (its likely bit sits on the
     # wrong one of two adjacent branches).
-    "libm.c": ("--barrier-return-store fabs,__ieee754_fmod --as-g0 "
-               "--barrier-branch-move --barrier-lo-load "
-               "--branch-likely sinf:2,cosf:2,__ieee754_atan2:2,"
-               "__ieee754_rem_pio2:5,scalbn:6 "
-               "--branch-unlikely scalbn:7"),
+    "libm.c": ("--barrier-return-store fabs,__ieee754_fmod --as-g0 --fp-pair-hazard --barrier-branch-move --barrier-lo-load --branch-likely sinf:2,cosf:2,__ieee754_atan2:2,__ieee754_rem_pio2:5,scalbn:6 --branch-unlikely scalbn:7"),
     # _dtoa_r: `dpcmp(d.d, 0.0)`'s `a1 = 0` argument setup is left as a
     # separate instruction (with a genuine nop in the jal delay slot) in
     # the original, but gas's reorder pass steals it into the jal's delay
