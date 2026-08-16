@@ -5537,15 +5537,25 @@ typedef struct {
 
 extern MENU_ITEM_EX_WORK *MenuItemEx;
 
-/* TODO: near-miss (61 diffs, 69 orig vs 65 built) - behaviour, constants and
-   the recoloured message literal are all recovered, and the frame size, the
-   branch shape (not a movz - the LAUNDER in the else arm is what stops gcc's
-   if-conversion) and the two arms now line up. What is left is base-register
-   selection again: the retail build hoists a dedicated $s4 = &w->msg.nColor
-   for the single colour store (costing an addiu and an sd/ld pair we do not
-   emit) and fills the dispatch's delay slot with it. Pinning a colour base
-   to $s4 just moves the work pointer into $s4 instead. Same wall as
-   MenuTecExMain. */
+/* TODO: near-miss (11 diffs of 69, was 61 of 65). Two levers closed the gap:
+   (1) the retail entry block hoists &w->msg.nColor into $s4 BEFORE the state
+   dispatch -- a plain `int *pColor = &w->msg.nColor;` above the switch is the
+   "&STRUCT.member through a local pointer holds the address" lever and fixes
+   the length and every base register in case 0; (2) a LAUNDER on the text
+   pointer keeps the three recolour stores in source order (without it gcc
+   reorders them to p[1],p[0],p[2] and duplicates p[1] into a delay slot).
+   Do NOT also launder the -128 arm: it stops the hoist but costs the b/delay
+   pair and goes back to 45 diffs. Hoisting &w->msg into its own local as
+   well makes the function two words too long.
+   Left: the ten-word recolour window. Retail is
+       li 400 / sh 400 / bltz a1,L2 / [addiu v1,v1,1] / b L3 / [li -128] /
+       L2: li 64 / L3: sb 0 / sb 2 / sb 1
+   and we emit the conditional-overwrite form
+       li 400 / li -128 / sh 400 / addiu v0,v0,1 / bgezl a1,L3 / [sb 1] /
+       li 64 / sb 1 / sb 0 / sb 2
+   -- same instruction count, but gcc hoists the -128 above the test and then
+   annuls. Swept: both branch polarities, LAUNDER on either arm, on both arms,
+   and all of those with and without the pointer launder. */
 /* Item screen "Sort" hint: slides in on page 32 and recolours the tag
    escape in its own message literal (0x80 grey when sorting is available,
    0x40 when MenuWork's sort flag is negative) */
@@ -5588,12 +5598,15 @@ void MenuItemExMain(void)
             p = msg00[0] + 1;
             /* launder: without an asm in one arm gcc if-converts the pair
                into a movz; the retail build keeps the real branch. */
-            if (MenuWork.f50 < 0) {
-                nLevel = 64;
-            } else {
+            if (MenuWork.f50 >= 0) {
                 nLevel = -128;
+            } else {
+                nLevel = 64;
                 LAUNDER(nLevel);
             }
+            /* launder: without a barrier on the text pointer gcc reorders the
+               three recolour stores and duplicates p[1] into the delay slot. */
+            LAUNDER(p);
             p[0] = nLevel;
             p[2] = nLevel;
             p[1] = nLevel;
