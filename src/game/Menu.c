@@ -7229,12 +7229,12 @@ char *MenuNumberTextGet(long long nVal, int nDigits, int nZero)
     char *num[10] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
     long long nDiv;
     long long nRem;
-    int i;
-    int j;
-    int n;
+    PIN(int i, "$18");
 
     strcpy(msg, "");
     if (nDigits < 0) {
+        int n;
+
         nDiv = 10;
         n = 1;
         while (nVal / nDiv != 0) {
@@ -7243,13 +7243,17 @@ char *MenuNumberTextGet(long long nVal, int nDigits, int nZero)
         }
         nDigits = n;
     }
-    i = (nDigits < 11) ? nDigits : 10;
+    i = 10;
+    if (nDigits < 11) {
+        i = nDigits;
+    }
     nZero = nZero == 1;
     nRem = nVal;
     while (i > 0) {
         nDiv = 10;
-        if (i > 1) {
-            j = i - 1;
+        if (1 < i) {
+            int j = i - 1;
+
             do {
                 nDiv = nDiv * 10;
                 j--;

@@ -58,12 +58,18 @@ void sceVif1PkOpenUpkCode(u_int *pPk, u_int nAddr, u_int nCmd, u_int nNum, u_int
 void sceVif1PkCloseUpkCode(u_int *pPk);
 void sceVif1PkAddUpkData128N(u_int *pPk, u_int *pData, u_int nNum);
 void *memcpy(void *, const void *, u_int);
+void nmlPacketAddGsFlushWide(void);
 
 extern XGLRENDER sRender;
 extern int g_aSubWindow[4];
 
 int g_nGsEntry;
 GSTAGBUF g_aGsTag;
+
+typedef struct {
+    u_long nData;
+    u_long nReg;
+} GSPACKETENTRY;
 
 static u_int *s_pPacket;
 static void *s_pCacheTexture;
@@ -223,7 +229,7 @@ void nmlPacketSetCurrent(void)
 /* Reset the GS register entry buffer */
 void nmlPacketGsInit(void)
 {
-    g_nGsEntry = 0;
+    *(volatile int *)&g_nGsEntry = 0;
 }
 
 /* Queue a CLAMP_1 register write */
@@ -572,6 +578,65 @@ void packet_gs_entry64(u_int nReg, u_long *pData)
     q[2] = pData[0];
     q[3] = nReg;
     *pn = n + 1;
+}
+
+/* Clear the screen by building an eight-register GS packet in scratchpad
+ * memory, copying it to the normal GS packet buffer, then flushing it. */
+void nmlPacketAddScreenClear(void)
+{
+    volatile GSPACKETENTRY *pScratch;
+    GSPACKETENTRY *pDst;
+    int nWidth;
+    int nHeight;
+    int n;
+    u_long nZbuf;
+
+    nZbuf = sRender.nZbp | 0x01000000;
+    pScratch = (volatile GSPACKETENTRY *)0x70000000;
+    pScratch->nReg = 0x4A;
+    pScratch->nData = 0;
+    pScratch = (volatile GSPACKETENTRY *)0x70000010;
+    pScratch->nReg = 0x4E;
+    pScratch->nData = nZbuf;
+    pScratch = (volatile GSPACKETENTRY *)0x70000020;
+    pScratch->nReg = 0x47;
+    pScratch->nData = 0x30000;
+    nWidth = sRender.nWidth;
+    pScratch = (volatile GSPACKETENTRY *)0x70000030;
+    pScratch->nReg = 0x4C;
+    pScratch->nData = sRender.nFrontFbp |
+        ((u_long)(nWidth / 64) << 16) |
+        ((u_long)sRender.nPsm << 24);
+    pScratch = (volatile GSPACKETENTRY *)0x70000040;
+    pScratch->nReg = 1;
+    pScratch->nData = (u_long)0xFE00 << 46;
+    pScratch = (volatile GSPACKETENTRY *)0x70000050;
+    pScratch->nData = 6;
+    pScratch->nReg = 0;
+
+    nHeight = (short)sRender.nUnk06;
+    pScratch = (volatile GSPACKETENTRY *)0x70000060;
+    pScratch->nReg = 4;
+    pScratch->nData = ((u_long)(0x800 - nWidth) << 4) |
+        ((u_long)(0x800 - nHeight) << 20);
+    pScratch = (volatile GSPACKETENTRY *)0x70000070;
+    pScratch->nReg = 4;
+    pScratch->nData = ((u_long)(nWidth + 0x800) << 4) |
+        ((u_long)(nHeight + 0x800) << 20);
+
+    g_nGsEntry = 0;
+    pScratch = (volatile GSPACKETENTRY *)0x70000000;
+    n = 7;
+    do {
+        --n;
+        pDst = (GSPACKETENTRY *)&g_aGsTag.l[*(volatile int *)&g_nGsEntry * 2 + 2];
+        ++*(volatile int *)&g_nGsEntry;
+        pDst->nData = pScratch->nData;
+        pDst->nReg = *(volatile u_int *)((char *)pScratch + 8);
+        ++pScratch;
+    } while (n >= 0);
+
+    nmlPacketAddGsFlushWide();
 }
 
 /* --- Transform-microcode init --- */

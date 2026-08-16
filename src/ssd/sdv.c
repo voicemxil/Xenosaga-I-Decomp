@@ -43,7 +43,11 @@ void sdvSetAmbient(void *pRgb, void *pAmbient)
 
 typedef struct
 {
-    char pad[0x1280];
+    char pad0000[0x1278];
+    unsigned short nUsed;    /* 0x1278 */
+    short pad127A;
+    short nSerial;           /* 0x127C */
+    short pad127E;
 } SDV_ALTER;
 
 extern SDV_ALTER _sdvAlter[];
@@ -92,4 +96,78 @@ void sdvSaveAmbient(void)
                          : : "r"(_sdvMapRgb), "r"(pRgb) : "$8", "memory");
     _sdvAmbFrame = 0;
     _sdvAmbState = 0;
+}
+
+/* Tear down the eight "special" slots, telling the game loop to drop the
+ * defocus each one requested */
+extern void GameDefocusSet(int nIdx, int a, int b);
+extern short _sdvSpecialWork[] __asm__("_sdvSpecialBuf");
+
+void sdvClearSpecialWork(void)
+{
+    short *p;
+    int i;
+
+    p = _sdvSpecialWork;
+    for (i = 0; i < 8; i++) {
+        if (*p != 0) {
+            GameDefocusSet(i, 0, 0);
+            *p = 0;
+        }
+        p++;
+    }
+}
+
+/* Kill the alter slot named by a packed (serial << 16 | index) handle,
+ * but only if the slot is still live and still carries that serial.
+ * The live/serial pair sits in a header at +0x1270 that the original
+ * addresses through its own pointer -- hence the separate `addiu +4720`
+ * rather than 0x1278/0x127C folded into the loads -- and the slot's byte
+ * offset is kept in its own unsigned variable so gcc cannot reassociate
+ * base+offset+constant into one address. */
+typedef struct
+{
+    char pad00[8];
+    unsigned short nUsed;    /* +0x08 (slot +0x1278) */
+    short pad0A;
+    short nSerial;           /* +0x0C (slot +0x127C) */
+    short pad0E;
+} ALTER_HDR;
+
+void sdvKillAlter(int nHandle)
+{
+    char *pBase;
+    unsigned int nOfs;
+    unsigned int nHdrOfs;
+    int nSerial;
+    ALTER_HDR *pHdr;
+
+    if (nHandle < 0) {
+        return;
+    }
+    nSerial = nHandle >> 16;
+    pBase = (char *)_sdvAlter;
+    nOfs = (nHandle & 0xFFFF) * 0x1280;
+    nHdrOfs = nOfs + 0x1270;
+    pHdr = (ALTER_HDR *)(pBase + nHdrOfs);
+    if (pHdr->nUsed == 0) {
+        return;
+    }
+    if (pHdr->nSerial != nSerial) {
+        return;
+    }
+    sdvDestroyAlter(pBase + nOfs);
+}
+
+extern void sdvExecAlter(void *p);
+
+void sdvExecAlters(void)
+{
+    int i;
+
+    for (i = 0; i < 16; i++) {
+        if (_sdvAlter[i].nUsed != 0) {
+            sdvExecAlter(&_sdvAlter[i]);
+        }
+    }
 }

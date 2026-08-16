@@ -342,3 +342,45 @@ void MATRIX_mul3x4(float *pDst, const float *pLeft, const float *pRight)
     pDst[7] = zero;
     pDst[3] = zero;
 }
+
+float xglSin(float angle);
+float xglCos(float angle);
+
+/* Build a column-major axis-angle rotation matrix. */
+void MATRIX_rotate4(float *m, float angle, float x, float y, float z)
+{
+    float sine;
+    float cosine;
+    float length;
+    float oneMinusCosine;
+    float zero;
+    float one;
+
+    sine = xglSin(angle);
+    cosine = xglCos(angle);
+    length = sqrtf(x * x + y * y + z * z);
+    x /= length;
+    y /= length;
+    z /= length;
+    one = 1.0f;
+    zero = 0.0f;
+    oneMinusCosine = one - cosine;
+
+    m[15] = one;
+    m[11] = zero;
+    m[7] = zero;
+    m[3] = zero;
+    m[14] = zero;
+    m[13] = zero;
+    m[12] = zero;
+
+    m[10] = (z * z) * oneMinusCosine + cosine;
+    m[0] = (x * x) * oneMinusCosine + cosine;
+    m[2] = (z * x) * oneMinusCosine - y * sine;
+    m[1] = (x * y) * oneMinusCosine + z * sine;
+    m[5] = (y * y) * oneMinusCosine + cosine;
+    m[6] = (y * z) * oneMinusCosine + x * sine;
+    m[4] = (x * y) * oneMinusCosine - z * sine;
+    m[8] = (z * x) * oneMinusCosine + y * sine;
+    m[9] = (y * z) * oneMinusCosine - x * sine;
+}

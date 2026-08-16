@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Battle scene effect/scheduler functions (sef* family, other than sefIs*) */
 
 /* sefPrintVector/sefPrintMatrix: debug stubs, compiled out entirely */
@@ -662,4 +664,225 @@ void sefDestroyEffectData(SEF_EFFDATA *p)
         }
     }
     p->nUsed = 0;
+}
+
+/* Release every allocated particle handle a line's local-data block
+ * owns (256 short slots at +0x600, -1 meaning "free") */
+void sefDestroyLocalData(void *pBase)
+{
+    short *p;
+    int i;
+
+    p = (short *)((char *)pBase + 0x600);
+    for (i = 0; i < 256; i++) {
+        if (*p >= 0) {
+            sefFreeLocalData(pBase, i);
+        }
+        p++;
+    }
+}
+
+/* Reset an effect-data block: 32 line slots to -1, then the header */
+extern void *memset(void *, int, unsigned int);
+typedef struct {
+    char pad000[0x20];
+    int nUsed;        /* 0x20 */
+    short f24;        /* 0x24 */
+    short f26;        /* 0x26 */
+    short f28;        /* 0x28 */
+    short pad2A;
+    short f2C;        /* 0x2C */
+} SEF_EFFDATA2;
+void sefInitEffectData(SEF_EFFDATA2 *p, int nUsed, int f26, int f24)
+{
+    memset(p, -1, 32);
+    p->nUsed = nUsed;
+    p->f26 = f26;
+    p->f24 = f24;
+    p->f2C = 0;
+    p->f28 = 0;
+}
+
+/* --- battle actor table (24 x 144 bytes, live count at +0xD90) --- */
+
+typedef struct {
+    char pad000[0x80];
+    int *pLight;         /* 0x80 -- also the actor handle sefIs* matches on */
+    char pad084[0x86 - 0x84];
+    short nLightFlag;    /* 0x86 */
+    unsigned short nHitSignal;  /* 0x88 */
+    short pad08A;
+    unsigned short nSeSignal;   /* 0x8C */
+    short pad08E;
+} SEF_ACTOR;
+
+typedef struct {
+    SEF_ACTOR aActor[24];
+    char padD80[0xD90 - 0xD80];
+    int nActors;         /* 0xD90 */
+} SEF_ACTOR_TBL;
+
+extern SEF_ACTOR_TBL _battleActor;
+
+/* Raise or clear bit 15 of every live actor's light flags. Note the
+ * original dereferences pLight on the null branch too -- the null test
+ * only selects which mask is applied, it does not skip the store, which
+ * is why the two arms have to share one exit through a goto. */
+void sefSetLightFlag(void)
+{
+    SEF_ACTOR *p;
+    int i;
+    int *pFlags;
+    int nFlags;
+
+    i = 0;
+    if (_battleActor.nActors > 0) {
+        p = _battleActor.aActor;
+        do {
+            pFlags = p->pLight;
+            if (pFlags == 0) {
+                goto clear;
+            }
+            if (p->nLightFlag > 0) {
+                nFlags = *pFlags | 0x8000;
+            } else {
+clear:
+                nFlags = *pFlags & ~0x8000;
+            }
+            *pFlags = nFlags;
+            i++;
+            p++;
+        } while (i < _battleActor.nActors);
+    }
+}
+
+/* Bump the hit / sound-effect signal counter of the actor holding this
+ * handle. The search is a goto loop entered at the comparison, so gcc's
+ * loop optimiser never sees a natural loop: the slot address is rebuilt
+ * from the table base every iteration and the live count re-read. Any
+ * for/while/do-while spelling gets strength-reduced to a pointer walk
+ * with the count hoisted, which is 11 instructions off. */
+void sefSetHitSignal(int *pHandle)
+{
+    SEF_ACTOR *p;
+    int i;
+
+    if (pHandle != 0) {
+        p = _battleActor.aActor;
+        i = 0;
+        if (_battleActor.nActors > 0) {
+loop:
+            if (p->pLight != pHandle) {
+                i++;
+                p = &_battleActor.aActor[i];
+                if (i < _battleActor.nActors) {
+                    goto loop;
+                }
+            } else {
+                p->nHitSignal++;
+            }
+        }
+    }
+}
+
+void sefSetSeSignal(int *pHandle)
+{
+    SEF_ACTOR *p;
+    int i;
+
+    if (pHandle != 0) {
+        p = _battleActor.aActor;
+        i = 0;
+        if (_battleActor.nActors > 0) {
+loop:
+            if (p->pLight != pHandle) {
+                i++;
+                p = &_battleActor.aActor[i];
+                if (i < _battleActor.nActors) {
+                    goto loop;
+                }
+            } else {
+                p->nSeSignal++;
+            }
+        }
+    }
+}
+
+/* --- scheduler slot table (128 x 0xAB0) --- */
+
+/* The walk addresses a header at +0xA90 inside each 0xAB0 slot through
+ * its own pointer: the original keeps `addiu +2704` separate from the
+ * `lh 2(...)`, which only happens when the sub-object's address is taken
+ * rather than the whole offset folded into the load. */
+typedef struct {
+    short f00;
+    short nScript;    /* +0x02 (slot +0xA92) */
+} SEF_SCHED_HDR;
+
+extern void sefFreeScheduler(int nIdx);
+
+void sefDestroyScriptScheduler(int nScript)
+{
+    SEF_SCHED_HDR *p;
+    char *pBase;
+    int i;
+
+    /* LAUNDER keeps &_scheduler opaque: folded, gcc emits the symbol's
+     * %lo and the +0xA90 as one addiu instead of the original's two. */
+    pBase = (char *)_scheduler;
+    LAUNDER(pBase);
+    p = (SEF_SCHED_HDR *)(pBase + 0xA90);
+    for (i = 0; i < 128; i++) {
+        if (p->nScript == nScript) {
+            sefFreeScheduler(i);
+        }
+        p = (SEF_SCHED_HDR *)((char *)p + 0xAB0);
+    }
+}
+
+/* Build dst = scale(rotate(translate)) from a rotation vector, a
+ * translation vector and a scale vector. The identity fill and the
+ * translation row come out of vf0 -- hardware asm. */
+extern void MMathRotateMatrixXYZ(void *pDst, void *pSrc, void *pRot);
+extern void MMathScaleMatrix(void *pDst, void *pSrc, void *pScale);
+void sefCalcRotTransSMatrix(void *pRot, void *pTrans, void *pScale, void *pDst)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%1)\n"
+        "vmove.w $vf1, $vf0\n"
+        "vmr32.xyzw $vf2, $vf0\n"
+        "vmr32.xyzw $vf3, $vf2\n"
+        "vmr32.xyzw $vf4, $vf3\n"
+        "sqc2 $vf1, 0x30(%0)\n"
+        "sqc2 $vf2, 0x20(%0)\n"
+        "sqc2 $vf3, 0x10(%0)\n"
+        "sqc2 $vf4, 0x0(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(pTrans) : "memory");
+    MMathRotateMatrixXYZ(pDst, pDst, pRot);
+    MMathScaleMatrix(pDst, pDst, pScale);
+}
+
+/* Set the "reverse Z" flag when an effect number is one of ten known
+ * reversed effects and the type is in [24,32) */
+extern short _revDirZ;
+extern int revEft_3[] __asm__("revEft.3");
+int sefSetReverseDir(int nEftNo, int nType)
+{
+    unsigned int i;   /* the loop bound test is sltiu, not slti */
+    int nKey;
+
+    if ((unsigned int)(nType - 24) < 8) {
+        nKey = nEftNo;
+        if ((unsigned int)(nEftNo - 2900) < 99) {
+            nKey = nEftNo - 100;
+        }
+        for (i = 0; i < 10; i++) {
+            if (nKey == revEft_3[i]) {
+                _revDirZ = 1;
+                return 1;
+            }
+        }
+    }
+    _revDirZ = 0;
+    return 0;
 }

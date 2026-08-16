@@ -1,12 +1,37 @@
 /* Game loop helpers - state save/restore, resources, movies, pause and radar */
 
+#include "matching.h"
+
 typedef unsigned char u8;
 typedef unsigned short u16;
 
 typedef int TIWORD __attribute__((mode(TI)));
 
+/* A 16-byte quadword the EE moves with a single lq/sq. */
+typedef TIWORD GAME_QUAD;
+
+/* Copied through `volatile GAME_QUAD *` locals: that is what keeps each
+ * quadword address in its own register (`addiu tN,base,off` + `lq/sq
+ * 0(tN)`). A plain member assignment folds the field offset into the
+ * lq/sq instead, which is two instructions shorter than the original. */
+
 typedef struct {
-    u8 pad0[0xC];
+    int nFlags;              /* 0x000 */
+    int nUnk004;             /* 0x004 */
+    u8 pad008[0x10 - 0x8];   /* 0x008 */
+    GAME_QUAD quad010;       /* 0x010 */
+    u8 pad020[0x50 - 0x20];  /* 0x020 */
+    GAME_QUAD quad050;       /* 0x050 */
+    u8 pad060[0x84 - 0x60];  /* 0x060 */
+    u16 nUnk084;             /* 0x084 */
+    short nAlive;            /* 0x086 */
+    u8 pad088[0xA70 - 0x88]; /* 0x088 */
+} GAME_ACTOR;
+
+typedef struct {
+    u8 pad00[0x4];          /* 0x00 */
+    GAME_ACTOR *pActor;     /* 0x04 */
+    u8 pad08[0x4];          /* 0x08 */
     u16 nSaveA;             /* 0x0C */
     u16 nSaveB;             /* 0x0E */
     int nFlags;             /* 0x10 */
@@ -29,8 +54,8 @@ typedef struct {
     short nUnk1F6;             /* 0x1F6 */
     int nUnk1F8;               /* 0x1F8 */
     u8 pad1FC[0x200 - 0x1FC];
-    TIWORD quad200;             /* 0x200 */
-    TIWORD quad210;             /* 0x210 */
+    GAME_QUAD quad200;          /* 0x200 */
+    GAME_QUAD quad210;          /* 0x210 */
     short nUnk220;              /* 0x220 */
     u8 pad222[0x230 - 0x222];
     int nUnk230;               /* 0x230 */
@@ -67,6 +92,18 @@ typedef struct { long long pad[0x1E]; } LIGHT_ENV;
 typedef struct {
     u8 pad0[0x40];
     short nActive;          /* 0x40 */
+    u8 pad42[0x90 - 0x42];  /* 0x42 */
+    int nBuf0;              /* 0x90 */
+    int nNo;                /* 0x94 */
+    u8 pad98[0x9A - 0x98];  /* 0x98 */
+    u8 nUnk9A;              /* 0x9A */
+    u8 pad9B[0xB0 - 0x9B];  /* 0x9B */
+    int nBuf1;              /* 0xB0 */
+    int nBuf2;              /* 0xB4 */
+    u8 padB8[0xC9 - 0xB8];  /* 0xB8 */
+    u8 nUnkC9;              /* 0xC9 */
+    u8 nUnkCA;              /* 0xCA */
+    u8 nUnkCB;              /* 0xCB */
 } MOVIE_INFO;
 
 extern GAME_LOOP_STATE GameLoopState;
@@ -116,6 +153,77 @@ extern void GameBgDrawType1(void);
 extern void nullfunc(void);
 extern int xglCdReadFile(char *name, int addr, int a2, int a3);
 
+/* The saved copy of studio camera 0, restored when a cinematic ends */
+typedef struct { long long pad[190]; } SAVE_CAM;   /* 0x5F0 */
+
+extern SAVE_CAM save_cam;
+extern SAVE_CAM *xglStudioGetCamera2(int nCamera);
+extern TIWORD D_00362EB0;
+
+/* Save studio camera 0 and the current cinematic camera definition */
+void GameCameraStateSave(void)
+{
+    save_cam = *xglStudioGetCamera2(0);
+    GameLoopState.quad240 = D_00362EB0;
+    GameLoopState.nUnk230 = GameLoopState.nUnk28;
+}
+
+extern void xglSoundLoadEffect(char *pName, int nAddr, int nNo);
+extern char D_004BE2B0[];
+
+/* Drop the cinematic banks, hand the segment allocator the cinematic
+ * window back and reload the shared effect bank at the top of the work
+ * area */
+void GameCFSoundReload(void)
+{
+    int nAddr = (WorkEnd + 63) & -64;
+    int i;
+    /* the loop-bound compare lands in $v0 without this */
+    PIN(int more, "$3");
+
+    i = 0;
+    do {
+        xglSoundSendSwd(0, -1 - i);
+        xglSoundSendSmd2(0, i);
+        i++;
+        more = (i < 8);
+    } while (more);
+    SsdResetSegmentAllocMode(0xA8000);
+    SsdSetSegmentAllocMode(0x70000, 0x10000);
+    xglSoundLoadEffect(D_004BE2B0, nAddr, 1);
+    GameCFSoundPurgeSub();
+}
+
+extern unsigned int GameResourceAlloc(unsigned int nSize);
+extern void xglMovieInfoInit(MOVIE_INFO *p);
+char GameMovieAlpha;
+char GameMovieTransparent;
+
+/* Reserve the movie work area and point the movie info block at its three
+ * buffers */
+void GameMovieInit(int nNo)
+{
+    int nSize = nNo * 2;
+    int nAddr;
+
+    nAddr = GameResourceAlloc(0x10000 + nSize);
+    xglMovieInfoInit(&mi);
+    mi.nBuf0 = nAddr;
+    nAddr += nSize;
+    mi.nBuf1 = nAddr;
+    nAddr = 0x8000 + nAddr;
+    /* PERM_BEGIN */
+    mi.nUnk9A = 1;
+    mi.nUnkCB = 0;
+    mi.nNo = nNo;
+    mi.nBuf2 = nAddr;
+    mi.nUnkC9 = 0;
+    mi.nUnkCA = 0;
+    /* PERM_END */
+    GameMovieAlpha = -128;
+    GameMovieTransparent = 0;
+}
+
 /* Purge every cinematic sound-effect slot */
 void GameCFSoundPurgeSub(void)
 {
@@ -126,6 +234,33 @@ void GameCFSoundPurgeSub(void)
     for (i = 0; i < 8; i++) {
         xglSoundSendEffect(0, 0, i + 4);
     }
+}
+
+extern void xglSoundSendSwd(void *pData, int nNo);
+extern void xglSoundSendSmd2(void *pData, int nNo);
+extern void GameCFSoundPurgeSub(void);
+extern int SsdResetSegmentAllocMode(int nMode);
+extern int SsdSetSegmentAllocMode(int nMode, int nSize);
+
+/* Drop every cinematic sound bank and hand the segment allocator back its
+ * default window */
+void GameCFSoundPurge(void)
+{
+    int i;
+    /* the loop-bound compare lands in $v0 without this */
+    PIN(int more, "$3");
+
+    i = 0;
+    do {
+        xglSoundSendSwd(0, -1 - i);
+        xglSoundSendSmd2(0, i);
+        i++;
+        more = (i < 8);
+    } while (more);
+    xglSoundSendEffect(0, 0, 1);
+    GameCFSoundPurgeSub();
+    SsdResetSegmentAllocMode(0x70000);
+    SsdSetSegmentAllocMode(0xA8000, 0x10000);
 }
 
 /* Snapshot the camera and lighting environment */
@@ -140,6 +275,46 @@ void GameStateRestoreCameraLight(void)
 {
     GameCameraStateRestore();
     *xglStudioGetLight2() = D_003624D0;
+}
+
+extern void GameStateSaveCameraLight(void);
+
+/* TODO: near-miss (26/30 words, SAME LENGTH -- scheduling + a register
+ * cascade, no missing/extra instruction). Swept: plain member assignment
+ * of a mode(TI) field (folds the offset into the lq/sq: 2 words short),
+ * a 16-byte union/struct field (emit_block_move picks DImode ld/sd pairs
+ * -- MOVE_MAX is 8 here so move_by_pieces never reaches TImode), a
+ * volatile-cast copy macro (unfolds only the STORE address), one shared
+ * vs two distinct pointer-pair locals, and an explicit GAME_LOOP_STATE*
+ * base local -- all land on the same 26. What is left: the original
+ * schedules all four scalar actor loads/stores BEFORE the first lq, and
+ * holds the loop-state base in $a0 rather than $v0. */
+/* Snapshot the game loop state: window flags and the player actor's
+ * transform, then the camera and lighting */
+void GameStateSave(void)
+{
+    GAME_ACTOR *p = GameLoopState.pActor;
+
+    GameLoopState.nStateA = GameLoopState.nSaveA;
+    GameLoopState.nStateB = GameLoopState.nSaveB;
+    GameLoopState.nUnk1F0 = p->nFlags;
+    GameLoopState.nUnk1F8 = p->nUnk004;
+    GameLoopState.nUnk1F4 = p->nUnk084;
+    GameLoopState.nUnk1F6 = p->nAlive;
+    {
+        volatile GAME_QUAD *pSrc = &p->quad010;
+        volatile GAME_QUAD *pDst = &GameLoopState.quad200;
+
+        *pDst = *pSrc;
+    }
+    {
+        volatile GAME_QUAD *pSrc = &p->quad050;
+        volatile GAME_QUAD *pDst = &GameLoopState.quad210;
+
+        *pDst = *pSrc;
+    }
+    GameLoopState.nUnk220 = GameLoopState.nUnk50;
+    GameStateSaveCameraLight();
 }
 
 /* Restore the saved game loop state */
@@ -284,6 +459,48 @@ void GameDefocusFinalize(int id)
     p->nType = 0;
 }
 
+extern void DefocusMain(GAME_DEFOCUS *p);
+
+/* Game.c's view of xgl's shared render state - only the post-effect hook */
+typedef struct {
+    u8 pad00[0x34];                     /* 0x00 */
+    void (*pDefocusFunc)(GAME_DEFOCUS *); /* 0x34 */
+    u8 pad38[0x5C - 0x38];              /* 0x38 */
+} GAME_RENDER;
+
+extern GAME_RENDER sRender;
+
+/* Install (or clear) the per-frame defocus driver depending on whether any
+ * of the sixteen defocus slots is in use */
+void GameDefocusCheck(void)
+{
+    int i;
+    int flag;
+
+    flag = 0;
+    i = 0;
+    if (GameDefocusParam[0].nType == 0) {
+        /* goto-loop: the original leaves this loop unoptimized (the base
+         * address is recomputed every iteration and never strength-reduced),
+         * which only happens without a NOTE_INSN_LOOP_BEG */
+    loop:
+        i++;
+        if (i >= 16) {
+            goto done;
+        }
+        if (GameDefocusParam[i].nType == 0) {
+            goto loop;
+        }
+    }
+    flag = 1;
+done:
+    if (flag == 0) {
+        sRender.pDefocusFunc = 0;
+        return;
+    }
+    sRender.pDefocusFunc = DefocusMain;
+}
+
 /* Stop the currently playing movie */
 void GameMovieStop(void)
 {
@@ -332,13 +549,6 @@ void GameRadarInit(void)
     WorkEnd = image_004DC554 + xglCdReadFile(D_004C0618, addr, 0, 0);
     rate = 0;
 }
-
-typedef struct {
-    int nFlags;              /* 0x000 */
-    u8 pad004[0x82];         /* 0x004 */
-    short nAlive;             /* 0x086 */
-    u8 pad088[0xA70 - 0x88]; /* 0x088 */
-} GAME_ACTOR;
 
 extern GAME_ACTOR actor[];
 extern void ACT_DrawShadowBegin(void);

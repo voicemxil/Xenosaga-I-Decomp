@@ -103,3 +103,130 @@ int subSeisanHissatuCheck01(void)
     }
     return 0;
 }
+
+/* --- Ether tree node graph --- */
+
+/* 8-byte aligned so a whole-node position copy uses ld/sd rather than the
+   unaligned ldl/ldr/sdl/sdr sequence. */
+typedef struct {
+    float x;
+    float y;
+    float z;
+    float w;
+} __attribute__((aligned(8))) EVEC;
+
+typedef struct ETNODE {
+    unsigned short nId;          /* 0x00 */
+    unsigned short nUnk02;       /* 0x02 */
+    struct ETNODE *pParent;      /* 0x04 */
+    unsigned short nChildren;    /* 0x08 */
+    char pad0A[2];
+    struct ETNODE *pChild[3];    /* 0x0C */
+    unsigned char bFlags;        /* 0x18 */
+    char pad19[7];
+    EVEC pos;                    /* 0x20 */
+    char pad30[0x40];
+} ETNODE;
+
+extern ETNODE *EtherTreeObject;
+extern unsigned char *EtherTreeFirstDataGet(void);
+extern ETNODE *EtherTreeObjectWorkGet(void);
+extern unsigned char *MenuEtherDataGet(int nId);
+
+/* Place every branch node halfway between its first child and whichever of
+   the other two children its node type selects. */
+void subPosSet3(void)
+{
+    ETNODE *p;
+    ETNODE *a;
+    ETNODE *b;
+    int i;
+
+    p = EtherTreeObject;
+    for (i = 0; i < 80; i++, p++) {
+        switch (p->nChildren) {
+        case 2:
+            a = p->pChild[0];
+            b = p->pChild[1];
+            break;
+        case 3:
+            a = p->pChild[0];
+            b = p->pChild[2];
+            break;
+        default:
+            continue;
+        }
+        p->pos.y = (b->pos.y - a->pos.y) * 0.5f + a->pos.y;
+    }
+}
+
+/* Shift a node and its whole subtree by pOfs, in place. */
+void subPosSet2(ETNODE *node, EVEC *pOfs)
+{
+    EVEC pos;
+    int i;
+
+    if (node != 0) {
+        pos = node->pos;
+        if (pOfs != 0) {
+            pos.x += pOfs->x;
+            pos.y += pOfs->y;
+        }
+        for (i = 0; i < node->nChildren; i++) {
+            subPosSet2(node->pChild[i], &pos);
+        }
+        node->pos = pos;
+    }
+}
+
+/* Build the child list of one tree node from the ether data table, then
+   recurse into each child. */
+void sub2ParentChildSet(ETNODE *node)
+{
+    int i;
+    unsigned char nId;
+    ETNODE *p;
+
+    node->nChildren = 0;
+    node->bFlags |= 4;
+    for (i = 0; i < 3; i++) {
+        nId = MenuEtherDataGet(node->nId)[i];
+        if (nId != 0) {
+            p = EtherTreeObjectWorkGet();
+            p->nId = nId;
+            node->pChild[i] = p;
+            p->pParent = node;
+            node->nChildren = node->nChildren + 1;
+            sub2ParentChildSet(node->pChild[i]);
+        } else {
+            node->pChild[i] = 0;
+        }
+    }
+}
+
+/* Build the root node's child list from the first-data table and recurse. */
+void subParentChildSet(void)
+{
+    unsigned char *pData;
+    ETNODE *root;
+    ETNODE *p;
+    unsigned char nId;
+    int i;
+
+    pData = EtherTreeFirstDataGet();
+    root = EtherTreeObjectWorkGet();
+    root->nChildren = 0;
+    root->bFlags = 0x20;
+    for (i = 0; i < 3; i++) {
+        nId = pData[i];
+        if (nId != 0) {
+            p = EtherTreeObjectWorkGet();
+            p->nId = nId;
+            root->pChild[i] = p;
+            root->nChildren = root->nChildren + 1;
+            sub2ParentChildSet(p);
+        } else {
+            root->pChild[i] = 0;
+        }
+    }
+}

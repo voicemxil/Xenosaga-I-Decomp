@@ -7,6 +7,13 @@ typedef unsigned short u16;
 typedef unsigned int u_int;
 
 typedef struct {
+    float x;
+    float y;
+    float z;
+    float w;
+} VECTOR;
+
+typedef struct {
     u8 pad00[0x1A];                 /* 0x00 */
     short nUnk1A;                   /* 0x1A */
     u8 pad1C[0x2];                  /* 0x1C */
@@ -21,13 +28,19 @@ typedef struct ACTOR {
     float fDir[4];                  /* 0x050 */
     u8 pad060[0x20];                /* 0x060 */
     u8 nSerial;                     /* 0x080 */
-    u8 pad081[0x5];                 /* 0x081 */
+    u8 pad081[0x1];                 /* 0x081 */
+    u8 nUnk082;                     /* 0x082 */
+    u8 pad083[0x3];                 /* 0x083 */
     short nAlive;                   /* 0x086 */
     u8 pad088[0x38];                /* 0x088 */
     ACTWORK work;                   /* 0x0C0 */
     u8 pad0E0[0xC];                 /* 0x0E0 */
     int nCode;                      /* 0x0EC */
-    u8 pad0F0[0x600];               /* 0x0F0 */
+    u8 pad0F0[0x1F0];               /* 0x0F0 */
+    short aBattleActor[4];          /* 0x2E0 */
+    u8 pad2E8[0x3AE];               /* 0x2E8 */
+    short nAfterBattle;             /* 0x696 */
+    u8 pad698[0x58];                /* 0x698 */
     int nAnimFlags;                 /* 0x6F0 */
     float fMotionSpeed;             /* 0x6F4 */
     float fStiff;                   /* 0x6F8 */
@@ -49,17 +62,23 @@ typedef struct {
     float fMove[4];                 /* 0x0010 */
     float fMoveWork[4];             /* 0x0020 */
     u8 pad0030[0x10];               /* 0x0030 */
-    u16 nUnk0040;                   /* 0x0040 */
+    short nUnk0040;                 /* 0x0040 */
     u8 pad0042[0x2];                /* 0x0042 */
     u16 nWait;                      /* 0x0044 */
     short nWaitLimit;               /* 0x0046 */
-    u8 pad0048[0x2];                /* 0x0048 */
+    char nState;                    /* 0x0048 */
+    u8 pad0049[0x1];                /* 0x0049 */
     char nType;                     /* 0x004A */
     u8 pad004B[0x3];                /* 0x004B */
     u16 nStiff;                     /* 0x004E */
-    u8 pad0050[0x1A];               /* 0x0050 */
+    short nAfterFlag0;              /* 0x0050 */
+    short nAfterFlag1;              /* 0x0052 */
+    u8 pad0054[0x16];               /* 0x0054 */
     u8 nUnk006A;                    /* 0x006A */
-    u8 pad006B[0x2025];             /* 0x006B */
+    u8 pad006B[0x15];               /* 0x006B */
+    VECTOR aRoute[256];             /* 0x0080 */
+    short nRouteCount;              /* 0x1080 */
+    u8 pad1082[0x100E];             /* 0x1082 */
     short nAction[256][4];          /* 0x2090 */
     short nActionArg[256][4];       /* 0x2890 */
     short nActionSet;               /* 0x3090 */
@@ -70,7 +89,8 @@ typedef struct {
     short nTarget;                  /* 0x37A4 */
     u8 pad37A6[0xA];                /* 0x37A6 */
     float fFreeze;                  /* 0x37B0 */
-    u8 pad37B4[0x1C];               /* 0x37B4 */
+    u8 pad37B4[0xC];                /* 0x37B4 */
+    VECTOR vRouteTarget;             /* 0x37C0 */
     float fScale;                   /* 0x37D0 */
     float fScaleFrom;               /* 0x37D4 */
     float fScaleTo;                 /* 0x37D8 */
@@ -109,6 +129,8 @@ typedef struct {
     u8 pad00[0x4];                  /* 0x00 */
     ACTOR *pPlayer;                 /* 0x04 */
     u8 pad08[0xDC];                 /* 0x08 */
+    u8 pad0E4[0x29EB8];             /* 0x00E4 */
+    ACTOR *pBattleActor;            /* 0x29F9C */
 } GAME_LOOP_STATE;
 
 extern ENEPC enepc[];
@@ -137,6 +159,11 @@ void SsdFadeoutEffect(int, int, int);
 int xglSRand(void);
 void TM_Enemy_Move_Step(int, float *, float);
 void ACT_setMotion2(ACTOR *, int, int);
+void GetBSplineLoop(short, short, short, VECTOR *, VECTOR *);
+float Get_Distance(VECTOR *, VECTOR *);
+short Get_DefaultMotion(ACTOR *, short);
+void Set_Motion(ACTOR *, short, int);
+void BSpline_Init(float, VECTOR *, VECTOR *, void *, u8);
 int xglCdReadFile(char *, void *, int, int);
 char *strcat(char *, char *);
 
@@ -239,6 +266,199 @@ void Enemy_Found(ACTOR *a)
     }
     if (a->nAlive != 0x2201) {
         a->fAngle = Get_Angle(&a->fPos[0], &GameLoopState.pPlayer->fPos[0]);
+    }
+}
+
+/* Follow the nearest point on the escape route and update movement */
+void Enemy_Escape(ACTOR *a)
+{
+    static u16 CoolDown;
+    ENEPC *p;
+    VECTOR point;
+    float distance[3];
+    short i;
+    short motion;
+    int cooldown;
+    short nearest;
+
+    p = &enepc[a->nSerial];
+    if (p->nRouteCount > 0) {
+        for (i = 0; i < 3; i++) {
+            GetBSplineLoop(
+                (short)((p->nUnk0040 +
+                         ((short)(u16)p->nRouteCount << 5) + i - 1) %
+                        ((short)(u16)p->nRouteCount << 5)),
+                (short)(u16)p->nRouteCount, 0x20, p->aRoute, &point);
+            distance[i] = Get_Distance(&p->vRouteTarget, &point);
+        }
+
+        if (distance[0] < distance[1]) {
+            nearest = 2;
+            if (!(distance[1] < distance[2])) {
+                nearest = 1;
+            }
+        } else {
+            nearest = 2;
+            if (!(distance[0] < distance[2])) {
+                nearest = 0;
+            }
+        }
+        i = nearest;
+        GetBSplineLoop((short)(p->nUnk0040 =
+                           (p->nUnk0040 +
+                            ((short)p->nRouteCount << 5) + i - 1) %
+                           ((short)p->nRouteCount << 5)),
+                       (short)p->nRouteCount, 0x20,
+                       p->aRoute, &point);
+
+        if (i == 1) {
+            a->fAngle = Get_Angle(&a->fPos[0], &p->vRouteTarget.x);
+            cooldown = CoolDown;
+            CoolDown = cooldown - 1;
+        } else {
+            CoolDown = 0x10;
+            a->fAngle = Get_Angle(&a->fPos[0], &point.x);
+        }
+
+        if (0.0120000001f <= Get_Distance((VECTOR *)&a->fPos[0], &point) ||
+            (short)CoolDown > 0) {
+            motion = Get_DefaultMotion(a, 2);
+        } else {
+            motion = Get_DefaultMotion(a, 1);
+        }
+        Set_Motion(a, motion, 9);
+        a->fStiff = 0.06666667014f;
+        p->fMove[0] = point.x - a->fPos[0];
+        p->fMove[2] = point.z - a->fPos[2];
+        a->fPos[0] = point.x;
+        a->fPos[2] = point.z;
+    }
+}
+
+/* Follow the nearest point on the chase route and update movement */
+void Enemy_Route_Chase(ACTOR *a)
+{
+    static u16 CoolDown;
+    ENEPC *p;
+    VECTOR point;
+    float distance[3];
+    short i;
+    short motion;
+    int cooldown;
+    int nearest;
+
+    p = &enepc[a->nSerial];
+    if (p->nRouteCount > 0) {
+        for (i = 0; i < 3; i++) {
+            GetBSplineLoop(
+                (short)((p->nUnk0040 +
+                         ((short)(u16)p->nRouteCount << 5) + i - 1) %
+                        ((short)(u16)p->nRouteCount << 5)),
+                (short)(u16)p->nRouteCount, 0x20, p->aRoute, &point);
+            distance[i] = Get_Distance(&p->vRouteTarget, &point);
+        }
+
+        if (distance[0] < distance[1]) {
+            nearest = 0;
+            if (!(distance[0] < distance[2])) {
+                nearest = 2;
+            }
+        } else {
+            nearest = 1;
+            if (!(distance[1] < distance[2])) {
+                nearest = 2;
+            }
+        }
+
+        i = nearest;
+        GetBSplineLoop((short)(p->nUnk0040 =
+                           (p->nUnk0040 +
+                            ((short)p->nRouteCount << 5) + i - 1) %
+                           ((short)p->nRouteCount << 5)),
+                       (short)p->nRouteCount, 0x20,
+                       p->aRoute, &point);
+
+        if (i == 1) {
+            a->fAngle = Get_Angle(&a->fPos[0], &p->vRouteTarget.x);
+            cooldown = CoolDown;
+            CoolDown = cooldown - 1;
+        } else {
+            CoolDown = 0x10;
+            a->fAngle = Get_Angle(&a->fPos[0], &point.x);
+        }
+
+        if (0.0120000001f <= Get_Distance((VECTOR *)&a->fPos[0], &point) ||
+            (short)CoolDown > 0) {
+            motion = Get_DefaultMotion(a, 2);
+        } else {
+            motion = Get_DefaultMotion(a, 1);
+        }
+        Set_Motion(a, motion, 9);
+        a->fStiff = 0.06666667014f;
+        p->fMove[0] = point.x - a->fPos[0];
+        p->fMove[2] = point.z - a->fPos[2];
+        a->fPos[0] = point.x;
+        a->fPos[2] = point.z;
+    }
+}
+
+/* Reset battle-linked actors and resume surviving encounter enemies */
+void Enemy_After_Battle(int nMode)
+{
+    ACTOR *pActor;
+    ACTOR *pBattleActor;
+    ENEPC *p;
+    short *pLinked;
+    short i;
+    u8 state;
+    int nActor;
+
+    pBattleActor = GameLoopState.pBattleActor;
+    if (nMode == 1) {
+        pActor = &actor[pBattleActor->nSerial];
+        if (pActor->aBattleActor[0] != -2) {
+            pActor->nAlive = 0;
+        }
+        pLinked = pActor->aBattleActor;
+        for (i = 0; i < 4; i++) {
+            if (*pLinked >= 0) {
+                nActor = Get_ActorNumber(*pLinked);
+                if (actor[nActor].nAlive != 0) {
+                    nActor = Get_ActorNumber(*pLinked);
+                    actor[nActor].nAlive = 0;
+                }
+            }
+            pLinked++;
+        }
+    } else {
+        actor[pBattleActor->nSerial].nAfterBattle = 0x10;
+    }
+
+    for (i = 0; i < 16; i++) {
+        pActor = &actor[i];
+        if (pActor->nAlive > 0 && pActor->nUnk082 != 1) {
+            p = &enepc[i];
+            if (p->nStatus & 1) {
+                if (p->nAfterFlag0 != 0) {
+                    p->nAfterFlag0 = 1;
+                }
+                state = p->nState;
+                if ((char)state == 7) {
+                    p->nStiff = 0;
+                }
+                if (p->nAfterFlag1 != 0) {
+                    p->nAfterFlag1 = 1;
+                    state = p->nState;
+                }
+                if ((char)state == 6) {
+                    p->nUnk0040 = 0;
+                    BSpline_Init(pActor->fAngle, p->aRoute, &pActor->fPos[0],
+                                 &p->nUnk0040, state);
+                    Enemy_ActionReady(pActor, 2);
+                    Homing_Search(pActor);
+                }
+            }
+        }
     }
 }
 

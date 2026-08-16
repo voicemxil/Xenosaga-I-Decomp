@@ -58,6 +58,7 @@ void nmlModelSetStencil(int);
 void nmlModelSetFilter(int, float, float);
 void nmlModelSetTransparency(float);
 void nmlModelSetReflTransparency(float);
+void EXM_InitMovedHair(ACTOR *);
 
 void ACT_info_00306090(void);
 void ACT_resetMatrix(ACTOR *);
@@ -72,9 +73,21 @@ void ACT_updateMotion(ACTOR *);
 void ACT_updateMotionCore(ACTOR *, int);
 void ACT_updateSequence(ACTOR *);
 void ACT_updateNPC(ACTOR *);
+void ACT_updateEnemy(ACTOR *);
 void ACT_dispose2(ACTOR *, int);
 ACTOR *ACT_create(int, int);
 int ACT_jointGetAccessories(ACTOR *, unsigned int);
+
+extern unsigned char enepc[][0x38B0];
+extern void *D_00338684[];
+extern float D_004D8154;
+extern float D_004D8158;
+extern float D_004D815C;
+extern float D_004D8450;
+extern void *AdrsEnemyPreset;
+extern char *AdrsEnemySpline;
+extern char *DataSpline;
+extern char *AdrsEnemy;
 
 /* Reserve the matrix buffers an actor needs for its joint hierarchy */
 int ACT_allocMatrix(ACTOR *a, int nCount)
@@ -498,6 +511,91 @@ void ACT_initVMObject(ACTOR *a)
     }
 }
 
+/* Allocate an actor slot and restore the common defaults shared by every
+ * actor class.  Negative slot -1 searches upward and -2 searches downward. */
+ACTOR *ACT_create(int nId, int nType)
+{
+    ACTOR *a;
+    ACTOR *scan;
+    int slot;
+    register int index __asm__("$5");
+    register int type __asm__("$8");
+    register int alive __asm__("$3");
+
+    slot = nId;
+    type = nType;
+    if (slot < 0) {
+        if (slot == -1) {
+            index = 0;
+            scan = actor;
+            alive = scan->nAlive;
+            if (alive == 0) {
+                slot = 0;
+            } else {
+loop_up:
+                index++;
+                if (index < 0x40) {
+                    scan = (ACTOR *)((unsigned int)actor + 0xA70 * index);
+                    alive = scan->nAlive;
+                    if (alive == 0) {
+                        goto found;
+                    }
+                    goto loop_up;
+                }
+            }
+        } else if (slot == -2) {
+            index = 0x3F;
+            scan = actor;
+            alive = *(short *)((unsigned int)scan + 0x29216);
+            if (alive == 0) {
+                slot = 0x3F;
+            } else {
+loop_down:
+                index--;
+                if (index >= 0) {
+                    scan = (ACTOR *)((unsigned int)actor + 0xA70 * index);
+                    alive = scan->nAlive;
+                    if (alive == 0) {
+found:
+                        slot = index;
+                    }
+                    else {
+                        goto loop_down;
+                    }
+                }
+            }
+        }
+    }
+
+    if (slot >= 0) {
+      if ((unsigned int)slot < 0x40) {
+    a = (ACTOR *)((unsigned int)actor + slot * 0xA70);
+    a->nMatrixType = type >> 16;
+    a->nFlags = 0x20;
+    a->nSerial = slot;
+    a->nAlive = type;
+    a->nChildNum = 0;
+    a->fScale[3] = a->fScale[2] = a->fScale[1] = a->fScale[0] = 1.0f;
+    a->pParent = 0;
+    a->nUnk008 = 0;
+    if ((type & 0xF000) == 0) {
+        a->nShadowType = 4;
+        a->nShadowSize = 0x10;
+    } else {
+        a->nShadowType = 1;
+        a->nShadowSize = 0x50;
+    }
+    *(int *)((unsigned char *)a + 0x9F4) = 0;
+    *(float *)((unsigned char *)a + 0x9E8) = D_004D8450;
+    *(int *)((unsigned char *)a + 0x9F8) = 0;
+    EXM_InitMovedHair(a);
+    *(int *)((unsigned char *)a + 0xA60) = 0;
+    return a;
+      }
+    }
+    return 0;
+}
+
 /* Create a script-driven character actor */
 ACTOR *ACT_createChr(int nId, int nArg)
 {
@@ -573,6 +671,176 @@ ACTOR *ACT_createNPC(int nId, int nArg)
         p->f2C = 0;
         p->f30 = 0;
     }
+    return a;
+}
+
+/* Create and initialise the actor and per-enemy work areas used by a field
+ * enemy.  The work structures are still represented by their recovered
+ * offsets here; their layouts span several subsystems and are not yet shared. */
+ACTOR *ACT_createEnemy(int nId, int nType)
+{
+    ACTOR *a;
+    unsigned char *w;
+    unsigned char *e;
+    short i;
+    short j;
+    short *p16;
+    int *p32;
+
+    if (nId < 0) {
+        if (actor[0].nAlive == 0) {
+            nId = 0;
+        } else {
+            i = 1;
+            while (i < 0x40) {
+                if (actor[i].nAlive == 0) {
+                    nId = i;
+                    break;
+                }
+                i++;
+            }
+        }
+        if (nId < 0) {
+            return 0;
+        }
+    }
+
+    a = &actor[nId];
+    w = (unsigned char *)a + 0xC0;
+    e = enepc[(unsigned char)nId];
+    a->nSerial = nId;
+    a->nAlive = nType;
+
+    *(short *)(w + 0x1C) = 0x14;
+    *(short *)(w + 0x1E) = 4;
+    *(short *)(w + 0x2A) = 1;
+    *(float *)(w + 0x00) = 15.0f;
+    *(short *)(e + 0x04) = 0x1E;
+    *(short *)(e + 0x06) = 5;
+    *(short *)(e + 0x08) = 0x19;
+    *(short *)(e + 0x37DC) = -1;
+    *(float *)(w + 0x08) = D_004D8154;
+    *(short *)(w + 0x18) = 0x1E;
+    *(short *)(w + 0x1A) = 4;
+    *(short *)(w + 0x20) = 0x19;
+    *(short *)(w + 0x28) = 0;
+    *(float *)(w + 0x0C) = D_004D8158;
+    *(float *)(w + 0x10) = 90.0f;
+    *(float *)(w + 0x68) = 10.0f;
+    *(float *)(w + 0x24) = 4.0f;
+    *(float *)(w + 0x40) = D_004D815C;
+    *(int *)(w + 0x2C) = -1;
+    *(float *)(e + 0x37D0) = 1.0f;
+    *(int *)(w + 0x34) = 0;
+    *(float *)(w + 0x04) = 10.0f;
+    *(float *)(w + 0x14) = 4.0f;
+    *(short *)(e + 0x3094) = 0;
+    *(int *)(w + 0x3C) = 0;
+    *(short *)(e + 0x37A0) = 0;
+    *(float *)(w + 0x48) = 1.0f;
+    *(int *)(w + 0x44) = -1;
+    *(int *)(w + 0x60) = 0;
+    *(int *)(w + 0x4C) = -1;
+
+    i = 0;
+    p16 = (short *)(e + 0x36A0);
+    do {
+        *p16 = 0;
+        j = 3;
+        {
+            short *p = (short *)(e + 0x34A6 + i * 8);
+            do {
+                *p = -1;
+                p--;
+            } while (--j >= 0);
+        }
+        i++;
+        p16++;
+    } while (i < 0x40);
+
+    *(char *)(e + 0x68) = -1;
+    *(short *)(e + 0x37A0) = 0;
+    *(short *)(e + 0x40) = 0;
+    *(short *)(e + 0x42) = 0;
+    *(short *)(e + 0x6E) = 0;
+    *(short *)(e + 0x6C) = 0;
+    *(short *)(e + 0x74) = 0;
+    *(short *)(e + 0x76) = 0;
+    a->nFlags |= 0x40030000;
+    *(short *)((unsigned char *)a + 0x9EC) = 0;
+    *(short *)((unsigned char *)a + 0x9EE) = -1;
+    *(short *)(w + 0x72) = 1;
+    *(short *)(w + 0x74) = 3;
+    *(short *)(w + 0x76) = 9;
+    *(short *)(w + 0x70) = 0;
+    *(short *)(w + 0x78) = 0;
+    *(short *)(w + 0x7A) = 0;
+    *(short *)(w + 0x7C) = 0;
+    *(short *)(w + 0x6C) = 0;
+    *(short *)(e + 0x37A4) = *((unsigned char *)D_00338684[0] + 0x80);
+    *(int *)(e + 0x37B4) = 0;
+    *(int *)(e + 0x37E0) = 0;
+    *(char *)(e + 0x37A2) = 0;
+    *(char *)(e + 0x37A3) = 0;
+    *(char *)(e + 0x6A) = 0;
+    *(short *)(e + 0x3830) = 0;
+    *(int *)(w + 0x204) = 0;
+    *(int *)(w + 0x200) = 0;
+    *(int *)(w + 0x64) = 0;
+    if ((unsigned short)(a->nAlive - 0x4000) >= 0x806) {
+        *(int *)(w + 0x64) = 0x1001B;
+    }
+    *(short *)(e + 0x3820) = -1;
+    *(short *)(e + 0x382C) = -1;
+    *(short *)(e + 0x382E) = 0;
+    *(short *)(e + 0x3822) = 0;
+    UnduParamInit((unsigned char *)a + 0x4C8);
+    *(short *)(w + 0x6E) = 1000;
+    *(short *)(e + 0x38A8) = 1000;
+    *(short *)(w + 0x22) = 0;
+    a->pUpdate = ACT_updateEnemy;
+    a->nFlags |= 0x20;
+
+    j = 3;
+    p16 = (short *)(w + 0x226);
+    do {
+        *p16 = -1;
+        p16--;
+    } while (--j >= 0);
+    *(int *)(e + 0x38A0) = 0;
+    j = 7;
+    p32 = (int *)((unsigned char *)a + 0xA2C);
+    do {
+        *p32 = 0;
+        p32--;
+    } while (--j >= 0);
+    *(short *)((unsigned char *)a + 0xA30) = -1;
+    *(short *)((unsigned char *)a + 0xA32) = 0;
+    DataSpline = AdrsEnemySpline;
+    *(short *)(e + 0x38AA) = 0;
+
+    i = 0;
+    do {
+        j = 0;
+        p16 = (short *)(e + 0x2890 + i * 8);
+        do {
+            *(p16 - 0x400) = -1;
+            *p16 = 0;
+            p16++;
+            j++;
+        } while (j < 4);
+        i++;
+    } while (i < 0x100);
+
+    p16 = (short *)(w + 0x5E);
+    j = 7;
+    do {
+        *p16 = -1;
+        p16--;
+    } while (--j >= 0);
+    *(char *)(e + 0x48) = 0;
+    *(short *)(e + 0x38AC) = 0;
+    AdrsEnemy = (char *)AdrsEnemyPreset + 4;
     return a;
 }
 

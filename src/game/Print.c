@@ -11,6 +11,7 @@ extern void eMessageSpriteReset(void);
 extern void sceVif1PkAddDirectDataN(void *packet, void *data,
                                     unsigned int count);
 extern unsigned short D_004A90F4[];
+extern unsigned char D_004C37C0[];
 
 typedef unsigned long PRINT_U64;
 typedef unsigned int PRINT_U32;
@@ -166,4 +167,78 @@ void PrintBackSprite2(void **packet, PRINT_BACK_SPRITE *sprite)
     entry[2] = sprite->texture;
     entry[3] = 0;
     sceVif1PkAddDirectDataN(*packet, direct, 6);
+}
+
+void PrintBackSprite(void **packet, void *data)
+{
+    PRINT_U64 *direct;
+    PRINT_U32 *entry;
+    PRINT_U64 frame;
+    short indices[8];
+    short *index;
+    PRINT_U32 *vertex;
+    PRINT_U32 color;
+    float one;
+    int i;
+
+    frame = 0x24020000 | (D_004A90F4[0] << 5) |
+            (((PRINT_U64)0x20000006 << 32) | 0x40000000);
+    direct = (PRINT_U64 *)((char *)packet + 0x30);
+    direct[4] = 0x7FDFF0;
+    direct[5] = 8;
+    direct[8] = frame;
+    direct[0] = ((PRINT_U64)0x10000000 << 32) | 5;
+    direct[3] = 0x42;
+    direct[1] = 0xE;
+    direct[2] = 0x44;
+    direct[6] = 0x60;
+    direct[7] = 0x14;
+    direct[9] = 6;
+    direct[10] = 0x30000;
+    direct[11] = 0x47;
+    sceVif1PkAddDirectDataN(*packet, direct, 6);
+
+    one = 1.0f;
+    __builtin_memcpy(indices, D_004C37C0, sizeof(indices));
+    entry = (PRINT_U32 *)direct;
+    entry[0] = 0x8004;
+    entry[1] = 0x302A4000;
+    entry[2] = 0x521;
+    entry[3] = 0;
+
+    entry = (PRINT_U32 *)((char *)packet + 0x40);
+    color = 0x80;
+    vertex = (PRINT_U32 *)data;
+    index = indices + 1;
+    i = 0;
+loop:
+    {
+        short index0;
+        short index1;
+
+        index0 = index[-1];
+        i++;
+        index1 = index[0];
+        index += 2;
+        entry[3] = color;
+        entry[2] = color;
+        entry[1] = color;
+        entry[0] = color;
+        entry += 4;
+        ((float *)entry)[0] = *(float *)((char *)data + index0 * 4 + 0x40);
+        entry[3] = 0;
+        ((float *)entry)[1] = *(float *)((char *)data + index1 * 4 + 0x40);
+        ((float *)entry)[2] = one;
+        entry += 4;
+        entry[0] = vertex[0];
+        entry[1] = vertex[1];
+        entry[2] = vertex[2];
+        entry[3] = 0;
+        entry += 4;
+        vertex += 4;
+    }
+    if (i < 4) {
+        goto loop;
+    }
+    sceVif1PkAddDirectDataN(*packet, direct, 0xD);
 }
