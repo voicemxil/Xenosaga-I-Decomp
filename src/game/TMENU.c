@@ -558,12 +558,15 @@ void TMENU_drawDefault(TMENU *t)
         if ((unsigned short)(t->h14 + 0xFFFF) < 2) {
             return;
         }
-        y = (int)t->nField24 + 16;
+        /* x BEFORE y, and h04 before h06 just below: together these two
+         * orders decide which float member lands in $f1 and hence which
+         * of x/y gets $s3.  Retail is nField20 -> $f1 -> $s3. */
         x = (int)t->nField20 + 16;
+        y = (int)t->nField24 + 16;
         p = t->pComp[1];
         p->n08 = 0xFFFFF1;
-        p->h06 = (int)(t->nField24 + 16.0f);
         p->h04 = (int)(t->nField20 + 16.0f);
+        p->h06 = (int)(t->nField24 + 16.0f);
         p->h0C = t->h0C;
         p->h0E = t->h0E;
         p->h00 |= 0x4000;
@@ -571,9 +574,9 @@ void TMENU_drawDefault(TMENU *t)
         p->h04 = x;
         p->h06 = y;
         p->n08 = 0xFFFFF0;
-        p->h00 |= 0x4000;
         p->h0C = t->h0C;
         p->h0E = t->h0E;
+        p->h00 |= 0x4000;
         if (t->b141 != 0) {
             n = t->b141;
             nOff = n * 24 + 12;
@@ -615,8 +618,9 @@ void TMENU_drawDefault(TMENU *t)
         }
         p = t->pComp[7];
         p->n08 = 0xFFFFFF;
-        p->h04 = t->h0C + x - 16;
+        /* h06 first here only -- the other pComp blocks want h04 first. */
         p->h06 = t->h0E + y - 16;
+        p->h04 = t->h0C + x - 16;
         EW_sprtSetCursorUV(p, 2, t->nTexF8);
         if (t->h58 + t->h5A < t->nItemCount) {
             p->h00 |= 0x4000;
