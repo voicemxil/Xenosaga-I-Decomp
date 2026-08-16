@@ -33,6 +33,32 @@
  * Sony's build guards the registry with WaitSema/SignalSema on
  * __sce_eh_sema_id via custom gthr hooks (see gccsrc/gthr-ps2.h).
  *
+ * REVISION SWEEP, so nobody redoes it. Every frame.c commit between the
+ * base rev and the compiler's 2000-10-03 snapshot date was built and
+ * measured (frame.h and dwarf2.h moved with it where the commit needed
+ * them -- the DW_CFA_GNU_negative_offset_extended constant and the
+ * cfa_saved field). Diff words, in-range / (orig vs built length) for
+ * execute_cfa_insn:
+ *
+ *   ec6bfc9b7ca  1999-12-29  end_fde 138  find_fde 20  frame_init 90
+ *                            exec_cfa 214  (267 vs 301)
+ *   78a0d70cdf55 2000-02-01  end_fde 138  find_fde  0  frame_init 90
+ *   3f388b42b08a 2000-02-09  end_fde 131  find_fde  0  frame_init 67
+ *                            exec_cfa 214  (267 vs 301)
+ *   2c84914526bd 2000-03-23  exec_cfa 176  (267 vs 325)
+ *   8034da37ce34 2000-03-23  exec_cfa 240
+ *   f7af368f2582 2000-05-15  exec_cfa 240
+ *   + 89d7f003d32b           end_fde   0  find_fde  0  frame_init  0
+ *
+ * We keep the 1999 base plus only the two hunks above. 2c84914526bd
+ * looks tempting -- 176 in-range diffs against 214 -- but it gets there
+ * by ADDING 24 words, and the original is SHORTER than every upstream
+ * revision including the oldest. A build that is 58 words long is not
+ * closer than one that is 34 words long; the in-range improvement is
+ * alignment noise. gcc split frame.c into frame.c + frame-dwarf2.c
+ * between 2000-05-15 and 2000-05-25, and neither side of the split has
+ * decode_stack_op either.
+ *
  * STILL WIP, both the same shape -- our build is LONGER than the
  * original, by 34 words and 32 words respectively:
  *   execute_cfa_insn   248d, 267 orig vs 301 built
