@@ -2634,3 +2634,4 @@ sceCdPowerOff = 0x0020E358, 0xB4; // sceCd.c
 sceCdMmode = 0x0020DBA0, 0xC4; // sceCd.c
 sefGetNullPosition = 0x002E1ED0, 0x7C; // sef.c
 sefGetWeaponPosition = 0x002E1F50, 0x7C; // sef.c
+MenuTextGet = 0x0028F028, 0x1CC; // Menu.c
