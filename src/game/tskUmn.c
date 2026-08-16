@@ -60,6 +60,10 @@ typedef struct {
     union {
         int nListNum;                   /* 0x54: rows in the current list */
         struct {
+            int pad54;
+            int nScript;                /* 0x58: chosen simulation script */
+        } sim;
+        struct {
             signed char nNum;           /* 0x54: mail rows on screen */
             char pad55[1];
             signed char aId[4];         /* 0x56: their header ids */
@@ -2845,5 +2849,100 @@ void UmnPlugin(void)
         UmnWork.nWait--;
     }
     xglFontDebugPrintf(32, 208, D_00A13540);
+    xglFontDebugHex(0, 64, UmnWork.nPage, 2);
+}
+
+
+/* --- simulation (training) screen driver ----------------------------- */
+
+extern int MenuScenarioNoGet(void);
+extern int UmnSimulationScriptNoTbl[];
+extern int UmnSimulationNo[];
+extern int D_00338690[];    /* system flag word; bit 0x400000 unlocks play */
+extern char D_00A132F8[];   /* debug caption */
+
+/* Page 0 spawns the three sub-tasks and derives the row count from the
+   scenario number; 16/17 run the cursor, 0xF0/0xF1 hand back to the top
+   level with the chosen script id in UmnSimulationNo. */
+void UmnSimulation(void)
+{
+    switch (UmnWork.nPage) {
+    case 0:
+        {
+            char *pWork = UmnWorkEnd[0];
+            int nScenario;
+
+            pWork = (char *)(((int)pWork + 0xF) & ~0xF);
+            UmnObjectTaskCreate(tskUmnSimulationPas, pWork);
+            pWork = (char *)(((int)pWork + 0x1FB) & ~0xF);
+            UmnObjectTaskCreate(tskUmnSimulationInfo, pWork);
+            pWork = (char *)(((int)pWork + 0x39F) & ~0xF);
+            UmnObjectTaskCreate(tskUmnSimulationList, pWork);
+
+            nScenario = MenuScenarioNoGet();
+            UmnWork.u54.nListNum = 0;
+            if (nScenario >= 388) {
+                UmnWork.u54.nListNum = 1;
+            }
+            if (nScenario >= 345) {
+                UmnWork.u54.nListNum++;
+            }
+            if (nScenario >= 301) {
+                UmnWork.u54.nListNum++;
+            }
+            if (nScenario >= 162) {
+                UmnWork.u54.nListNum++;
+            }
+            if (nScenario >= 115) {
+                UmnWork.u54.nListNum += 3;
+            }
+            UmnWork.u.nSimulationScript = -1;
+            if (UmnWork.u54.nListNum == 0) {
+                UmnWork.nPage = -16;
+            } else {
+                UmnWork.nPage = 16;
+            }
+        }
+        break;
+    case 16:
+        UmnWork.nPage = 17;
+        UmnWork.nWait = 12;
+        /* fall through */
+    case 17:
+        if (UmnWork.nWait == 0) {
+            int nSel = UmnWork.u.nSimulationScript;
+
+            if (nSel >= 0) {
+                if (PadData.trig.b.h & 0x20) {
+                    if (D_00338690[0] & 0x400000) {
+                        UmnWork.nPage = -16;
+                        UmnWork.u54.sim.nScript = UmnSimulationScriptNoTbl[nSel];
+                        xglSoundEffectNormalID(1, 0);
+                    } else {
+                        xglSoundEffectNormalID(5, 0);
+                    }
+                }
+            }
+            if (PadData.trig.b.h & 0x40) {
+                xglSoundEffectNormalID(2, 0);
+                UmnWork.nPage = -16;
+            }
+        }
+        break;
+    case 0xF0:
+        UmnWork.nPage = -15;
+        UmnWork.nWait = 16;
+        /* fall through */
+    case 0xF1:
+        if (UmnWork.nWait == 0) {
+            UmnSimulationNo[0] = UmnWork.u54.sim.nScript;
+            UmnChangeTopLevel(0);
+        }
+        break;
+    }
+    if (UmnWork.nWait != 0) {
+        UmnWork.nWait--;
+    }
+    xglFontDebugPrintf(32, 208, D_00A132F8);
     xglFontDebugHex(0, 64, UmnWork.nPage, 2);
 }
