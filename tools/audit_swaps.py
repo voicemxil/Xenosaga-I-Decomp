@@ -33,11 +33,21 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.getcwd())
 import ccpipe  # noqa: E402
-from decomplib import Repo, masked_compare  # noqa: E402
+from decomplib import Repo, mask_word, masked_compare  # noqa: E402
 from elflib import Elf32  # noqa: E402
 
 def _identity(word):
-    """Instruction identity with relocatable operands removed."""
+    """Instruction identity with relocatable and encoding-variant bits gone.
+
+    Starts from decomplib's mask_word, which is what verify.py itself
+    normalizes with -- WITHOUT it the two legal encodings of `break`
+    (`break 0x7` = 0x000001CD and `break 0x0,0x7` = 0x0007000D) count as
+    two different instructions, and any reordering flag on a function
+    containing a division (gcc emits a break as the divide-by-zero trap)
+    gets reported as masking a different multiset. That false positive
+    cost an agent a real investigation on xglFontAscii2Euc.
+    """
+    word = mask_word(word)
     op = word >> 26
     if op == 0 or op == 16 or op == 17 or op == 18:
         return word                      # R-type / coprocessor: keep whole
@@ -65,6 +75,7 @@ def main():
     srcs = sources_by_basename()
     repo = Repo()
     problems = []
+    skipped = []
     audited = 0
     for base, flagstr in sorted(configure.FILE_FIX_FLAGS.items()):
         if only and base != only:
@@ -92,8 +103,12 @@ def main():
                                    cflags=cflags, fixflags=tuple(stripped),
                                    asflags=asflags)
         if not ok:
-            problems.append((base, "<file>", "does not compile without "
-                                             "reordering flags"))
+            # Eleven agents edit this tree at once, so a file that does not
+            # compile right now is almost always someone mid-edit, not a
+            # bad flag. Say so instead of filing it as a SUSPECT reorder.
+            print(f"  SKIP {base:41} does not compile right now "
+                  f"(mid-edit?) -- not audited")
+            skipped.append(base)
             continue
         elf = Elf32("/tmp/_audit.o")
         syms = elf.func_symbols_sized()
@@ -123,6 +138,9 @@ def main():
                                  "reordering is masking a different "
                                  "instruction multiset"))
     print(f"\naudited {audited} reordering-flag functions")
+    if skipped:
+        print(f"skipped {len(skipped)} file(s) that do not compile right "
+              f"now: {', '.join(skipped)}")
     if problems:
         print("\nSUSPECT -- these are not pure reorders:")
         for base, fn, why in problems:
