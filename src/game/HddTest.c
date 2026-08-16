@@ -144,3 +144,56 @@ void HddTestDummyFolder(void)
     }
     HddTestUnmountCommon();
 }
+
+int sceChstat(const char *path, void *stat, int mask);
+
+/* NEAR MISS -- 2 diffs, REGISTER ($v0 -> $v1), both in the loop
+   preheader: the original materialises the static's address as
+   `lui $v0,%hi(name)` + `addiu $s2,$v0,%lo(name)` and we get $v1 for
+   that temp. Everything else, all 86 words, is identical. Swept: every
+   ordering of the four locals; st as unsigned int[16] / char[64] / via a
+   pointer; the 0xC4A7 mode as a literal, a named local, and a cast
+   store; the path string through a `char *`. The temp is the LAST of the
+   four loop invariants gcc hoists (after $s4, $s5, $s6) and its register
+   is an allocator naming tie-break, not source-reachable; a whole-
+   function --swap-regs is not usable because $v0 and $v1 are both live
+   elsewhere in the body and already agree there.
+
+   Create 1024 save folders under Your Saves, chmod'ing each one, and stop
+   at the first failure */
+void HddTest1024Save(void)
+{
+    static char name[] = "pfs1:/Your Saves/0000";
+    unsigned int st[16];
+    int i;
+    int n;
+    int r;
+
+    HddTestMountCommon();
+    HddTestMakeYourSaves();
+    for (i = 0; i < 1024; i++) {
+        n = i;
+        name[20] = n % 10 + '0';
+        n = n / 10;
+        name[19] = n % 10 + '0';
+        n = n / 10;
+        name[18] = n % 10 + '0';
+        n = n / 10;
+        name[17] = n % 10 + '0';
+        r = sceMkdir(name, 511);
+        if ((i & 0x1F) == 0) {
+            printf("%s:%d\n", name, r);
+        }
+        if (r < 0) {
+            printf("%s:%d\n", name, r);
+            break;
+        }
+        st[1] = 0xC4A7;
+        r = sceChstat(name, st, 2);
+        if (r < 0) {
+            printf("chstat:%d\n", r);
+            break;
+        }
+    }
+    HddTestUnmountCommon();
+}
