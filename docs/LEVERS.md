@@ -119,6 +119,14 @@ branch delay slot.
 removes the temp retail loads through. Pin the first N and let the next
 register fall out.
 
+**Drop the named local and let CSE invent the temporary.** In
+`nmlPacketTextureTrans` a `nOfs = *(int *)(pTex + 0x6C);` local put the
+pointer in `$v0` and the offset in `$v1`; writing the field expression
+twice and letting CSE make the temp reversed them -- and that one change
+also fixed the prologue's `sd` order and which instruction filled the
+`blez` delay slot. Same axis as the double-deref entry above, and it is
+worth trying in BOTH directions before reaching for a flag.
+
 **Delete steering before adding any.** One function matched tonight
 purely by removing two stale `LAUNDER`s — the scheduler then emitted the
 retail order by itself.
@@ -179,6 +187,15 @@ them together.** A load written after an intervening store to the same
 object cannot be hoisted (gcc must assume the store aliases), so the
 schedule is fixed by source order, not by the scheduler.
 (GameResourceAlloc.)
+
+**A scratchpad A+D block wants inline absolute casts, not a pointer.**
+`((GSENTRY *)0x70000010)->lData = ...` per entry is the form that
+matches: each `0x700000X0` gets its own `lui`+`ori` in its own
+caller-saved register, live only across that entry's two stores. One
+reassigned `GSENTRY *` local is ONE pseudo, so every entry reuses the
+same register and the whole block's schedule is wrong; eight
+function-scope pointers all go live at once and push the data constants
+into `$s0-$s6`. Confirmed by the five matching `nmlFilter*` builders.
 
 ---
 
@@ -335,6 +352,17 @@ uploads 5, and nothing else could be judged until the frame was 144.
 **Arm order reads off the source condition** — a `bnezl` past a call
 means that call is the THEN arm.
 
+**A VU0/MMI-only leaf needs `.set noreorder` around its asm.** Without
+it gas pulls the block's LAST instruction into the `jr ra` delay slot
+and the trailing pad nop vanishes -- the function comes out one word
+short. Wrapping the body in `.set noreorder` ... `.set reorder` restores
+both. Four `nml` VU leaves fell to this in one edit each.
+
+**Naming hard registers inside an asm block is what pushes its operands
+off `$a0-$a2`.** `_WeightToGlobalPlaceVec` uses `$v0-$a3`/`$t0-$t1` by
+name for a pextlw/pcpyld transpose; declaring exactly those as clobbers
+makes gcc emit the original's three `move` instructions into `$t2-$t4`.
+
 **Read the delay slots first.** A non-annulled delay slot always
 executes, so whatever gcc puts in one is UNCONDITIONAL in the source.
 
@@ -385,6 +413,12 @@ range test to 16 bits and costs `andi 0xffff` plus `li`+`addu`.
 **`c->s * 4` gives `lh`+`sll`; `c->s << 2` gives `lhu`+`sll`.** Multiply
 and shift are NOT interchangeable for matching.
 
+**A `union { TI q; u_int w[4]; }` is not optional for a quadword
+buffer you then patch a word of.** With `u_int aTag[4]` plus
+`*(TI *)aTag = ...`, gcc 2.96 does not see the alias and hoists the
+`lw 4(sp)` ABOVE the `sq` that fills the buffer. That is a MISCOMPILE,
+not a mismatch -- the union both fixes it and removes 12 diffs.
+
 **Read a byte global into an `int` local before comparing** — compared
 directly, 2.96 knows the `lbu` result is 0..255 and narrows `slti` to
 `sltiu`.
@@ -401,6 +435,13 @@ align 4 → `ldl/ldr` for 8-byte chunks plus a `lw/sw` tail; align 8 (the
 combine narrows the load to `lhu`. Worth 4 words.
 
 **`(T *)(n + (u_int)p)` is the only way to get `addu rd,<int>,<ptr>`.**
+
+**Grouping decides whether two constants fold.** `BIG | 0x24020000 |
+(field << 5)` left-associates, so gcc folds `BIG | 0x24020000` into one
+constant and the function comes out a word SHORT. `(0x24020000 |
+(field << 5)) | BIG` ORs the small constant with the non-constant first
+and keeps both materialisations. Symptom: LENGTH, one or two words, with
+an `ori` immediate that is the two constants merged.
 
 **Integer-first addition.** C pointer arithmetic ALWAYS normalises
 `int + ptr` to `ptr + int`, so no spelling of pointer arithmetic yields
