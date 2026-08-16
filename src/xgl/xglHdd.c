@@ -31,7 +31,8 @@ int sceOpen(char *pName, int nFlag, int nMode);
 int sceRead(int nFd, void *pBuf, int nSize);
 int sceClose(int nFd);
 int create_file(char *pName, int nFlag, void *pBuf, int nSize);
-void make_fullpath(char *pDest, char *pName, int nFlag);
+char *make_fullpath(char *pDest, char *pName, int nFlag);
+char *xglMcSetFullPath(char *pName, int nFlag);
 int xglCdArcCheck(void);
 void xglCdReadCancel(void);
 int xglHddErrorScreen(void);
@@ -416,4 +417,26 @@ int xglHddErrorScreen(void)
     xglSoundEffectNormalDirect(1);
     PASSTHRU(pRender, &sRender);
     pRender->nUnk58 = 0;
+}
+
+/* Build "pfs1:/Your Saves<mc-relative path>" into pDest and hand back
+ * the address of its terminating NUL */
+char *make_fullpath(char *pDest, char *pName, int nFlag)
+{
+    static char root[] = "pfs1:/Your Saves";
+    char *p;
+    char *q;
+
+    p = pDest;
+    q = root;
+    while ((*p = *q) != 0) {
+        q++;
+        p++;
+    }
+    q = xglMcSetFullPath(pName, nFlag);
+    while ((*p = *q) != 0) {
+        q++;
+        p++;
+    }
+    return p;
 }
