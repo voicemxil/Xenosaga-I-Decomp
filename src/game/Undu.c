@@ -170,15 +170,30 @@ int CheckWallAttr(WALL_UNIT *unit, unsigned short *pId)
     return 1;
 }
 
+/* The collision shape being tested: only its flag word matters here. */
 typedef struct {
-    char pad_00[0x54];
-    int nList;
+    char pad_00[8];
+    unsigned short nFlags;   /* 0x08 */
+} UNDU_SHAPE;
+
+typedef struct {
+    char pad_00[0x50];
+    UNDU_SHAPE *pShape;      /* 0x50 */
+    int nList;               /* 0x54 */
     char pad_58[8];
-    char *pList;
+    char *pList;             /* 0x60 */
+    char *pAttrTbl;          /* 0x64 */
+    char pad_68[0x1C];
+    float fBase;             /* 0x84 */
+    char pad_88[0x0C];
+    float fRange;            /* 0x94 */
+    float fBest;             /* 0x98 */
+    char *pBest;             /* 0x9C */
 } UNDU_CHECK;
 
 extern float UnduCheckSub(UNDU_CHECK *chk, char *entry);
-extern void UnduCheckSubHeightCheck(float height, UNDU_CHECK *chk, char *entry);
+extern int UnduCheckSubHeightCheck(float height, UNDU_CHECK *chk, char *entry);
+extern float D_003386DC[];
 
 /* Height-test every entry of the check list; -1000.0f is the "no hit"
    height (the same sentinel UnduParamInit writes to field_14). */
@@ -440,4 +455,68 @@ void *UnduDataGetHeader(unsigned int key, unsigned int id)
     }
     }
     return 0;
+}
+
+/* Score one list entry's height against the best hit so far: 0 rejects it,
+   1 accepts it without replacing the best, 2 makes it the new best. The
+   attribute word's 0x1F00 field can substitute a fixed height from the
+   table for the measured one. */
+int UnduCheckSubHeightCheck(float height, UNDU_CHECK *chk, char *entry)
+{
+    unsigned short flags = chk->pShape->nFlags;
+    unsigned int attr;
+    int result;
+    float best;
+    float base;
+    float range;
+
+    if (chk->pAttrTbl != 0) {
+        attr = *(unsigned int *)(chk->pAttrTbl +
+                                 *(unsigned short *)entry * 8);
+    } else {
+        attr = *(unsigned short *)entry;
+    }
+    if ((flags & 0x20) && (attr & 0xE000) == 0x4000) {
+        height = D_003386DC[(attr & 0x1F00) >> 8];
+    }
+    result = 0;
+    if (flags & 0x10) {
+        if (chk->fBase - chk->fRange < height &&
+            height < chk->fBase + chk->fRange) {
+            result = 1;
+            if (chk->fBase + chk->fRange < chk->fBest) {
+                result = 2;
+            }
+        } else if (flags & 0x800) {
+            best = chk->fBest;
+            if (best == -1000.0f) {
+                result = 1;
+            } else if (height < chk->fBase + chk->fRange) {
+                result = 1;
+            } else if (height < best) {
+                result = 1;
+            }
+        }
+    } else if (flags & 0x800) {
+        if (height <= chk->fBase + chk->fRange) {
+            result = 1;
+        }
+    } else {
+        best = chk->fBest;
+        if (best == -1000.0f) {
+            result = 1;
+        } else if (height < chk->fBase + chk->fRange) {
+            result = 1;
+        } else if (height < best) {
+            result = 2;
+        }
+    }
+    if (result != 0) {
+        if (result == 2 || chk->fBest < height) {
+            chk->fBest = height;
+            result = 2;
+            chk->pBest = entry;
+        }
+    }
+    return result;
 }
