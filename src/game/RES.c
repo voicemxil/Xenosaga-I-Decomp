@@ -177,3 +177,47 @@ void RES_GetLeaderSeName(char *pName)
         pDst++;
     }
 }
+
+/* Build "<path>cfNNNN.txt" (or "evNNNN.txt" for the event range) and return
+   a pointer at the extension so the caller can swap it.
+
+   The leading digit goes through the local `c`: computed with the other
+   three, stored last. Written as `pDst[2] = n % 10 + '0'` after the
+   extension stores, its divisor's `li 10` is materialised AFTER the four
+   character constants and every one of $t4..$t7 ends up holding the wrong
+   value. Store order of the four extension characters is from a 24-way
+   sweep. */
+char *RES_getScenePath(char *pDst, int nScene)
+{
+    char *p;
+    int n;
+    int c;
+
+    p = RES_getPath();
+    while ((*pDst = *p) != 0) {
+        p++;
+        pDst++;
+    }
+    if (nScene <= 0x0FFFFFFF) {
+        pDst[0] = 'c';
+        pDst[1] = 'f';
+    } else {
+        pDst[0] = 'e';
+        pDst[1] = 'v';
+    }
+    n = nScene & 0x0FFFFFFF;
+    pDst[5] = n % 10 + '0';
+    n = n / 10;
+    pDst[4] = n % 10 + '0';
+    n = n / 10;
+    pDst[3] = n % 10 + '0';
+    n = n / 10;
+    c = n % 10 + '0';
+    pDst[6] = '.';
+    pDst[8] = 'x';
+    pDst[7] = 't';
+    pDst[9] = 't';
+    pDst[10] = 0;
+    pDst[2] = c;
+    return pDst + 7;
+}

@@ -2742,3 +2742,4 @@ sceChstat = 0x002063D8, 0x23C; // sceFs.c
 sefGetCubePos = 0x002E24F0, 0xF4; // sef.c
 ACT_resetParent = 0x003066D0, 0xD8; // ACT.c
 sefGetOfsRange = 0x002E25E8, 0x230; // sef.c
+RES_getScenePath = 0x0024A3C0, 0x128; // RES.c
