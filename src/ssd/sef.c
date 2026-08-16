@@ -1652,3 +1652,28 @@ void sefGetCubePosBtm(void *pDst, void *pSize)
     VU_SUB(&vRnd, &vRnd, &vSize);
     VU_SCALE(pDst, &vRnd, 0.1f);
 }
+
+/* Same body as sefGetCubePosBtm without the y-flattening: a random
+ * point anywhere inside the box. */
+void sefGetCubePos(void *pDst, void *pSize)
+{
+    SEF_VEC4 vSize;
+    SEF_VEC4 vRnd;
+    unsigned int nA;
+    unsigned int nB;
+    unsigned int nC;
+
+    VU_ITOF(&vSize, pSize);
+    vRnd.w = 0.0f;
+    nA = sefRandSeed * 1103515245 + 12345;
+    vRnd.x = (float) (int) ((nA >> 16) & 0x7FFF) * (1.0f / 32767.0f);
+    nB = nA * 1103515245 + 12345;
+    vRnd.y = (float) (int) ((nB >> 16) & 0x7FFF) * (1.0f / 32767.0f);
+    nC = nB * 1103515245 + 12345;
+    vRnd.z = (float) (int) ((nC >> 16) & 0x7FFF) * (1.0f / 32767.0f);
+    sefRandSeed = nC;
+    VU_MUL(&vRnd, &vRnd, &vSize);
+    VU_SCALE(&vSize, &vSize, 0.5f);
+    VU_SUB(&vRnd, &vRnd, &vSize);
+    VU_SCALE(pDst, &vRnd, 0.1f);
+}
