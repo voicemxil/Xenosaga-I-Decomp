@@ -1,16 +1,37 @@
 /* Text-menu (TMENU) component - create/dispose plumbing and message-queue push */
 
+/* 0x10 and 0x14 of an EW component are read both as a word and as a
+ * halfword by TMENU_init, so they are spelled as unions of one struct
+ * rather than two struct types (alias-set trap). */
+typedef union EWVAL {
+    int n;
+    short h;
+} EWVAL;
+
 typedef struct EWCOMP {
-    char pad[0x1C];
+    unsigned short h00;            /* 0x00 */
+    short h02;
+    short h04;
+    short h06;
+    int n08;                       /* 0x08 */
+    short h0C;                     /* 0x0C */
+    short h0E;                     /* 0x0E */
+    EWVAL u10;                     /* 0x10 */
+    EWVAL u14;                     /* 0x14 */
+    int n18;                       /* 0x18 */
+    char pad01C[0x24 - 0x1C];
+    int n24;                       /* 0x24 */
 } EWCOMP;
 
 typedef struct MBUF {
     int active;
+    char pad004[0x08 - 0x04];
+    int *p08;                      /* 0x08 */
+    int *p0C;                      /* 0x0C */
 } MBUF;
 
 typedef struct MSGQUEUE {
-    unsigned short field_0;
-    unsigned short field_2;
+    int *pBuf;                     /* 0x00 */
     unsigned short field_4;
     unsigned short field_6;
     unsigned short field_8;
@@ -25,29 +46,38 @@ typedef struct TMENU {
     short h0C;                     /* 0x0C: running max line width */
     short h0E;                     /* 0x0E */
     int nFlags;                    /* 0x10 */
-    char pad014[0x20 - 0x14];
+    short h14;                     /* 0x14 */
+    char pad016[0x20 - 0x16];
     float nField20;              /* 0x20 */
     float nField24;              /* 0x24 */
-    char pad028[0x56 - 0x28];
+    char pad028[0x50 - 0x28];
+    int n50;                       /* 0x50 */
+    unsigned char b54;             /* 0x54 */
+    unsigned char b55;             /* 0x55 */
     unsigned char nItemCount;      /* 0x56: occupied item slots */
-    char pad057[0x5A - 0x57];
+    unsigned char b57;             /* 0x57: widest line so far */
+    short h58;                     /* 0x58 */
     short h5A;                     /* 0x5A: per-line height factor */
     char pad05C[0x60 - 0x5C];
     MBUF *pMBuf1;                 /* 0x60 */
     MBUF *pMBuf2;                 /* 0x64 */
     char pad068[0xD8 - 0x68];
     MSGQUEUE queue;                /* 0xD8 */
-    char pad0EA[0xFC - 0xEA];
+    char pad0EC[0xFC - 0xEC];  /* MSGQUEUE is word-aligned, so it rounds up to 0xEC */
     EWCOMP *pEwComp;               /* 0xFC */
-    char pad100[0x140 - 0x100];
+    EWCOMP *pComp[16];             /* 0x100: child component table */
     unsigned char nItemMax;        /* 0x140: item slot capacity */
     unsigned char b141;            /* 0x141 */
-    char pad142[0x144 - 0x142];
+    unsigned char b142;            /* 0x142 */
+    unsigned char b143;            /* 0x143 */
     unsigned char **ppLine144;     /* 0x144 */
     unsigned char *pText148;        /* 0x148 */
     unsigned char **ppItem;        /* 0x14C: item pointer slots */
     char pad150[0x154 - 0x150];
     unsigned char *pText154;        /* 0x154 */
+    unsigned char *aSlot158[16];   /* 0x158: the item slot array itself */
+    int nLine198[3];               /* 0x198: line-metrics block */
+    unsigned char aText1A4[4];     /* 0x1A4: start of the text arena */
 } TMENU;
 
 extern void EW_dispose(EWCOMP *pComp);
@@ -209,4 +239,123 @@ void TMENU_addItem(TMENU *t, unsigned char *src)
     if (t->h0C < wmax) {
         t->h0C = wmax;
     }
+}
+
+extern MBUF *MBUF_create(int size, int count);
+extern EWCOMP *EW_create(int id, int type);
+extern int EW_addComponent(EWCOMP *parent, int idx, EWCOMP *child);
+
+/* Build a text-menu component: allocate its message buffer, clear the item
+ * and child-component tables, seed the default geometry, then create and
+ * attach the nine EW children that draw frame, cursor, text and icons. */
+void TMENU_init(TMENU *t)
+{
+    MBUF *m;
+    EWCOMP *p;
+    EWCOMP *e;
+    int i;
+    /* retail parks t+0x198 in a callee-saved register across MBUF_create,
+     * so the line block is a local named before the call, not an address
+     * rebuilt at each use. */
+    int nMax = 16;
+    int *pLine = (int *)t->aSlot158;
+
+    t->ppItem = (unsigned char **)pLine;
+    pLine = t->nLine198;
+    t->n50 = 1;
+    m = MBUF_create(0x80, 3);
+    t->queue.pBuf = m->p0C;
+    t->queue.field_C = 0x100;
+    t->pMBuf1 = m;
+    t->nItemMax = nMax;
+    t->queue.field_8 = 0;
+    t->queue.field_A = 0;
+    t->queue.field_E = 0;
+    t->queue.field_10 = 0;
+    t->pMBuf2 = 0;
+    for (i = 0; i < 16; i++) {
+        t->ppItem[i] = 0;
+    }
+    t->ppLine144 = (unsigned char **)pLine;
+    pLine += 3;
+    t->b142 = 0;
+    t->b143 = 0;
+    t->b141 = 0;
+    t->pText148 = 0;
+    {
+        int *ps = t->pMBuf1->p08;
+        int *pd = (int *)t->ppLine144;
+
+        for (i = 0; i < 3; i++) {
+            pd[i] = ps[i];
+        }
+    }
+    t->pText154 = (unsigned char *)pLine;
+    t->nFlags = 0x15;
+    t->h14 = 1;
+    t->nField20 = 120.0f;
+    t->nField24 = 100.0f;
+    t->h0E = 32;
+    t->h5A = 4;
+    t->nItemCount = 0;
+    t->h58 = 0;
+    t->b55 = 0;
+    t->b54 = 0;
+    t->h0C = 0;
+    for (i = 0; i < 16; i++) {
+        t->pComp[i] = 0;
+    }
+    p = EW_create(-1, 4);
+    p->u14.n = (int)t->pComp;
+    p->u10.h = 16;
+    p->h00 |= 0x4000;
+    t->pEwComp = p;
+    e = EW_create(-1, 9);
+    e->h0C = 16;
+    e->h0E = 16;
+    EW_addComponent(p, 0, e);
+    e = EW_create(-1, 10);
+    e->h0C = 16;
+    e->h0E = 16;
+    EW_addComponent(p, 1, e);
+    {
+        EWCOMP *q = t->pComp[1];
+
+        q->u14.n = 0x808000;
+        q->u10.n |= 0x100;
+    }
+    e = EW_create(-1, 7);
+    e->n18 = 0;
+    e->n24 = (int)t->ppItem;
+    e->u14.h = -1;
+    EW_addComponent(p, 2, e);
+    e = EW_create(-1, 7);
+    e->n18 = 0;
+    e->n24 = (int)t->ppLine144;
+    e->u14.h = -1;
+    EW_addComponent(p, 3, e);
+    e = EW_create(-1, 9);
+    e->h0C = 512;
+    e->h0E = 448;
+    e->h04 = 0;
+    e->h06 = 0;
+    e->n08 = 0;
+    EW_addComponent(p, 4, e);
+    e->h00 |= 0x4000;
+    e = EW_create(-1, 1);
+    EW_addComponent(p, 5, e);
+    e = EW_create(-1, 5);
+    e->h0C = 16;
+    e->h0E = 16;
+    EW_addComponent(p, 6, e);
+    e = EW_create(-1, 5);
+    e->h0C = 16;
+    e->h0E = 16;
+    EW_addComponent(p, 7, e);
+    e = EW_create(-1, 5);
+    e->h0C = 16;
+    e->h0E = 16;
+    EW_addComponent(p, 8, e);
+    t->nFlags = 0x55;
+    t->h14 = 1;
 }
