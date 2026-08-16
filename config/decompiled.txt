@@ -2468,3 +2468,5 @@ _sequenceHeader = 0x00217A98, 0x124; // mpeg.c
 _sequenceExtension = 0x00218020, 0x130; // mpeg.c
 TCAMERA_mpackGetInterest = 0x003089D0, 0x18; // TCAMERA.c
 TCAMERA_init = 0x00309428, 0x54; // TCAMERA.c
+sin = 0x00323BD8, 0x134; // libm.c
+cos = 0x00323AB0, 0x124; // libm.c
