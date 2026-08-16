@@ -1263,3 +1263,78 @@ int sceAddDrv(void *drv)
     DeleteSema(semid);
     return result;
 }
+
+/* The ioctl2 request layout. */
+typedef struct t_fs_send_ioctl2 {
+    int   semid;
+    void *dst;
+    int   size;
+    int   fd;                   /* +12 */
+    int   cmd;                  /* +16 */
+    char  data[1024];           /* +20 */
+    void *bufp;                 /* +1044 */
+    unsigned int buflen;        /* +1048 */
+    unsigned int arglen;        /* +1052 */
+} fs_send_ioctl2_t;             /* 1056 bytes */
+
+extern void *memcpy(void *dst, const void *src, unsigned int n);
+
+/* sceIoctl2: the NULL-argument arm zeroes the length word even though
+ * the unconditional `sd->arglen = arglen` below overwrites it -- gcc
+ * 2.9 does not eliminate the dead store, and the original has it. */
+int sceIoctl2(int fd, int cmd, char *arg, unsigned int arglen,
+              void *bufp, unsigned int buflen)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_ioctl2_t *sd;
+    iob_t *p;
+    int done;
+
+    sd = (fs_send_ioctl2_t *)&_send_data;
+    p = get_iob(fd);
+    _sceFsWaitS(26);
+    if (_fs_init == 0)
+        sceFsInit();
+    if (p == 0 || p->used == 0) {
+        _sceFsSigSema();
+        return -9;
+    }
+    if (arglen > 1024 || buflen > 1024) {
+        _sceFsSigSema();
+        return -22;
+    }
+    if (arg == 0)
+        sd->arglen = 0;
+    else
+        memcpy(sd->data, arg, arglen);
+    sd->fd = p->fd;
+    sd->cmd = cmd;
+    sd->arglen = arglen;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->buflen = buflen;
+    sd->dst = &result;
+    sd->size = 4;
+    sd->bufp = bufp;
+    sd->semid = semid;
+    sceSifWriteBackDCache(&_send_data, 1056);
+    if (sceSifCallRpc(&_cd, 26, 0, &_send_data, 1056, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}
