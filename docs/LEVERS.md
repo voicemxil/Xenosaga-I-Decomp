@@ -959,6 +959,41 @@ first, fixed it.
 
 ---
 
+## Build hazards
+
+**A block-scope `extern` is a latent build bomb.** gcc 2.9x keeps such a
+declaration's name on the function obstack, frees it, then prints the
+dangling pointer in its `-G8` `.extern` directive. It stays harmless
+only while the freed memory happens to hold a live symbol name — adding
+one unrelated function turned it into `.extern ;, 4` and gas rejected
+the whole file. Hoist every `extern` to file scope; it is
+codegen-neutral.
+
+---
+
+## Volatile, varargs and sibling calls
+
+**A record reloaded before EVERY field store is `volatile`.** No
+aliasing story explains retail reloading both a count and a base before
+each store; the declaration does. That alone matched six functions.
+
+**A `volatile` store will NOT fold a byte offset into its store offset —
+but a volatile struct MEMBER will.** Indexing does not help; only the
+member does.
+
+**`PASSTHRU` breaks the CSE that decides which of two equal values a
+test reads.**
+
+**`va_list` must be `__builtin_va_list`** — a `char *` typedef spills.
+
+**`n >= 0 && n <= K` folds to one unsigned compare** — retail's `bltz`
+needs two nested ifs.
+
+**A void call becomes retail's `j` sibling jump only as the function's
+LAST statement, outside any `else`.**
+
+---
+
 ## Axes that DON'T work — don't spend runs on these
 
 **Local declaration order does not move gcc 2.96's allocation.** Four
