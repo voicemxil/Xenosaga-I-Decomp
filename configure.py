@@ -183,6 +183,10 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "Java_Chr.c": "--mtc1-nop Java_xeno_Chr_look_eye_set__FF:0 --rotate Java_xeno_Chr_setFilter__I:58:2",
+    "JNI.c": "--rotate JNI_searchClasses:16:2",
+    "JTHREAD.c": "--rotate JTHREAD_cntl:2:2",
+    "sceGs.c": "--swap-adjacent sceGsSyncVCallback:26",
     # sceVif1PkCnt/End: the original scheduler ordered an or/sw pair the
     # other way -- parked for months as "needs a mid-block instruction
     # swap flag", which --swap-adjacent now is. NOTE all sites for one
@@ -193,7 +197,7 @@ FILE_FIX_FLAGS = {
     # an lwc1 in a jal delay slot followed by mov.s trips a bogus hazard nop
     "MAP.c": "--omit-hazard mov.s",
     # many util natives do lwc1->cvt.s.w with no hazard nop in the original
-    "Java_util.c": "--omit-hazard cvt.s.w",
+    "Java_util.c": ("--omit-hazard cvt.s.w --mtc1-nop Java_xeno_util_Spline_getValue__I:0 --swap-adjacent Java_xeno_util_Runtime_jumpCF__II:7 --rotate Java_xeno_util_Runtime_setLocation__III:15:2,Java_xeno_util_Runtime_setLocation__III:17:3"),
     "xglVector.c": ("--omit-hazard mul.s --omit-hazard sub.s "
                     "--omit-hazard c.lt.s --omit-hazard mov.s"),
     # EXM's original object schedules independent FP work into load-delay
