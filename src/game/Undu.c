@@ -176,22 +176,41 @@ typedef struct {
     unsigned short nFlags;   /* 0x08 */
 } UNDU_SHAPE;
 
+/* One position, and the vertex/plane records the lists index into. */
+typedef struct {
+    float x;
+    float y;
+    float z;
+} UNDU_VEC;
+
 typedef struct {
     char pad_00[0x50];
     UNDU_SHAPE *pShape;      /* 0x50 */
     int nList;               /* 0x54 */
-    char pad_58[8];
+    char *pVtx;              /* 0x58 */
+    char *pPlane;            /* 0x5C */
     char *pList;             /* 0x60 */
     char *pAttrTbl;          /* 0x64 */
-    char pad_68[0x1C];
-    float fBase;             /* 0x84 */
-    char pad_88[0x0C];
+    char pad_68[0x18];
+    UNDU_VEC q;              /* 0x80 -- the query position */
+    char pad_8C[8];
     float fRange;            /* 0x94 */
     float fBest;             /* 0x98 */
     char *pBest;             /* 0x9C */
 } UNDU_CHECK;
 
-extern float UnduCheckSub(UNDU_CHECK *chk, char *entry);
+/* One triangle of the check list: the plane constant, the three vertex
+   byte-offsets and the plane record's byte-offset. */
+typedef struct {
+    int pad_00;
+    float fD;                /* 0x04 */
+    unsigned short nA;       /* 0x08 */
+    unsigned short nB;       /* 0x0A */
+    unsigned short nC;       /* 0x0C */
+    unsigned short nPlane;   /* 0x0E */
+} UNDU_ENTRY;
+
+extern float UnduCheckSub(UNDU_CHECK *chk, void *entry);
 extern int UnduCheckSubHeightCheck(float height, UNDU_CHECK *chk, char *entry);
 extern float D_003386DC[];
 
@@ -496,31 +515,31 @@ int UnduCheckSubHeightCheck(float height, UNDU_CHECK *chk, char *entry)
     }
     result = 0;
     if (flags & 0x10) {
-        if (chk->fBase - chk->fRange < height &&
-            height < chk->fBase + chk->fRange) {
+        if (chk->q.y - chk->fRange < height &&
+            height < chk->q.y + chk->fRange) {
             result = 1;
-            if (chk->fBase + chk->fRange < chk->fBest) {
+            if (chk->q.y + chk->fRange < chk->fBest) {
                 result = 2;
             }
         } else if (flags & 0x800) {
             best = chk->fBest;
             if (best == -1000.0f) {
                 result = 1;
-            } else if (height < chk->fBase + chk->fRange) {
+            } else if (height < chk->q.y + chk->fRange) {
                 result = 1;
             } else if (height < best) {
                 result = 1;
             }
         }
     } else if (flags & 0x800) {
-        if (height <= chk->fBase + chk->fRange) {
+        if (height <= chk->q.y + chk->fRange) {
             result = 1;
         }
     } else {
         best = chk->fBest;
         if (best == -1000.0f) {
             result = 1;
-        } else if (height < chk->fBase + chk->fRange) {
+        } else if (height < chk->q.y + chk->fRange) {
             result = 1;
         } else if (height < best) {
             result = 2;
@@ -534,4 +553,98 @@ int UnduCheckSubHeightCheck(float height, UNDU_CHECK *chk, char *entry)
         }
     }
     return result;
+}
+
+/* PARKED at 128 of 128 words. The whole cross-product block -- eighteen
+   multiplies, the CSE of the six shared products and the three summations
+   -- comes out instruction for instruction, and so do the plane solve, the
+   flag dispatch and both returns. Two things are left:
+
+     * a ONE-SLOT schedule shift: retail issues the first `c.le.s f1,f8`
+       after `sub.s f0,f0,f12`, ee-gcc issues it one instruction earlier.
+       Everything after that is misaligned by one, which is what inflates
+       the diff count -- the instructions themselves are the same.
+     * the min/max pair. Retail keeps the MIN in the register `a->y` was
+       loaded into ($f5) and makes the max the copy ($f1); ee-gcc does the
+       opposite. Swept: `lo = a->y; hi = lo;`, `hi = a->y; lo = hi;`, both
+       read separately, and swapping the declaration order -- all three
+       spellings coalesce the load with `hi`.
+
+   Solved and not to be re-swept: the three edge determinants must be
+   LOCALS computed before the test, not the arms of a short-circuit `&&`
+   chain -- retail evaluates all three up front and only then branches
+   three times, and an inline `&&` chain recomputes each one after its
+   predecessor's branch. Declaring the b vertex before the a vertex costs
+   21 words.
+
+   Drop the query position onto one triangle: reject it with -1000.0f
+   unless all three edge cross-products keep it inside, then solve the
+   plane equation for the height. Flag 0x400 additionally clamps the
+   result to the triangle's own Y span, widened or narrowed by fRange
+   according to flags 0x10 and 0x800. */
+float UnduCheckSub(UNDU_CHECK *chk, void *entry_)
+{
+    UNDU_ENTRY *ent = (UNDU_ENTRY *)entry_;
+    char *vtx = chk->pVtx;
+    UNDU_VEC *q = &chk->q;
+    UNDU_VEC *a = (UNDU_VEC *)(vtx + ent->nA);
+    UNDU_VEC *b = (UNDU_VEC *)(vtx + ent->nB);
+    UNDU_VEC *c = (UNDU_VEC *)(vtx + ent->nC);
+
+    float d1 = q->x * a->z + a->x * b->z + b->x * q->z - q->x * b->z -
+               a->x * q->z - b->x * a->z;
+    float d2 = q->x * b->z + b->x * c->z + c->x * q->z - q->x * c->z -
+               b->x * q->z - c->x * b->z;
+    float d3 = q->x * c->z + c->x * a->z + a->x * q->z - q->x * a->z -
+               c->x * q->z - a->x * c->z;
+
+    if (d1 <= 0.0f && d2 <= 0.0f && d3 <= 0.0f) {
+        UNDU_VEC *plane = (UNDU_VEC *)(chk->pPlane + ent->nPlane);
+        unsigned short flags = chk->pShape->nFlags;
+        int ok = 0;
+        float height = (ent->fD - plane->x * q->x - plane->z * q->z) /
+                       plane->y;
+
+        if (flags & 0x400) {
+            float hi = a->y;
+            float lo = hi;
+            float range;
+
+            if (b->y < lo) {
+                lo = b->y;
+            }
+            if (c->y < lo) {
+                lo = c->y;
+            }
+            range = chk->fRange;
+            if (hi < b->y) {
+                hi = b->y;
+            }
+            if (hi < c->y) {
+                hi = c->y;
+            }
+            lo += range;
+            hi -= range;
+            if (flags & 0x10) {
+                if (hi < q->y) {
+                    if (flags & 0x800) {
+                        ok = 1;
+                    } else if (q->y < lo) {
+                        ok = 1;
+                    }
+                }
+            } else if (flags & 0x800) {
+                if (hi < q->y) {
+                    ok = 1;
+                }
+            } else {
+                ok = 1;
+            }
+            if (ok == 0) {
+                return -1000.0f;
+            }
+        }
+        return height;
+    }
+    return -1000.0f;
 }
