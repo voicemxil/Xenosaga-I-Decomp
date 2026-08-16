@@ -4292,16 +4292,23 @@ void MenuAgwsListMake_Pilot(void)
     WindowSPSetSelect(win, &D_0036C200[40]);
 }
 
-/* TODO: near-miss (32 diffs, was 60; 88 orig vs 89 built). Fixed since the
-   last pass: pinning the four long-lived values to the retail registers
-   (ptr $s0, n $s1, pSort $s2, w2 $s3, win $s4) and splitting the sort count
-   into a separate variable so the `> 0` test reads the raw return in $v0
-   and the loop counter is assigned inside the block, as the retail build
-   does. What is left: the AgwsList load lands straight in $s4 instead of a
-   temp; the mount-index byte uses $v1 with a flipped addu operand order;
-   and the five window-header stores come out in a scheduler-chosen order
-   (source order provably has no effect on that -- see the 120-permutation
-   note on MenuSkillListChange00). */
+/* TODO: near-miss (22 diffs of 88, was 32 at 89 built). Closed this pass:
+   the LENGTH bug was the tail's `&MenuWork + MenuWork.b56` naming MenuWork
+   twice, which makes gcc rebuild %hi/%lo instead of reusing the pointer it
+   already has -- a block-local `signed char *pw = (signed char *)&MenuWork`
+   gives the retail `addiu a1,s6,-16000` + `addu v0,v0,a1` pair and drops
+   the extra lui. The loop's mount-index byte needed the integer-first form
+   `*(signed char *)(w2->b56 + (int)w2 + 0x10)` to get `addu v0,v0,s3`
+   instead of `addu v0,s3,v1`. And the PIN on `win` was actively harmful:
+   with $s0..$s3 pinned, $s4 falls out naturally, and unpinning it restores
+   the retail `lw v1,gp` into a temp before `addiu s4,v1,304`.
+   Left, both pure scheduling with an identical instruction multiset:
+   (a) the five window-header stores issue in a different order even though
+   our source order already equals the retail store order; (b) in the tail
+   retail starts the D_0036C200 %hi chain before the &MenuWork chain and we
+   do the reverse -- and `&D_0036C200[-5]` as a separate local folds the -5
+   into the %lo and LOSES an instruction, so the -5 has to stay inside the
+   subscript. */
 /* Build the AGWS weapon list for the selected mount: enable by equip-pos check */
 void MenuAgwsListMake_Wpn(void)
 {
