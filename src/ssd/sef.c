@@ -300,6 +300,69 @@ void sefScaleIVectorAdd(void *pDst, void *pSrc, void *pAdd, float fScale)
         ".set reorder" : : "r"(pDst), "r"(pSrc), "r"(pAdd), "r"(fScale) : "memory");
 }
 
+/* Lerp between two adjacent packed short[3] keyframe records (10 bytes
+ * apart) by fScale and store the result as a float vector. Same
+ * unaligned ldl/ldr + pcgth/pextlh sign-extend idiom as sefLerpVectorA,
+ * done twice; dsrl skips the leading 16-bit time field of each record.
+ * Pure VU0 macro-mode hardware asm. */
+void sefLerpVectorB(void *pSrc, void *pDst, float fScale)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "addiu $2, %0, 10\n"
+        "mfc1 $9, %2\n"
+        "qmtc2 $9, $vf3\n"
+        "ldl $8, 0x7(%0)\n"
+        "ldr $8, 0x0(%0)\n"
+        "ldl $9, 0x7($2)\n"
+        "ldr $9, 0x0($2)\n"
+        "dsrl $8, $8, 0x10\n"
+        "dsrl $9, $9, 0x10\n"
+        "pcgth $10, $0, $8\n"
+        "pcgth $11, $0, $9\n"
+        "pextlh $10, $10, $8\n"
+        "pextlh $11, $11, $9\n"
+        "qmtc2 $10, $vf1\n"
+        "qmtc2 $11, $vf2\n"
+        "vitof0.xyzw $vf1, $vf1\n"
+        "vitof0.xyzw $vf2, $vf2\n"
+        "vsub.xyz $vf2, $vf2, $vf1\n"
+        "vmulx.xyz $vf2, $vf2, $vf3x\n"
+        "vadd.xyz $vf2, $vf2, $vf1\n"
+        "sqc2 $vf2, 0x0(%1)\n"
+        ".set reorder" : : "r"(pSrc), "r"(pDst), "f"(fScale)
+        : "$2", "$8", "$9", "$10", "$11", "memory");
+}
+
+/* Integer-result twin of sefLerpVectorB: no dsrl (the records here start
+ * at the value, not a time field) and a vftoi0 on the way out. Pure VU0
+ * macro-mode hardware asm. */
+void sefLerpIVectorB(void *pSrc, void *pDst, float fScale)
+{
+    __asm__ __volatile__(".set noreorder\n"
+        "addiu $2, %0, 10\n"
+        "ldl $8, 0x7(%0)\n"
+        "ldr $8, 0x0(%0)\n"
+        "ldl $9, 0x7($2)\n"
+        "ldr $9, 0x0($2)\n"
+        "mfc1 $10, %2\n"
+        "qmtc2 $10, $vf3\n"
+        "pcgth $10, $0, $8\n"
+        "pcgth $11, $0, $9\n"
+        "pextlh $10, $10, $8\n"
+        "pextlh $11, $11, $9\n"
+        "qmtc2 $10, $vf1\n"
+        "qmtc2 $11, $vf2\n"
+        "vitof0.xyzw $vf1, $vf1\n"
+        "vitof0.xyzw $vf2, $vf2\n"
+        "vsub.xyz $vf2, $vf2, $vf1\n"
+        "vmulx.xyz $vf2, $vf2, $vf3x\n"
+        "vadd.xyz $vf2, $vf2, $vf1\n"
+        "vftoi0.xyzw $vf2, $vf2\n"
+        "sqc2 $vf2, 0x0(%1)\n"
+        ".set reorder" : : "r"(pSrc), "r"(pDst), "f"(fScale)
+        : "$2", "$8", "$9", "$10", "$11", "memory");
+}
+
 /* --- sefExecLineData: progress one "line" scheduler object one frame --- */
 typedef struct {
     char pad000[0x1C0];
