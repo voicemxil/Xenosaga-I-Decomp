@@ -53,6 +53,23 @@ typedef struct
     short pad127E;
 } SDV_ALTER;
 
+/* A third view of the record, based at its 0x1270 tail: sdvCreateAlter
+ * walks this one while the block copy goes to base + byte offset. The
+ * stride is still the full record. */
+typedef struct
+{
+    int nFlags;              /* 0x1270 */
+    short f1274;
+    short f1276;
+    unsigned short nUsed;    /* 0x1278 */
+    short pad127A;
+    short nSerial;           /* 0x127C */
+    char pad127E[0x1280 - 0x0E];
+} SDV_ALTER_TAIL;
+
+/* The 112 bytes actually copied in from the caller's template. */
+typedef struct { long q[14]; } SDV_ALTER_COPY;
+
 /* A second view of the same record, based 0x60 in: the draw loop walks
  * this one (stride is still the full record) while the calls take
  * &_sdvAlter[i], which is what gives the loop its two induction
@@ -331,4 +348,51 @@ void sdvDrawAlters(int nOwner)
         }
         q++;
     }
+}
+
+/* PARKED at 2 diffs -- identical instruction multiset, and the only
+ * disagreement is that gcc's prologue scheduler emits the hoisted
+ * `li t0,1` second and `move a3,zero` (i = 0) fourth where retail has
+ * them the other way round. Swept: all 24 orderings of the four tail
+ * stores (this one and `f1276, nUsed, nFlags, f1274` are the two that
+ * reach 2; the rest are 4-7), nOfs initialised before pBase / after q /
+ * in the for-init (the for-init is the only one that reaches 2), the
+ * `nOfs += 0x1280` before and after `q++` (after is right), and hoisting
+ * the 1 into a named local placed before and after the `q` assignment
+ * (no effect -- the position is the scheduler's, not the source's).
+ * The two are three apart, so neither --swap-adjacent nor --rotate
+ * expresses the transposition.
+ *
+ * Claim the first unused alter slot, copy the caller's 112-byte
+ * template into it and stamp it with the next 8-bit serial. The handle
+ * packs that serial into the high half and the slot index into the low.
+ * The serial is re-read for the store because the block copy may alias
+ * it. */
+extern int _sdvAlterSerial;
+
+int sdvCreateAlter(SDV_ALTER_COPY *pSrc)
+{
+    SDV_ALTER_TAIL *q;
+    int i;
+    int nOfs;
+    int nSerial;
+    char *pBase;
+
+    pBase = (char *)_sdvAlter;
+    q = (SDV_ALTER_TAIL *)(pBase + 0x1270);
+    for (i = 0, nOfs = 0; i < 16; i++, nOfs += 0x1280) {
+        if (q->nUsed == 0) {
+            nSerial = (_sdvAlterSerial + 1) & 0xFF;
+            _sdvAlterSerial = nSerial;
+            *(SDV_ALTER_COPY *)(char *)(nOfs + (int)pBase) = *pSrc;
+            q->nSerial = _sdvAlterSerial;
+            q->f1276 = 0;
+            q->nFlags = 0;
+            q->nUsed = 1;
+            q->f1274 = 0;
+            return (nSerial << 16) | i;
+        }
+        q++;
+    }
+    return -1;
 }
