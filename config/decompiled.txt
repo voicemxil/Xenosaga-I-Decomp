@@ -2851,3 +2851,4 @@ SEQ_moveChr = 0x00309FD0, 0x2C4; // SEQ.c
 setup_occlusion = 0x0023E570, 0x274; // nmlModel.c
 sceSifStopModule = 0x00207B38, 0x208; // sceSif.c
 SEQ_moveNPC_XZ = 0x0030A4B0, 0x2D4; // SEQ.c
+_sceSifLoadModule = 0x00207F40, 0x224; // sceSif.c

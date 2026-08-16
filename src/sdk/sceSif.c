@@ -82,7 +82,8 @@ extern int sceSifFreeSysMemory(int addr);
 extern int _sceSifLoadElfPart(const char *path, const char *sec, void *dest,
                               int mode);
 extern int _sceSifLoadModuleBuffer(int a0, int a1, int a2, int a3);
-extern int _sceSifLoadModule(int a0, int a1, int a2, int a3, int a4);
+extern int _sceSifLoadModule(const char *path, int arglen, const void *args,
+                             int *result, int mode);
 
 int sceSifFreeIopHeap(int addr)
 {
@@ -103,7 +104,8 @@ int sceSifLoadModuleBuffer(int a0, int a1, int a2)
 
 int sceSifLoadStartModule(int a0, int a1, int a2, int a3)
 {
-    return _sceSifLoadModule(a0, a1, a2, a3, 0);
+    return _sceSifLoadModule((const char *)a0, a1, (const void *)a2,
+                             (int *)a3, 0);
 }
 
 int sceSifLoadStartModuleBuffer(int a0, int a1, int a2, int a3)
@@ -115,7 +117,8 @@ int sceSifLoadModule(int a0, int a1, int a2)
 {
     int local;
 
-    return _sceSifLoadModule(a0, a1, a2, (int)&local, 0);
+    return _sceSifLoadModule((const char *)a0, a1, (const void *)a2,
+                             &local, 0);
 }
 
 /* sceSifExitCmd: tears down the SIF cmd layer -- disables the SIF0 DMA
@@ -910,6 +913,56 @@ int sceSifStopModule(int nModId, int nArgLen, const void *args, int *result)
     }
 
     if (sceSifCallRpc(&cd_00994A40, 7, 0, &_senddata, 512,
+                      &_senddata, 8, 0, 0) < 0)
+        return (int)0xfffeffff;
+
+    n = _senddata.pad;
+    r = _senddata.arg;
+    *result = n;
+    return r;
+}
+
+/* _sceSifLoadModule: the loadfile RPC behind sceSifLoadModule and
+ * sceSifLoadStartModule.  Same shape as sceSifStopModule, except the send
+ * block also carries the module path and the argument LENGTH lands in the
+ * block's first word rather than its second. */
+int _sceSifLoadModule(const char *pPath, int arglen, const void *args,
+                      int *result, int mode)
+{
+    /* Same $17 pin as _sceSifLoadElfPart: without it gcc emits the path
+     * copy first and the whole prologue comes out rotated by one. */
+    PIN(const char *path, "$17");
+    int r, n;
+
+    path = pPath;
+    if (_lf_bind((int)path) < 0)
+        return (int)0xffff0000;
+    if (_lf_version() != 0)
+        return (int)0xfffefffc;
+
+    strncpy(_senddata.name, path, 252);
+    _senddata.name[251] = 0;
+
+    if (args != 0)
+    {
+        if (arglen >= 253)
+        {
+            memcpy(_senddata.sec, args, 252);
+            _senddata.arg = 252;
+        }
+        else
+        {
+            memcpy(_senddata.sec, args, arglen);
+            _senddata.arg = arglen;
+        }
+    }
+    else
+    {
+        _senddata.sec[0] = 0;
+        _senddata.arg = 0;
+    }
+
+    if (sceSifCallRpc(&cd_00994A40, mode, 0, &_senddata, 512,
                       &_senddata, 8, 0, 0) < 0)
         return (int)0xfffeffff;
 
