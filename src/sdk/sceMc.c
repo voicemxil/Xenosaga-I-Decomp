@@ -31,7 +31,7 @@ extern int retval;           /* 0x00998500, RPC reply word */
 extern int mcRunCmdNo;       /* 0x004AD488, command currently in flight */
 extern int semaidRegFunc;    /* 0x004AD48C, module semaphore id */
 
-extern int sceMcOpen(int a0, int a1, int a2, int a3);
+extern int sceMcOpen(int port, int slot, const char *name, int flags);
 
 /* sceMcMkdir: opens the directory with sceMcOpen (mode 64, i.e.
  * O_CREAT-ish) and, if it returns a falsy fd, records the error code. */
@@ -322,6 +322,117 @@ int sceMcGetEntSpace(int port, int slot, const char *name)
                        &retval, 4, 0, 0);
     if (rc == 0)
         mcRunCmdNo = 18;
+    else
+        SignalSema(semaidRegFunc);
+    return rc;
+}
+
+/* ------------------------------------------------------------------
+ * Pathname commands: sceMcOpen and sceMcDelete.
+ *
+ * Same 1044-byte sifParamFname payload as sceMcGetEntSpace, but here
+ * the original keeps the ADDRESS OF THE NAME FIELD live and reaches the
+ * block header backwards from it (`addiu v1,s0,-20`) rather than
+ * indexing the block twice -- so the strncpy destination is the named
+ * local and the header pointer is derived from it.
+ * ------------------------------------------------------------------ */
+
+int sceMcOpen(int port, int slot, const char *name, int flags)
+{
+    char *dst;
+    int *p;
+    int rc;
+
+    if (PollSema(semaidRegFunc) < 0)
+        return -200;
+    if (mcClientID[9] == 0) {
+        SignalSema(semaidRegFunc);
+        return -100;
+    }
+    if (name == 0 || *name == 0) {
+        SignalSema(semaidRegFunc);
+        return -210;
+    }
+    dst = (char *)sifParamFname + 20;
+    strncpy(dst, name, 1023);
+    p = (int *)(dst - 20);
+    p[0] = port;
+    p[2] = flags;
+    p[1] = slot;
+    ((char *)p)[1043] = 0;
+    rc = sceSifCallRpc(mcClientID, 2, 1, p, 1044, &retval, 4, 0, 0);
+    if (rc == 0)
+        mcRunCmdNo = 2;
+    else
+        SignalSema(semaidRegFunc);
+    return rc;
+}
+
+int sceMcDelete(int port, int slot, const char *name)
+{
+    char *dst;
+    int *p;
+    int rc;
+
+    if (PollSema(semaidRegFunc) < 0)
+        return -200;
+    if (mcClientID[9] == 0) {
+        SignalSema(semaidRegFunc);
+        return -100;
+    }
+    if (name == 0 || *name == 0) {
+        SignalSema(semaidRegFunc);
+        return -210;
+    }
+    dst = (char *)sifParamFname + 20;
+    strncpy(dst, name, 1023);
+    p = (int *)(dst - 20);
+    p[0] = port;
+    p[1] = slot;
+    ((char *)p)[1043] = 0;
+    p[2] = 0;
+    rc = sceSifCallRpc(mcClientID, 15, 1, p, 1044, &retval, 4, 0, 0);
+    if (rc == 0)
+        mcRunCmdNo = 15;
+    else
+        SignalSema(semaidRegFunc);
+    return rc;
+}
+
+/* ------------------------------------------------------------------
+ * sceMcRead: the caller's buffer and the 192-byte alignment scratch
+ * block are both flushed out of the data cache before the IOP is told
+ * about them, and the RPC carries an end-function
+ * (mceIntrReadFixAlign) plus the scratch block as its end-data -- that
+ * is what puts the misaligned head and tail bytes back after the DMA.
+ * ------------------------------------------------------------------ */
+
+extern int sifParamNext[48];        /* 0x00997440, 192-byte align scratch */
+extern void sceSifWriteBackDCache(void *addr, int size);
+extern void mceIntrReadFixAlign(void);
+
+int sceMcRead(int fd, void *buf, int size)
+{
+    int *p;
+    int rc;
+
+    if (PollSema(semaidRegFunc) < 0)
+        return -200;
+    if (mcClientID[9] == 0) {
+        SignalSema(semaidRegFunc);
+        return -100;
+    }
+    p = sifParamOrd;
+    p[0] = fd;
+    p[7] = (int)sifParamNext;
+    p[6] = (int)buf;
+    p[3] = size;
+    sceSifWriteBackDCache(buf, size);
+    sceSifWriteBackDCache(sifParamNext, 192);
+    rc = sceSifCallRpc(mcClientID, 5, 1, p, 48, &retval, 4,
+                       (void *)mceIntrReadFixAlign, sifParamNext);
+    if (rc == 0)
+        mcRunCmdNo = 5;
     else
         SignalSema(semaidRegFunc);
     return rc;
