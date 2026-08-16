@@ -2794,3 +2794,5 @@ _MinMaxSort = 0x0022E000, 0x20; // nmlModel.c
 _CurMatrixSet = 0x00236448, 0x18; // nmlModel.c
 _CurMatrixGet = 0x00236460, 0x18; // nmlModel.c
 _CurMatrixMul = 0x00236478, 0x64; // nmlModel.c
+_WeightToGlobalPlaceInit = 0x0023B168, 0x18; // nmlFilter.c
+_WeightToGlobalPlaceVec = 0x0023B180, 0x98; // nmlFilter.c

@@ -1,5 +1,7 @@
 /* Post-effect filter packet builders for the normal-map model renderer */
 
+#include "matching.h"
+
 typedef unsigned char u_char;
 typedef unsigned short u_short;
 typedef unsigned int u_int;
@@ -216,4 +218,61 @@ void nmlFilterSetBufferToFrame(int nFbp)
         i--;
     } while (i >= 0);
     nmlPacketAddGsFlush();
+}
+
+/* Load the object-to-global place matrix into VU0 vf10-vf13. */
+void _WeightToGlobalPlaceInit(void *pMtx)
+{
+    PS2_ASM(".set noreorder\n"
+            "lqc2 $vf10, 0x0(%0)\n"
+            "lqc2 $vf11, 0x10(%0)\n"
+            "lqc2 $vf12, 0x20(%0)\n"
+            "lqc2 $vf13, 0x30(%0)\n"
+            ".set reorder" : : "r"(pMtx));
+}
+
+/* Transpose the 3x3 weight matrix at pSrc, transform its z-basis by the
+ * current matrix and then by the vf10-vf13 place matrix loaded by
+ * _WeightToGlobalPlaceInit; the result lands in pDst.  The block uses
+ * $v0-$a3/$t0-$t1 by name for the pextlw/pcpyld transpose, which is why
+ * the three pointers arrive in $t2-$t4. */
+void _WeightToGlobalPlaceVec(void *pDst, void *pMtx, void *pSrc)
+{
+    PS2_ASM(".set noreorder\n"
+            "lq $2, 0x0(%2)\n"
+            "lq $3, 0x10(%2)\n"
+            "lq $4, 0x20(%2)\n"
+            "lqc2 $vf3, 0x30(%2)\n"
+            "qmfc2 $5, $vf0\n"
+            "pextlw $6, $3, $2\n"
+            "pextuw $7, $3, $2\n"
+            "pextlw $8, $5, $4\n"
+            "pextuw $9, $5, $4\n"
+            "pcpyld $2, $8, $6\n"
+            "pcpyud $3, $6, $8\n"
+            "pcpyld $4, $9, $7\n"
+            "qmtc2 $2, $vf5\n"
+            "qmtc2 $3, $vf6\n"
+            "qmtc2 $4, $vf7\n"
+            "vmulax.xyz $ACC, $vf5, $vf3x\n"
+            "vmadday.xyz $ACC, $vf6, $vf3y\n"
+            "vmaddz.xyz $vf2, $vf7, $vf3z\n"
+            "vmove.w $vf2, $vf0\n"
+            "lqc2 $vf27, 0x0(%1)\n"
+            "lqc2 $vf28, 0x10(%1)\n"
+            "lqc2 $vf29, 0x20(%1)\n"
+            "lqc2 $vf30, 0x30(%1)\n"
+            "vsub.xyz $vf2, $vf0, $vf2\n"
+            "vmulax.xyzw $ACC, $vf27, $vf2x\n"
+            "vmadday.xyzw $ACC, $vf28, $vf2y\n"
+            "vmaddaz.xyzw $ACC, $vf29, $vf2z\n"
+            "vmaddw.xyzw $vf31, $vf30, $vf2w\n"
+            "vmulax.xyzw $ACC, $vf10, $vf31x\n"
+            "vmadday.xyzw $ACC, $vf11, $vf31y\n"
+            "vmaddaz.xyzw $ACC, $vf12, $vf31z\n"
+            "vmaddw.xyzw $vf31, $vf13, $vf0w\n"
+            "sqc2 $vf31, 0x0(%0)\n"
+            ".set reorder"
+            : : "r"(pDst), "r"(pMtx), "r"(pSrc)
+            : "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "memory");
 }
