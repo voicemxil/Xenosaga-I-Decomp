@@ -1278,3 +1278,57 @@ sceMpegDec.c (four matches, no source change) and sceVif1Pk.c ->
 sceVif1PkRefLoadImage.c (20 -> 14 diffs on the flag alone, then 4 once the
 register levers could land). Both wanted `-O2 -G0`, i.e. the SDK default
 `-fno-schedule-insns` removed.
+
+**Scope a pointer local to the switch arm that uses it.** A single
+function-wide `T *p` shared by several arms of a state machine keeps the
+allocator from ever giving one arm the original's register -- it sees one
+long live range. Redeclaring it inside the arm's own block recovered
+retail's `$a0` and closed 3 words of `TMENU_updateDefault`. It is a
+PER-ARM lever: the same rewrite in a second arm of the same function
+changed nothing, so try it arm by arm rather than globally.
+
+**Write a `switch` by OMITTING the dead cases, not by spelling them.**
+gcc emits one jump table spanning min..max and fills every hole with the
+default label, so six `case` labels reproduce retail's 16-entry table
+exactly. Both of `TMENU_updateDefault`'s h14 dispatches and its
+queue-control dispatch came out right first try this way.
+
+**`t->shortfield = t->shortfield + 1` keeps the value RAW; a `short`
+local does not.** Member-to-member gives `lhu`/`addiu`/`sh` and defers
+the sign extension to each later use (`sll`/`sra` AFTER the add), which
+is the usual retail shape; routing it through a `short` local makes gcc
+extend at the definition (`sll`/`sra` BEFORE the add). Read the original:
+whichever side of the `addiu` the extension sits on tells you which
+spelling the source used. Same rule for `signed char` members in a
+read-modify-write chain -- use the member, not a local, and CSE forwards
+the stored byte raw exactly like retail.
+
+**A store through a differently-typed pointer kills the CSE of a struct
+member across it.** `p->field = x;` (EWCOMP*) between `t->h30 = ...` and
+a later `t->h30` read forces a genuine reload. Put the member's re-read
+BEFORE the foreign store, or move the foreign store above the member
+store -- both orders were needed in different arms.
+
+**gcc deletes the first of two stores to the same member even with a
+non-aliasing load between them; only a `volatile` store keeps both.**
+Retail's own barrier was a dead load of a neighbouring member, which our
+build's alias analysis sees straight through. Spelling the first store
+`*(volatile int *)&t->nFlags = v;` restores both stores (and was the
+last word of length in `TMENU_updateDefault`) at the price of a register
+naming shift.
+
+**Two `return` arms with identical tails get cross-jumped -- retail was
+saved by register allocation, you are saved by permuting one arm's store
+order.** The merge silently costs several words and looks like a "length
+short" bug. Permuting the stores in ONE of the two arms broke it and was
+worth 2 words plus the length match.
+
+**`--mtc1-nop FUNC:N` is needed twice per `(float)n * k * m` block.**
+ee-as pads two slots after the LAST `mtc1` of a float-constant pair
+before the first COP1 compute; this toolchain emits only the first
+hazard nop (after the int->float `mtc1`). Count every `mtc1` of the
+function in emission order and name the last one of each block.
+
+**Local DECLARATION ORDER does not move gcc 2.96's register allocation.**
+Four orders of `TMENU_updateDefault`'s twelve locals gave byte-identical
+output. Do not spend compile runs on this axis.
