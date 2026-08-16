@@ -938,3 +938,91 @@ void GameCFSoundMenuPurge(int nMode)
         xglSoundSendEffect(0, 0, i + 4);
     }
 }
+
+extern void xglSoundEffectNormalDirect(int nCode);
+extern void EvtTools(void);
+
+/* Event-tools game mode: SELECT arms the skip, L1+L2+SELECT aborts. */
+int GameModeEvtTools(void)
+{
+    if (GameLoopState.nCfEventLock == 0 && (PadData[0].nPress & 0x800)) {
+        GameLoopState.nCfEventLock = 16;
+        if ((PadData[0].nButton & 0x10C) == 0x10C) {
+            GameLoopState.nFlags |= 0x80000000;
+            return 1;
+        }
+        xglSoundEffectNormalDirect(4);
+        GameLoopState.nFlags &= ~1;
+        GameLoopState.quad29F50 = 0;
+        GameLoopState.nSaveA = GameLoopState.nUnk29F60;
+    }
+    TWSYS_update();
+    EvtTools();
+    if (((int *)xglStudioGetCamera2(0))[1] == 4) {
+        void (*pFunc)(void) = (void (*)(void))GameLoopState.nUnk28;
+
+        if (pFunc != 0) {
+            pFunc();
+        }
+    }
+    return 0;
+}
+
+/* Event-debug game mode: same skip handling as the tools mode, without the
+   tools update */
+int GameModeEvtDebug(void)
+{
+    if (GameLoopState.nCfEventLock == 0 && (PadData[0].nPress & 0x800)) {
+        GameLoopState.nCfEventLock = 16;
+        if ((PadData[0].nButton & 0x10C) == 0x10C) {
+            GameLoopState.nFlags |= 0x80000000;
+            return 1;
+        }
+        xglSoundEffectNormalDirect(4);
+        GameLoopState.nFlags &= ~1;
+        GameLoopState.quad29F50 = 0;
+        GameLoopState.nSaveA = GameLoopState.nUnk29F60;
+    }
+    TWSYS_update();
+    if (((int *)xglStudioGetCamera2(0))[1] == 4) {
+        void (*pFunc)(void) = (void (*)(void))GameLoopState.nUnk28;
+
+        if (pFunc != 0) {
+            pFunc();
+        }
+    }
+    return 0;
+}
+
+extern void PartyTimePauseEnd(void);
+extern void PauseMenu(void);
+
+/* Paused game mode */
+int GameModePause(void)
+{
+    if (GameLoopState.nCfEventLock == 0 && (PadData[0].nPress & 0x800)) {
+        GameLoopState.nCfEventLock = 16;
+        if ((PadData[0].nButton & 0x10C) == 0x10C) {
+            GameLoopState.nFlags |= 0x80000000;
+            return 1;
+        }
+        xglSoundEffectNormalDirect(4);
+        GameLoopState.nFlags &= ~1;
+        GameLoopState.quad29F50 = 0;
+        GameLoopState.nSaveA = GameLoopState.nUnk29F60;
+        PartyTimePauseEnd();
+    }
+    TWSYS_update();
+    PauseMenu();
+    if ((unsigned short)(GameLoopState.nUnk29F60 - 2) < 2) {
+        ACT_pauseUpdate();
+    }
+    if (((int *)xglStudioGetCamera2(0))[1] == 4) {
+        void (*pFunc)(void) = (void (*)(void))GameLoopState.nUnk28;
+
+        if (pFunc != 0) {
+            pFunc();
+        }
+    }
+    return 0;
+}
