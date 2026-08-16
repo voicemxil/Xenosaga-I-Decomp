@@ -297,24 +297,42 @@ int sceCdStStat(void)
  * two %hi address temps stay hoisted in s0/s1 across the whole loop.
  * ------------------------------------------------------------------ */
 
+/* PARKED NEAR-MISS, 3 words of 40. The mode==0 arm -- the plain `while`
+ * loop with the two-test `||`, the hoisted s0/s1 %hi temps, the entry
+ * branch into the bottom test -- is EXACT (the goto-loop spelling
+ * duplicates the test block here; the ordinary `while` is what matches).
+ * The residue is entirely the one-shot poll: the original emits
+ * `bnez v0, done` with `li v0,1` in the delay slot and a `move v0,zero`
+ * fall-through, where 2.9 folds our second test to `sltu v0,zero,v0`.
+ * Swept without success: two explicit `return 1;`s (sltu), a shared
+ * `busy:` label (bnezl + an extra move/beqz, 41 words), single-exit
+ * `r = 1; ... r = 0;` and the `&&` form (both give `movz s0,zero,v0`),
+ * LAUNDER on the call result (folded away, still sltu). Same class as
+ * the other v0-constant tie-breaks -- permuter or a pin, not a shape. */
+
 extern int _sceCd_c_cb_sem;
 extern int _sceCd_cd_ncmd;
 
 int sceCdSync(int mode)
 {
+    int r;
+
     if (mode == 0) {
         if (SCE_CD_debug > 0)
             scePrintf("N cmd wait\n");
-        goto test;
-        do {
+        while (_sceCd_c_cb_sem != 0
+               || sceSifCheckStatRpc(&_sceCd_cd_ncmd) != 0)
             sceCdDelayThread(60);
-        test: ;
-        } while (_sceCd_c_cb_sem != 0
-                 || sceSifCheckStatRpc(&_sceCd_cd_ncmd) != 0);
         return 0;
     }
-    return _sceCd_c_cb_sem != 0 || sceSifCheckStatRpc(&_sceCd_cd_ncmd) != 0;
+    if (_sceCd_c_cb_sem != 0)
+        return 1;
+    r = sceSifCheckStatRpc(&_sceCd_cd_ncmd);
+    if (r != 0)
+        return 1;
+    return 0;
 }
+
 
 /* ------------------------------------------------------------------
  * The S-command reply template.
