@@ -2899,3 +2899,4 @@ xglMpeg2InfoInit2 = 0x00222748, 0xFC; // xglMovie.c
 UmnPlugin = 0x00A0E6F8, 0x23C; // tskUmn.c
 UmnSimulation = 0x00A0C1C8, 0x2BC; // tskUmn.c
 xglCameraSetWindow = 0x0022C168, 0xE4; // xglCamera.c
+fillBuff = 0x00221C80, 0xB0; // xglMovie.c

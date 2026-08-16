@@ -265,27 +265,25 @@ int fileRead(XGLMOVIEINFO *pInfo);
 int fillBuff(XGLMOVIEINFO *pInfo, int nWait);
 int sceMpegDemuxPss(void *pMpeg, void *pSrc, int nSize);
 
-/* TODO: near-miss (42 words built vs 44; every instruction present is
- * correct and in the right place). Missing: the original's `move v1,v0`
- * copying fileRead's result out of $v0, and the alignment `nop` before
- * the shared tail. The copy means nRead is a MULTI-BLOCK pseudo in the
- * original (global_alloc gave it $v1); every shape that puts the
- * `pInfo->nLeft = nRead` store into both successors of the test lets
- * gcc constant-fold the zero arm into `sw zero,140(s0)` instead.
- * Swept: for / while / while(1)+break / do-while+goto loop forms (the
- * do-while is the one that reproduces the block layout -- a `for` or
- * `while` header gets rotated by duplicate_loop_exit_test and sinks the
- * nWait test to the bottom, 3 words short); re-reading pInfo->nLeft for
- * the test; storing through the call expression; pre-initialising
- * nRead; duplicating the store into both arms (10 diffs, wrong code).
- */
+/* nRead is pinned to $v1 and laundered: the original copies fileRead's
+ * result out of the return register (`move $v1,$v0`) before storing and
+ * testing it, and no source shape produces that copy -- local_alloc
+ * coalesces the pseudo onto $v0 in every one of them (for / while /
+ * while(1)+break / do-while+goto loop forms, re-reading pInfo->nLeft
+ * for the test, storing through the call expression, a second local
+ * seeded from nRead, pre-initialising nRead).  A bare PIN is silently
+ * ignored on a plain assignment, so the LAUNDER_V is what makes it
+ * stick (matching.h documents the pair); with the copy in place the
+ * .p2align pad before the shared tail appears by itself.  The loop-exit
+ * branch is then retail's branch-likely form (--branch-likely
+ * fillBuff:3). */
 /* Top the demux up: if the last read still has bytes left carry on from
  * where it stopped, otherwise pull fresh data (optionally spinning until
  * some arrives), then feed the PSS demuxer */
 int fillBuff(XGLMOVIEINFO *pInfo, int nWait)
 {
     char *pSrc;
-    int nRead;
+    PIN(int nRead, "$3");
     int i;
     int j;
     int pBuf;
@@ -300,6 +298,7 @@ int fillBuff(XGLMOVIEINFO *pInfo, int nWait)
             }
             i++;
             nRead = fileRead(pInfo);
+            LAUNDER_V(nRead);
             pInfo->nLeft = nRead;
             if (nRead != 0) {
                 goto ready;
