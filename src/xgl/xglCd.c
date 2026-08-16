@@ -5,18 +5,29 @@
 typedef unsigned int u_int;
 typedef unsigned char u_char;
 
+/* One pending read request in LW's 32-entry ring */
+typedef struct {
+    u_int nAddr;         /* 0x00 */
+    int nUnk04;          /* 0x04 */
+    int nUnk08;          /* 0x08 */
+    int nSize;           /* 0x0C */
+    char aName[0x70];    /* 0x10 */
+} XGLCDQUEUE;
+
 typedef struct {
     int nFd;             /* 0x00 */
     u_char aPad04[4];
     int nUnk08;          /* 0x08 */
     int nUnk0C;          /* 0x0C */
-    u_char aPad10[0x20];
+    void (*pProgress)(int, int); /* 0x10 */
+    u_char aPad14[0x1C];
     char nStatus;
     u_char aPad31[3];
     char nPowerOff;      /* 0x34 */
     u_char aPad35[0x9];
-    char nUnk3E;
-    char nUnk3F;
+    u_char nUnk3E;
+    u_char nUnk3F;
+    XGLCDQUEUE aQueue[32];   /* 0x40 */
 } XGLCDWORK;
 
 /* CD stream work area (prefix of the sound XGL_STREAM) */
@@ -99,6 +110,23 @@ void extract(u_int *pDst, u_int *pSrc, int nSize)
             pDst++;
         } while (nSize > 0);
     }
+}
+
+/* Issue the next queued read; returns 1 when the ring is empty */
+int queue_next(void)
+{
+    XGLCDQUEUE *pEnt;
+
+    LW.pProgress(4, (LW.nUnk3F - LW.nUnk3E) & 0x1F);
+    LW.nStatus = 0;
+    if (LW.nUnk3F != LW.nUnk3E) {
+        pEnt = &LW.aQueue[LW.nUnk3E];
+        xglCdReadFilePart(pEnt->aName, pEnt->nAddr, 1, pEnt->nSize, pEnt->nUnk04,
+                          pEnt->nUnk08);
+        LW.nUnk3E = (LW.nUnk3E + 1) & 0x1F;
+        return 0;
+    }
+    return 1;
 }
 
 void xglCdDefaultCallback(void)
