@@ -276,7 +276,32 @@ void subTreeLineDraw_type_1(ETLINE *line)
     subTreeLineDraw(line, &nType);
 }
 
-/* Type 2: a two-child node. One elbow per child -- a vertical stub out of
+/* PARKED, subTreeLineDraw_type_2 at 56 diffs / 80 words vs 81, and
+   subTreeLineDraw_type_3 at 87 / 92 vs 90. The bodies are semantically
+   right and, apart from one copy chain, instruction-for-instruction
+   right. Two things stand between them and a match:
+
+     * The original copies `line` into $a2 at entry and back into $a0 for
+       the call, keeping the CHILD pointer in $a0 inside the loop; we
+       keep `line` in $a0 throughout. Pure global_alloc tie-break.
+     * The original rematerialises `node->pChild` (`addiu t0,t1,12`) for
+       the geometry loop; we keep the loop-1 giv's initial value alive in
+       a spare register and copy it (one extra word). Not reachable by
+       spelling: walked pointer, indexed access, separate loop counters
+       and every mix of the two were tried, and the CSE survives all of
+       them -- it is a consequence of the register assignment above.
+
+   The elbow geometry itself IS solved and should not be re-swept: the
+   store order comes from writing posB before posA and chaining the
+   second copy off the first (`posA = posB`, so cse forwards the stored
+   value instead of reloading node->pos through the same alias set), and
+   the giv anchor (line+176) comes from making the seg[i*2+2] pair
+   posA-first while the seg[i*2+1] pair stays posB-first. Swapping either
+   pair moves the anchor by 32 or mirrors four stores. Block-local ETSEG
+   pointers, EVEC pointers to the members and permuter run #1 (best 8080
+   vs base 8780) all failed to close it -- permuter territory.
+
+   Type 2: a two-child node. One elbow per child -- a vertical stub out of
    the node (segment 0, pushed 28.5 to the right), then for each child a
    riser to the child's height and a run out to the child. The style array
    is one entry for the stub plus two per child. */
