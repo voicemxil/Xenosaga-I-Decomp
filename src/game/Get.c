@@ -350,39 +350,32 @@ void GetCenter(VECTOR *out, CENTEROBJ *p)
     out->w = 1.0f;
 }
 
-/* TODO: near-miss (LOGIC) - register/control-flow shape differs substantially
- * from the natural indexed-loop C below (26/27 words differ); parked after 2
- * attempts, needs a from-asm-first rewrite using a single advancing pointer
- * rather than a separate index local. */
 /* Scan a (possibly SJIS double-byte) string for the byte preceding the terminator or the first
-   run of high-bit bytes, returning 0 for an empty or NULL string */
+   run of high-bit bytes, returning 0 for an empty or NULL string.
+ *
+ * Three shape details, all of which cost words if written the other way:
+ * `i = 0` comes BEFORE the null test (it is what lets the null test's
+ * delay slot carry the zero return value); the scan is a plain `while`,
+ * NOT a hand-peeled first iteration -- gcc's own exit-test duplication
+ * peels it exactly once, whereas peeling it in the source makes gcc peel
+ * a second time; and the i==0 case falls out of the bottom so it shares
+ * the null test's `return 0` epilogue instead of getting its own. */
 int GetLastWord(char *s)
 {
     int i;
     signed char c;
 
+    i = 0;
     if (s == 0) {
         return 0;
     }
-    i = 0;
-    c = s[0];
-    if (c != 0 && !(c & 0x80)) {
-        i = 1;
-        for (;;) {
-            c = s[i];
-            if (c == 0) {
-                break;
-            }
-            if (c & 0x80) {
-                break;
-            }
-            i++;
-        }
+    while ((c = s[i]) != 0 && (c & 0x80) == 0) {
+        i++;
     }
-    if (i == 0) {
-        return 0;
+    if (i != 0) {
+        return s[i - 1];
     }
-    return s[i - 1];
+    return 0;
 }
 
 typedef struct {
