@@ -279,3 +279,79 @@ void RES_GetMdlFileName(char *pDst)
         *q = c;
     } while ((char)c != 0);
 }
+
+extern char *MAP_getPath(void);
+extern int xglCdGetFileSize(char *pName);
+extern void readreq(char *pName, int nArg);
+extern char RES_dummyPath[];
+
+/* TODO: near-miss, 16 diffs at the right 88 words. Three shapes are
+   settled and load-bearing: a plain `while (*p) { *d++ = *p++; }` gives
+   the b-to-test form with an lb test and a separate lbu for the move
+   (loops 1, 2 and 5); a guard whose pointer expression DIFFERS from the
+   walker's (`if (pFile[0])` with a separate walker) keeps the guard,
+   where `p = x; if (*p)` around a do-while gets folded back into the
+   b-to-test form; and the fallback path's dst/src walkers must be
+   block-local to that arm (worth 8 diffs and the bgtzl). Residue: the
+   original's third loop CSEs its bottom load into the next iteration's
+   value (one lbu + a move) while the fourth reloads (lb + lbu), and gcc
+   has them the other way round; and gcc keeps a copy of the dummy-path
+   base where the original walks the materialised address itself. Swept:
+   goto forms (84 words), unsigned-char walkers and an explicit
+   loop-carried `unsigned char c` (21). */
+/* Build "<map path><dir><file>" in a scratch buffer and queue the read.
+   When that path does not exist, fall back to "<dummy path><file>". */
+int RES_loadFileSubMapSub(char *pDir, char *pFile, int nArg)
+{
+    char szPath[256];
+    char *d;
+    char *p;
+    int nSize;
+
+    d = szPath;
+    p = MAP_getPath();
+    while (*p != 0) {
+        *d = *p;
+        d++;
+        p++;
+    }
+    p = pDir;
+    while (*p != 0) {
+        *d = *p;
+        d++;
+        p++;
+    }
+    if (pFile[0] != 0) {
+        unsigned char *u = (unsigned char *)pFile;
+
+        do {
+            *d = *u;
+            d++;
+            u++;
+        } while (*u != 0);
+    }
+    *d = 0;
+    nSize = xglCdGetFileSize(szPath);
+    if (nSize <= 0) {
+        char *d2 = szPath;
+        char *p2 = RES_dummyPath;
+
+        if (*p2 != 0) {
+            do {
+                *d2 = *p2;
+                d2++;
+                p2++;
+            } while (*p2 != 0);
+        }
+        p2 = pFile;
+        while (*p2 != 0) {
+            *d2 = *p2;
+            d2++;
+            p2++;
+        }
+        *d2 = 0;
+        nSize = xglCdGetFileSize(szPath);
+    }
+    readreq(szPath, nArg);
+    return nSize;
+}
