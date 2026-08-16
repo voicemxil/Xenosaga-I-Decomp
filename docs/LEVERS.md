@@ -990,6 +990,44 @@ first, fixed it.
 
 ---
 
+## Loads, stores and aliasing
+
+**A field read the original hoists ABOVE a run of stores has to be
+written as a local.** gcc cannot move a load over a possibly-aliasing
+store, so `w->win.nColor = w->nColor;` emits its load mid-block. Reading
+it into a local right after the setup call was the last word of one
+function — and shifted every other register in the block by one slot,
+fixing nine more words at once.
+
+**A second load of the same global AFTER a store is REAL** — the store
+may alias, so the source really does re-read it in that arm.
+
+**The `(unsigned short)` cast is what keeps a widened halfword alive
+across a store.** Without it gcc proves the value fits, deletes the
+`andi`, and has to reload after the store.
+
+**Two fields of DIFFERENT MODES assigned the same constant get two
+registers** (`sb` + `sw`); one shared local recovers retail's single
+register — and dropping that word can also drop a `.p2align` pad two
+switch arms later, fixing the length.
+
+**Hand the loop's initial value to LSR.** `p[i].nX = i * 573 - 45;` lets
+strength reduction build the giv and emit its init LAST, where retail
+has it; `nX = -45; ... nX += 573;` hoists the -45 ahead of the loop's
+address bases.
+
+**A quadword-copied frame array wants a UNION, not a cast** —
+`union { float f[16]; TI q[4]; }` gives it the alignment it really has
+and stops the scheduler interleaving unrelated stores into the `lq`/`sq`
+block. A whole-struct assignment is NOT the same (gcc drops to word
+pieces, +7 words).
+
+**Write the positive `if (a && b) x = 0; else x = 1;`** when the
+original merges two negative arms; the negated form makes gcc reach for
+`bnezl` and flip the block order.
+
+---
+
 ## Build hazards
 
 **A block-scope `extern` is a latent build bomb.** gcc 2.9x keeps such a
