@@ -348,8 +348,9 @@ typedef struct NATIVEENTRY
  * known here; reloadClassEntry is a pure address-order truncation. */
 typedef struct CLASSENTRY
 {
-    char               pad00[0xC];
-    struct CLASSENTRY *pNext; /* 0x0C */
+    char               pad00[8];
+    JCLASS            *pClass; /* 0x08 - resolved class, NULL until loaded */
+    struct CLASSENTRY *pNext;  /* 0x0C */
 } CLASSENTRY;
 
 extern JCLASS      *classClass;
@@ -385,7 +386,7 @@ void *newObject(JCLASS *pClass)
 {
     int *pObj;
 
-    pObj = (int *) xmalloc(pClass->nInstanceSize, 14);
+    pObj = (int *) xmalloc(pClass->u.nInstanceSize, 14);
     pObj[0] = pClass->pType;
     return pObj;
 }
@@ -397,7 +398,7 @@ JCLASS *newClass(void)
     JCLASS *p;
 
     p = (JCLASS *) xmalloc(0x40, 14);
-    p->nInstanceSize = 0;
+    p->u.nInstanceSize = 0;
     p->nStaticFieldCount = 0;
     p->pType = classClass->pType;
     return p;
@@ -506,4 +507,200 @@ void initBaseClasses(void)
     loadStaticClass(&classObject, D_004CD628);
     loadStaticClass(&classStringBuffer, D_004CD640);
     loadStaticClass(&classString, D_004CD658);
+}
+
+extern CLASSENTRY *lookupClassEntry(STRENTRY *pName, int nFlags);
+extern JCLASS *findClass(CLASSENTRY *pEntry);
+extern int processClass(JCLASS *pClass, int nStage);
+
+/* Walk the superclass chain for a method with the same interned
+ * name/signature pair as pWant.
+ *
+ * NOTE -- the inner scan does not advance through the method table: the
+ * original reads pSuper->pMethods once per class and then compares that
+ * one entry nMethodCount times.  That is faithfully what the retail code
+ * does (gcc hoisted the table load and the first pair of operands out of
+ * the loop, which it could only do because they are loop invariant), so
+ * the missing `[i]` is a bug in the original source, not in this
+ * transcription. */
+JMETHOD *findSuperMethod(JMETHOD *pWant, JCLASS *pClass)
+{
+    JCLASS *pSuper;
+    JMETHOD *pM;
+    int i;
+
+    for (pSuper = pClass->pSuper; pSuper != 0; pSuper = pSuper->pSuper) {
+        for (i = pSuper->nMethodCount - 1; i >= 0; i--) {
+            pM = pSuper->pMethods;
+            if (pM->pName == pWant->pName && pM->pSig == pWant->pSig) {
+                return pM;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Build one of the primitive/wrapper class records (int, float, byte...). */
+void initWrapperClass(JCLASS **ppOut, char *pName, char cSigChar,
+                      int nElemSize)
+{
+    *ppOut = newClass();
+    (*ppOut)->nFlags = 0x100;
+    (*ppOut)->pName = loadConstString(pName, -1);
+    (*ppOut)->u.prim.cSigChar = cSigChar;
+    (*ppOut)->u.prim.nElemSize = nElemSize;
+}
+
+/* Resolve a class by interned name, loading it on demand unless the
+ * caller asked for a cache-only lookup. */
+JCLASS *loadClass(STRENTRY *pName, int bNoLoad)
+{
+    CLASSENTRY *pEntry;
+    JCLASS *pClass;
+
+    pEntry = lookupClassEntry(pName, bNoLoad);
+    pClass = pEntry->pClass;
+    if (pClass == 0) {
+        if (bNoLoad == 0) {
+            pClass = findClass(pEntry);
+        }
+        if (pClass == 0) {
+            return 0;
+        }
+        pEntry->pClass = pClass;
+    }
+    if (processClass(pClass, 11) == 0) {
+        pClass = 0;
+    }
+    return pClass;
+}
+
+/* Lay out the instance fields, each aligned to its own rounded-up word
+ * size, and record the resulting instance size. */
+void resolveInstanceField(JCLASS *pClass)
+{
+    JFIELD *p;
+    int nOfs;
+    int nAlign;
+    int i;
+
+    nOfs = pClass->u.nInstanceSize;
+    if (nOfs == 0) {
+        nOfs = 4;
+    }
+    i = pClass->nFieldCount - pClass->nStaticFieldCount - 1;
+    p = &pClass->fields[pClass->nStaticFieldCount];
+    for (; i >= 0; i--) {
+        nAlign = ((p->nSize + 3) >> 2) << 2;
+        nOfs = (nOfs + nAlign - 1) / nAlign * nAlign;
+        p->nOffset = nOfs;
+        nOfs += nAlign;
+        p++;
+    }
+    pClass->u.nInstanceSize = nOfs;
+}
+
+/* Load a named class into a global slot and run it to the linked stage. */
+void loadStaticClass(JCLASS **ppOut, char *pName)
+{
+    CLASSENTRY *pEntry;
+    JCLASS *pClass;
+
+    pEntry = lookupClassEntry(loadConstString(pName, -1), 0);
+    if (pEntry->pClass == 0) {
+        pClass = findClass(pEntry);
+        if (pClass == 0) {
+            *ppOut = 0;
+            return;
+        }
+        pEntry->pClass = pClass;
+        *ppOut = pClass;
+    }
+    processClass(pEntry->pClass, 11);
+}
+
+/* Allocate an array object: 12-byte header (type word, length, data
+ * pointer) followed by the elements. */
+void *newArray(JCLASS *pElement, int nCount)
+{
+    int *pArray;
+    int *pData;
+    JCLASS *pArrayClass;
+    int nType;
+
+    if ((pElement->nFlags & 0x100) != 0) {
+        pArray = (int *) xmalloc(pElement->u.prim.nElemSize * nCount + 12, 14);
+    } else {
+        pArray = (int *) xmalloc(nCount * 4 + 12, 14);
+    }
+    pArrayClass = (JCLASS *) lookupArray(pElement);
+    pData = pArray + 3;
+    nType = pArrayClass->pType;
+    pArray[1] = nCount;
+    pArray[0] = nType;
+    pArray[2] = (int) pData;
+    return pArray;
+}
+
+/* Turn every still-unresolved string constant (tag 8) into a live
+ * java.lang.String and retag it (0x18) so the pass is idempotent. */
+int resolveConstants(JCLASS *pClass)
+{
+    int *pConst;
+    int *p;
+    unsigned char *pTag;
+    int nCount;
+    int i;
+
+    i = 0;
+    nCount = pClass->nConstCount;
+    if (nCount != 0) {
+        pConst = pClass->pConst;
+        p = pConst;
+        do {
+            pTag = (unsigned char *) pConst[0] + i;
+            if (*pTag == 8) {
+                *pTag = 0x18;
+                p[0] = (int) Const2JavaString((STRENTRY *) p[0]);
+                nCount = pClass->nConstCount;
+            }
+            i++;
+            p++;
+        } while (i < nCount);
+    }
+    return 1;
+}
+
+/* Pack the static fields into one xmalloc'd block. The first pass turns
+ * each field's declared size into its offset within the block (parked in
+ * the nSize slot); the second swaps nSize back and rewrites nOffset as
+ * the absolute address of the field's storage. */
+void allocStaticField(JCLASS *pClass)
+{
+    JFIELD *p;
+    char *pBlock;
+    int nTotal;
+    int nAlign;
+    int i;
+
+    if (pClass->nStaticFieldCount != 0) {
+        nTotal = 0;
+        p = pClass->fields;
+        for (i = pClass->nStaticFieldCount - 1; i >= 0; i--) {
+            nAlign = ((p->nSize + 3) >> 2) << 2;
+            nTotal += nAlign;
+            p->nSize = (nTotal - 1) / nAlign * nAlign;
+            p++;
+        }
+        pBlock = (char *) xmalloc(nTotal, 10);
+        p = pClass->fields;
+        for (i = pClass->nStaticFieldCount - 1; i >= 0; i--) {
+            unsigned int nOfs = p->nSize;
+            int nSize = p->nOffset;
+
+            p->nSize = nSize;
+            p->nOffset = (int) (pBlock + nOfs);
+            p++;
+        }
+    }
 }

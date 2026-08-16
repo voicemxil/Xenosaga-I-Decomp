@@ -36,13 +36,32 @@ typedef struct STRENTRY
 typedef struct JFIELD
 {
     void *name;          /* 0x00 - interned string pointer (STRENTRY*), compared by identity */
-    char  pad04[0x14 - 0x04]; /* 0x04 - unknown (includes the nOffset field used by every
-                                  Java_*.c caller, exact sub-offset not yet recovered) */
+    char  pad04[0x0C - 0x04]; /* 0x04 - unknown */
+    unsigned int nSize;  /* 0x0C - declared byte size.  allocStaticField reuses this slot
+                                   as a scratch offset while it lays the static block out,
+                                   then restores it from nOffset. */
+    int   nOffset;       /* 0x10 - byte offset within the instance; for static fields
+                                   allocStaticField overwrites it with the absolute
+                                   address inside the freshly allocated static block. */
 } JFIELD;                /* size 0x14 (20), confirmed via the *5*4 index-scaling in lookupClassField */
+
+/* A method table entry, keyed by the interned name/signature pair. */
+typedef struct JMETHOD
+{
+    void *pName;         /* 0x00 */
+    void *pSig;          /* 0x04 */
+} JMETHOD;
 
 typedef struct JCLASS
 {
-    char pad00[0x18];                 /* 0x00 - unknown (name, super, methods, ...) */
+    char pad00[0x04];                 /* 0x00 - unknown */
+    void *pName;                      /* 0x04 - interned class name */
+    char pad08[0x0A - 0x08];          /* 0x08 - unknown */
+    unsigned short nFlags;            /* 0x0A - 0x100 marks a primitive/wrapper class */
+    char pad0C[0x10 - 0x0C];          /* 0x0C - unknown */
+    struct JCLASS *pSuper;            /* 0x10 */
+    int *pConst;                      /* 0x14 - constant pool; slot 0 points at the
+                                                parallel array of one-byte tags */
     int pType;                        /* 0x18 - the word every instance of this class
                                                 carries in its first slot; newClass
                                                 inherits it from classClass.  Typed int,
@@ -51,11 +70,30 @@ typedef struct JCLASS
                                                 that precede it in newClass, and the
                                                 original build did not hoist it. */
     JFIELD *fields;                   /* 0x1C - base of the field table */
-    char pad20[0x30 - 0x20];          /* 0x20 - unknown */
+    JMETHOD *pMethods;                /* 0x20 - base of the method table */
+    char pad24[0x28 - 0x24];          /* 0x24 - unknown */
+    unsigned short nConstCount;       /* 0x28 - entries in pConst */
+    char pad2A[0x2C - 0x2A];          /* 0x2A - unknown */
+    unsigned short nMethodCount;      /* 0x2C - entries in pMethods */
+    char pad2E[0x30 - 0x2E];          /* 0x2E - unknown */
     unsigned short nFieldCount;       /* 0x30 - total entries in `fields` */
     unsigned short nStaticFieldCount; /* 0x32 - static fields occupy fields[0..nStaticFieldCount) */
     char pad34[0x38 - 0x34];          /* 0x34 - unknown */
-    int nInstanceSize;                /* 0x38 - byte size newObject hands to xmalloc */
+    /* 0x38 - a reference class stores the instance byte size newObject hands
+       to xmalloc; a primitive/wrapper class (nFlags & 0x100) instead uses the
+       middle two bytes for its signature letter and element width, and
+       newClass zeroes the whole word. */
+    union
+    {
+        int nInstanceSize;
+        struct
+        {
+            unsigned char pad38;
+            signed char   cSigChar;   /* 0x39 */
+            unsigned char nElemSize;  /* 0x3A */
+            unsigned char pad3B;
+        } prim;
+    } u;
     char pad3C[0x40 - 0x3C];          /* 0x3C - unknown; newClass allocates 0x40 */
 } JCLASS;
 
