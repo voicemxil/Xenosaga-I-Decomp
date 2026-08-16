@@ -2694,3 +2694,5 @@ PrintPoint = 0x0027C708, 0xC8; // Print.c
 scEFFECT3Script = 0x002EB698, 0x160; // sc.c
 tskUmnBgCubeMain = 0x00A02D68, 0x2F8; // tskUmnBgCube.c
 Check_Undu = 0x002D8A68, 0x160; // Check.c
+sefSetHitSignal = 0x002E67A0, 0x68; // sefIs.c
+sefSetSeSignal = 0x002E6860, 0x68; // sefIs.c

@@ -108,3 +108,41 @@ int sefIsSeSignal(int nID)
     }
     return 0;
 }
+
+/* --- battle-actor signal setters (share the table above) --- */
+
+/* Raise the hit signal on the actor slot owning this object */
+void sefSetHitSignal(int nID)
+{
+    BATTLE_ACTOR *p;
+    int i;
+
+    if (nID == 0) {
+        return;
+    }
+    for (i = 0; i < _battleActor.nActors; i++) {
+        p = &_battleActor.aActor[i];
+        if (p->nID == nID) {
+            p->nHit++;
+            break;
+        }
+    }
+}
+
+/* Same walk, raising the sound-effect signal instead */
+void sefSetSeSignal(int nID)
+{
+    BATTLE_ACTOR *p;
+    int i;
+
+    if (nID == 0) {
+        return;
+    }
+    for (i = 0; i < _battleActor.nActors; i++) {
+        p = &_battleActor.aActor[i];
+        if (p->nID == nID) {
+            p->nSeSignal++;
+            break;
+        }
+    }
+}
