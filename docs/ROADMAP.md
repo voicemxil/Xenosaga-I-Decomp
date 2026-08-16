@@ -20,7 +20,17 @@ Everything below builds on the same machinery, all committed:
   `--barrier-return-store`, `--barrier-branch-move` (gas delay-slot
   theft), `--expand-sym-loads` (ctype-style symbol loads),
   `--unfill-gcc-slots` (exists, needs per-site selection),
-  `--no-fill-delay` (rarely right).
+  `--no-fill-delay` (rarely right). Reordering family:
+  `--swap-adjacent`, `--rotate FUNC:N[:LEN]` (negative LEN rotates
+  left), `--rotate-seq` (same sites applied one at a time with indices
+  re-resolved, for OVERLAPPING windows -- order matters),
+  `--swap-into-slot`, `--swap-slot-target`; all of these are checked by
+  `tools/audit_swaps.py`, which recompiles without them and fails the
+  build if the instruction multiset changed (i.e. if a "reorder" is
+  really masking different logic). Register naming: `--swap-regs
+  FUNC:A-B`, GPR or FP (`f0-f1`). Idiom rewrites: `--zero-quad-store`
+  (gcc's `por $X,$0,$0` + `sq $X` for a TImode zero; the original built
+  `nop` + `sq $0`).
 - **Sony glue is hand-written from disasm** when the source never existed
   publicly: `malloc_lock.c`, `gccsrc/gthr-ps2.h` (WaitSema/SignalSema on
   `__sce_sema_id`/`__sce_eh_sema_id`).
