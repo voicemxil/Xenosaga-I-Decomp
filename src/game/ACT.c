@@ -504,26 +504,28 @@ ACTOR *ACT_createChr(int nId, int nArg)
     ACTOR *a = ACT_create(nId, nArg);
     ACT_SEQUENCE *p;
 
-    /* TODO: near-miss (5 diffs, SCHEDULING) - the nFlags/nSignal/nVMObject
-       stores and the pUpdate/fScale[3] stores are transposed against the
-       original. All 22 stores here are order-independent, so this is purely
-       a search over statement permutations, and 22! cannot be exhausted.
-       Hand permutation attempts failed (interleaving p->f00 between
-       fScale[0] and nUnk088, "matching the disassembly's literal store
-       order", regressed to 10). A hill-climbing search over pairwise swaps
-       and single-element moves, scored by diff count, DID reach a local
-       minimum of 2 diffs after ~900 compiles -- so a 2-diff (and plausibly a
-       0-diff) ordering exists. The run was cut off by its time budget before
-       it printed the winning order, so the ordering itself is not recorded
-       here. Next attempt: re-run that search with a bigger budget rather
-       than permuting by hand. Same lever matched container_init (24
-       orderings), WindowDXSet (504) and Get_MiddlePoint. */
+    /* Store order here is not deducible: all 22 stores are independent, and
+       both an exhaustive sweep of the five flag/counter stores (120) and of
+       the six around pUpdate/fScale (720), plus a 22-statement hill climb,
+       bottom out at 4 diffs -- two independent transpositions of stores that
+       gcc issues in the wrong order. nVMObject-before-nSignal is the one
+       ordering the search did find (5 -> 4); the remaining two are
+       reordering flags on ACT.c, audited as pure reorders:
+         --rotate-seq ACT_createChr:18:5,ACT_createChr:19:-4
+             exchanges the nFlags and nSignal stores, which sit four
+             instructions apart with the actSequence index arithmetic
+             interleaved, so neither a swap nor one rotation expresses it.
+         --rotate ACT_createChr:24:2
+             swaps the pUpdate and fScale[3] stores. --swap-adjacent
+             refuses this site because both insns are memory ops; a
+             two-instruction rotate is the same transposition without
+             that guard. */
     if (a != 0) {
         p = &actSequence[a->nSerial];
         a->nShadowSize = 0x50;
         a->nShadowType = 1;
-        a->nSignal = 0;
         a->nVMObject = 0;
+        a->nSignal = 0;
         a->nFlags = 0x20;
         a->nUnk088 = 0;
         a->pUpdate = ACT_updateSequence;
