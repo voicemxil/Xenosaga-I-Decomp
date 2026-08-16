@@ -559,7 +559,17 @@ int sceMcGetInfo(int port, int slot, int *type, int *free, int *format)
     return rc;
 }
 
-/* sceMcRename: command 14 -- but the in-flight command code recorded is
+/* PARKED NEAR-MISS, 2 words of 90 (a pure adjacent swap): the original
+ * sets up FlushCache's `move a0,zero` argument BEFORE the
+ * `sw s0,16(s1)` payload store, we emit them the other way round.
+ * Swept: both orders of `q[63] = 0` against `p[4] = (int)q` (the order
+ * below is the better one, 3 words the other way), and --swap-adjacent
+ * at sceMcRename:54..58 (54/55/56 are ineligible sites and change
+ * nothing, 57 and 58 make it worse). Everything else -- the two
+ * strncpys, the backwards-derived buffFileInfo base, the 19-not-14
+ * command code -- is exact.
+ *
+ * sceMcRename: command 14 -- but the in-flight command code recorded is
  * 19, not 14.  Two names: the path goes in the usual 1024-byte field,
  * the new name into the 32-byte tail of buffFileInfo, whose base is
  * reached backwards from the strncpy destination the same way the
