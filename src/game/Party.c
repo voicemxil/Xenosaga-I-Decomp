@@ -399,7 +399,31 @@ void PartyAttackPosSet(int nPos, int nId)
 
 extern int MenuMaryIdChange(int);
 
-/* TODO: near-miss - loop structure/scheduling diff (32 orig vs 35 built words); parked after 2 attempts. */
+/* TODO: near-miss, 4 of 32 words (was 21 of 35). SCHEDULING class -- the
+ * instruction multiset is the original's, and the whole remaining diff is
+ * that gcc hoists the `p++` above the nPos exit branch (to fill the lhu
+ * load-use stall) and then has only `cnt++` left for the call's delay
+ * slot, where the retail build puts `p++` in the delay slot and leaves
+ * `cnt++` after the call. All 24 orderings of the four post-call
+ * statements give exactly the same schedule, so source order does not
+ * reach it; LAUNDER(p) does stop the hoist but the empty asm block then
+ * lands IN the call's delay slot and leaves it for gas to fill, which is
+ * worse. --swap-into-slot sites 0 and 1 both decline (the instruction
+ * before the call's noreorder block is itself inside the branch's
+ * noreorder block).
+ *
+ * Two shape levers that DID land, both worth reusing:
+ *   - the loop must be written with an explicit goto. Every loop
+ *     statement form (for, while, while(1)+break, for(;;)+break) carries
+ *     a NOTE_INSN_LOOP_BEG and gcc 2.9x's duplicate_loop_exit_test then
+ *     copies the exit test into the preheader and inverts the loop; the
+ *     retail build has the `i < 3` test at the TOP with an unconditional
+ *     branch back to it.
+ *   - `pos` must be a local. Reading p->nPos twice (test, then call
+ *     argument) emits two lhu; the original loads once and copies.
+ * The SCHED_NOP is the loop-top alignment: gcc emits `.p2align 3,,7`
+ * ahead of a real loop's top label and the retail build's pad word comes
+ * from that, but the goto form has no loop note and so no directive. */
 /* Fill out[] with converted character ids for each nonzero attack-position slot, return the count */
 int PartyAttackerGet(int *out)
 {
@@ -407,17 +431,24 @@ int PartyAttackerGet(int *out)
     int i;
     int cnt;
     int id;
+    int pos;
 
     p = (ATTACKPOS *)((char *)PartyDataGet() + 0x30);
     cnt = 0;
-    for (i = 0; i < 3; i++, out++) {
-        if (p->nPos == 0) {
-            break;
+    i = 0;
+    SCHED_NOP();
+loop:
+    if (i < 3) {
+        i++;
+        pos = p->nPos;
+        if (pos != 0) {
+            id = MenuMaryIdChange(pos);
+            p++;
+            cnt++;
+            *out = id;
+            out++;
+            goto loop;
         }
-        id = MenuMaryIdChange(p->nPos);
-        p++;
-        cnt++;
-        *out = id;
     }
     return cnt;
 }
