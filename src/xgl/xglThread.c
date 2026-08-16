@@ -50,39 +50,30 @@ void xglSleep()
     SleepThread();
 }
 
-// WIP
+/* Bring up the four engine threads: copy each entry out of the static
+ * system table into the active table and into the ThreadParam block,
+ * carving the stacks downward from 0x1f8000. */
 void xglThreadInitial()
 {
     static struct ThreadParam sThreadParam;
     void* next_stack = (void*)0x1f8000;
-    void* gp = _gp;
-    s32 i;
+    void* gp = &_gp;
+    u32 i;
 
     for (i = 0; i < 4; i++)
     {
-        // sThreadParam.entry = asSystemThreadList[i].entry;
-        // asActiveThreadList[i].entry = sThreadParam.entry;
-        // sThreadParam.stack = next_stack - sThreadParam.stackSize;
-        // asActiveThreadList[i].stack = sThreadParam.stack;
-        // sThreadParam.stackSize = asSystemThreadList[i].stackSize;
-        // asActiveThreadList[i].stackSize = sThreadParam.stackSize;
-
-        // asActiveThreadList[i].entry = sThreadParam.entry = asSystemThreadList[i].entry;
-        // asActiveThreadList[i].stack = sThreadParam.stack = next_stack -
-        // asSystemThreadList[i].stack; asActiveThreadList[i].stackSize = sThreadParam.stackSize =
-        // asSystemThreadList[i].stackSize;
-
-        sThreadParam.gpReg = gp;
         sThreadParam.initPriority = asSystemThreadList[i].initPriority;
-
-        sThreadParam.entry = asActiveThreadList[i].entry = asSystemThreadList[i].entry;
-
-        sThreadParam.stack = asActiveThreadList[i].stack = next_stack - asSystemThreadList[i].stack;
-        sThreadParam.stackSize = asActiveThreadList[i].stackSize = asSystemThreadList[i].stackSize;
+        asActiveThreadList[i].initPriority = asSystemThreadList[i].initPriority;
+        asActiveThreadList[i].entry = sThreadParam.entry = asSystemThreadList[i].entry;
+        asActiveThreadList[i].stack = sThreadParam.stack =
+            (char*)next_stack - asSystemThreadList[i].stackSize;
+        asActiveThreadList[i].stackSize = sThreadParam.stackSize =
+            asSystemThreadList[i].stackSize;
+        sThreadParam.gpReg = gp;
 
         asActiveThreadList[i].id = CreateThread(&sThreadParam);
         StartThread(asActiveThreadList[i].id, 0);
-        next_stack -= asSystemThreadList[i].stackSize;
+        next_stack = (char*)next_stack - asSystemThreadList[i].stackSize;
     }
 
     iCurrentThread = 0;
