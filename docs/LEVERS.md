@@ -277,6 +277,19 @@ source idiom — four matches in the sound driver needed it. The bias
 constant in the field offsets tells you where the sub-view starts; the
 stride stays the full record, so pad the view struct to it.
 
+**An LSR-built giv's init lands in the loop PREHEADER; a source-walked
+pointer's copy lands in the ENTRY BLOCK.** `pType[i]` vs `*pt++` changes
+TWO things at once: where the callee-save appears in the prologue, and
+the pseudo's `global_alloc` priority (its live range starts at the guard
+rather than at entry), so it can swap registers with an unrelated
+whole-loop pointer. A `PIN` forces the register but NOT the placement —
+only the giv form does both.
+
+**A block-local pointer declared inside the loop BODY keeps the base on
+the loop's own biv.** `for (...) { REC *q = &p->out[i]; ... }` — writing
+`p->out[i].member` throughout leaves the base fixed and gcc invents a
+separate giv per PAIR of stores.
+
 **Let LSR build the giv.** `arr[i].field` yields `%hi/%lo(arr)` plus a
 separate `addiu +off` for the giv's initial value; a hand-walked pointer
 folds the offset into the `%lo` and comes out ONE WORD SHORTER — and
@@ -374,6 +387,12 @@ retail jump table.
 function-wide `T *p` shared by several arms is one long live range and
 the allocator never gives any arm the original's register. Note this is
 per-arm: the same rewrite in a second arm did nothing.
+
+**A dispatch whose arms are laid out AFTER the join is a `switch`, not
+an if/else-if chain** — and **literal case labels are what keep LICM
+alive**. Naming the case values as `int` locals moved their `li` above
+the loop guard and stopped six float constants being hoisted into
+`$f20-$f25`.
 
 **Switch node COUNT picks the decision-tree root.** gcc's
 `balance_case_nodes` special-cases exactly three nodes and splits at the
@@ -682,6 +701,13 @@ read-modify-write, or gcc emits load-compute-store triples.
 **gcc DELETES the first of two stores to the same member**, even with a
 non-aliasing load between them. Only a `volatile` store keeps both.
 
+**Chain a second struct copy off the first** (`a = src; b = a;`) —
+copying `src` twice reloads it, because the first copy's stores are in
+the same alias set.
+
+**A char store aliases every load**, which makes it a PLACEABLE
+scheduling barrier.
+
 **A store through a differently-typed pointer kills a struct member's
 CSE across it.**
 
@@ -830,6 +856,12 @@ shows any of these, check the source first:
 real hazard.** One cost an agent 30 minutes and briefly broke a
 registered match, because the comment invited experimentation on
 working code. `checkfile.py` is the authority, not the file comments.
+
+**A fixer-flag site index must be read off the POST-`fix_cc_asm`
+stream, not the raw `ee-gcc -S` output.** Earlier passes insert nops and
+expand macros, so an index taken from the raw assembly silently does not
+fire. Use `tools/slot_sites.py`, which prints the word offset each
+counting lands at.
 
 **`set_flags.py` keys are BASENAMES, not paths.** Passing
 `src/ssd/sef.c` used to write a key nothing ever reads, silently doing
