@@ -343,6 +343,12 @@ void xglCameraTravelInit(void *pCamera)
  * copies but loses the 3-move rotate. */
 /* Set a camera's clip window: order the corners, clamp them to the
  * current display size and store them as floats in the screen block */
+/* Clamp order is load-bearing and is NOT the reading order of the
+   corners: the negative clamps run nX0,nX1,nY0,nY1 and the screen-size
+   clamps run nX0,nY0,nX1,nY1.  Both groups are four independent
+   conditional moves, so gcc emits them in source order and the order
+   decides which of $t1..$t4 and $a2/$a3 each corner gets; all 24
+   orderings of each group were tried (14 -> 4 -> match). */
 void xglCameraSetWindow(void *pCamera, int nX0, int nY0, int nX1, int nY1)
 {
     char *pScreen;
@@ -365,26 +371,26 @@ void xglCameraSetWindow(void *pCamera, int nX0, int nY0, int nX1, int nY1)
     if (nX0 < 0) {
         nX0 = 0;
     }
-    if (nY0 < 0) {
-        nY0 = 0;
-    }
     if (nX1 < 0) {
         nX1 = 0;
     }
+    if (nY0 < 0) {
+        nY0 = 0;
+    }
     if (nY1 < 0) {
         nY1 = 0;
-    }
-    if (!(nX1 < sRender.nWidth)) {
-        nX1 = sRender.nWidth - 1;
-    }
-    if (!(nY1 < sRender.nHeight)) {
-        nY1 = sRender.nHeight - 1;
     }
     if (!(nX0 < sRender.nWidth)) {
         nX0 = sRender.nWidth - 1;
     }
     if (!(nY0 < sRender.nHeight)) {
         nY0 = sRender.nHeight - 1;
+    }
+    if (!(nX1 < sRender.nWidth)) {
+        nX1 = sRender.nWidth - 1;
+    }
+    if (!(nY1 < sRender.nHeight)) {
+        nY1 = sRender.nHeight - 1;
     }
     *(float *)(pScreen + 0x50) = nX0;
     *(float *)(pScreen + 0x54) = nY0;
