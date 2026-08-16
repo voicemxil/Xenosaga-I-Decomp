@@ -702,3 +702,36 @@ void GameResourceReset(int nNo)
     GameResourceDump(0);
     arcfilepreload = 0;
 }
+
+extern int arcfilepreload;
+extern char scene_txt_buffer[];
+extern char *RES_getScenePath(char *pPath, int nScene);
+extern int xglCdGetFileSize(char *pPath);
+
+/* Stage the scene script and its archive at the top of memory before the
+   scene itself is built. */
+void GameResourcePreLoad(int nScene)
+{
+    char szPath[256];
+    char *pExt;
+    int nSize;
+    int nAddr;
+
+    pExt = RES_getScenePath(szPath, nScene);
+    arcfilepreload = 0;
+    if (xglCdGetFileSize(szPath) > 0) {
+        xglCdReadFile(szPath, (int)scene_txt_buffer, 1, 1);
+        pExt[0] = 'a';
+        pExt[1] = 0;
+        nSize = xglCdGetFileSize(szPath);
+        if (nSize > 0) {
+            /* Written inside the guard: gcc hoists the address arithmetic
+               above the branch on its own, and writing it above the guard
+               instead gives the mask and the 0x2000000 base the wrong
+               registers. */
+            nAddr = 0x2000000 - ((nSize + 2047) & -2048);
+            arcfilepreload = nAddr;
+            xglCdReadFile(szPath, nAddr, 1, 1);
+        }
+    }
+}
