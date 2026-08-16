@@ -448,19 +448,18 @@ void svInitImageMapper(void)
         0xE8000, 0xE8000, 0xE8000, 0xE8000, 0xE8000, 0xE8000, 0xE8000,
         0xE8000, 0xE8000, 0xE8000, 0xE8000, 0xE8000
     };
+    char *m = _imageMapper;
+    SV_IMAGE_LIST *p = (SV_IMAGE_LIST *)m;
     int i;
 
-    memset(_imageMapper, 0,
-           40 * sizeof(SV_IMAGE_LIST) + 40 * sizeof(SV_REF));
+    memset(m, 0, 40 * sizeof(SV_IMAGE_LIST) + 40 * sizeof(SV_REF));
     for (i = 0; i < 40; i++) {
-        /* PERM_BEGIN */
-        svImageMapper[i].vramBase = top[i];
-        svImageMapper[i].vramSize = siz[i];
-        svImageMapper[i].vramPtr = top[i];
-        svImageMapper[i].id = 0;
-        svImageMapper[i].data = 0;
-        svImageMapper[i].num = 0;
-        /* PERM_END */
+        p[i].vramBase = top[i];
+        p[i].vramSize = siz[i];
+        p[i].vramPtr = top[i];
+        p[i].id = 0;
+        p[i].data = 0;
+        p[i].num = 0;
     }
 }
 
@@ -571,4 +570,102 @@ void svDeleteImageMapper(int idx)
     if (p->num != 0) {
         svImageListDestroy(p);
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* Per-frame draw scheduling.                                          */
+
+/* One effect scheduler slot, 0xAB0 bytes; sefGetScheduler returns the
+ * base of a 128-entry array of them. */
+typedef struct {
+    /* 0x000 */ char pad000[0x6B0];
+    /* 0x6B0 */ int used;
+    /* 0x6B4 */ char pad6B4[0xA78 - 0x6B4];
+    /* 0xA78 */ short eftNo;
+    /* 0xA7A */ char padA7A[0xA8C - 0xA7A];
+    /* 0xA8C */ int flags;
+    /* 0xA90 */ char padA90[0xAB0 - 0xA90];
+} SV_SCHED;
+
+/* Only the effect-number table of the srs resource block is used here. */
+typedef struct {
+    /* 0x000 */ char pad000[0x10C];
+    /* 0x10C */ short eftNo[26];        /* indexed by mapper slot - 14 */
+} SV_MEMRES;
+
+extern SV_MEMRES _srsMemRes;
+extern SV_SCHED *sefGetScheduler(void);
+extern void srsAnalyzeEftNo(int no, int *charID, int *cate);
+extern void SGsSetZTestEnv(int on);
+extern void sefDrawSchedulerEffect(int idx);
+extern void SGsInitEnv(void);
+extern void SGsRestoreEnv(void);
+extern void MEfObjExec1st(void);
+extern void svInitRefImage(void);
+void svDrawSchedulerBlk(int cate, int no);
+
+/* Draw every live scheduler slot whose effect belongs to one category.
+ * `no` of 0 means "any effect", otherwise only the named one. */
+void svDrawSchedulerBlk(int cate, int no)
+{
+    static int charID __asm__("charID.3");
+    static int eftCate __asm__("eftCate.4");
+    static int eft __asm__("eft.5");
+    SV_SCHED *s;
+    /* Allocator tie-break: gcc gives the loop counter $s1 and the `no`
+     * parameter $s2; the original build chose the other way round. The
+     * pin sticks because i is also the sefDrawSchedulerEffect argument. */
+    PIN(int i, "$18");
+
+    s = sefGetScheduler();
+    for (i = 0; i < 128; i++) {
+        if (s->used != 0) {
+            if (eft != s->eftNo) {
+                eft = s->eftNo;
+                srsAnalyzeEftNo(eft, &charID, &eftCate);
+            }
+            if (eftCate == cate) {
+                if (no == 0 || (no > 0 && no == eft)) {
+                    SGsSetZTestEnv(((s->flags >> 2) ^ 1) & 1);
+                    sefDrawSchedulerEffect(i);
+                }
+            }
+        }
+        s++;
+    }
+}
+
+/* The 3D pass: one scheduler sweep per image-mapper category. */
+void svDrawScheduler3D(void)
+{
+    int mode = 2;
+    int i;
+    SV_IMAGE_LIST *p;
+
+    _draw3D = mode;
+    svInitRefImage();
+    SGsInitEnv();
+    p = (SV_IMAGE_LIST *)_imageMapper;
+    if (p[0].num > 0) {
+        _nowImage = 0;
+        svDrawSchedulerBlk(0, 0);
+    }
+    _nowImage = mode;
+    svDrawSchedulerBlk(2, 0);
+    _nowImage = 11;
+    svDrawSchedulerBlk(11, 0);
+    _nowImage = 14;
+    svDrawSchedulerBlk(14, 0);
+    _nowImage = 15;
+    svDrawSchedulerBlk(15, 0);
+    for (i = 16; i < 40; i++) {
+        if (p[i].num > 0) {
+            if (_srsMemRes.eftNo[i - 14] > 0) {
+                _nowImage = i;
+                svDrawSchedulerBlk(16, _srsMemRes.eftNo[i - 14]);
+            }
+        }
+    }
+    MEfObjExec1st();
+    SGsRestoreEnv();
 }
