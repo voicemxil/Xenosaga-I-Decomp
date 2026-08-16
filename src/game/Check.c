@@ -50,6 +50,15 @@ typedef union {
     long long alignment[2];
 } BOUNDS;
 
+/* Same fields as VECTOR, but 8-byte aligned so a whole-struct copy uses
+   ld/sd instead of the unaligned ldl/ldr/sdl/sdr sequence */
+typedef struct {
+    float x;
+    float y;
+    float z;
+    float w;
+} __attribute__((aligned(8))) VECTOR8;
+
 typedef struct {
     int nFlags;                 /* 0x00 */
     char pad04[0xC];
@@ -58,8 +67,10 @@ typedef struct {
     short nUnkA4;               /* 0xA4 */
     char padA6[0xA];
     BOUNDS bounds;              /* 0xB0 */
-    char padC0[0xE0];
+    VECTOR8 posAligned;         /* 0xC0 */
+    char padD0[0xD0];
     UWAMONO uwamono;            /* 0x1A0 */
+    char pad1E8[0x118];         /* pad to the 0x300 array stride */
 } MAPUNIT;
 
 extern ACTOR actor[];
@@ -200,15 +211,6 @@ int CheckInBox(VECTOR *pPos, VECTOR *pMin, VECTOR *pMax)
     return 0;
 }
 
-/* Same fields as VECTOR, but 8-byte aligned so a whole-struct copy uses
-   ld/sd instead of the unaligned ldl/ldr/sdl/sdr sequence */
-typedef struct {
-    float x;
-    float y;
-    float z;
-    float w;
-} __attribute__((aligned(8))) VECTOR8;
-
 typedef struct {
     unsigned char pad0C0[0xC0];
     VECTOR8 pos;                /* 0xC0 */
@@ -223,15 +225,9 @@ typedef struct {
     float fDir;                   /* 0x54 */
 } DOORTARGET;
 
-typedef struct {
-    unsigned char pad00[0xC0];
-    VECTOR8 pos;                  /* 0xC0 */
-    unsigned char pad0D0[0x230]; /* pad to the 0x300 array stride */
-} MAPUNIT2;
-
 /* Non-gp_rel: an incomplete array keeps a <=8-byte extern out of sdata */
 extern DOORTARGET *D_00338684[];
-extern MAPUNIT2 MapUnit[];
+extern MAPUNIT MapUnit[];
 extern short D_00490DBA[];
 extern float D_004D7F4C;
 extern float D_004D7F50;
@@ -284,7 +280,7 @@ int CheckDoorSwitch(DOORACTOR *a)
 void CheckDoorPos(DOORACTOR *a, VECTOR8 *pOut)
 {
     int nMapIdx = a->nMapIdx;
-    MAPUNIT2 *m;
+    MAPUNIT *m;
     float x, dx, z, dz;
 
     if (nMapIdx == -1) {
@@ -292,11 +288,11 @@ void CheckDoorPos(DOORACTOR *a, VECTOR8 *pOut)
     } else {
         m = &MapUnit[nMapIdx];
         x = a->pos.x;
-        dx = x - m->pos.x;
+        dx = x - m->posAligned.x;
         pOut->x = x - dx * 0.5f;
         pOut->y = a->pos.y;
         z = a->pos.z;
-        dz = z - m->pos.z;
+        dz = z - m->posAligned.z;
         pOut->z = z - dz * 0.5f;
     }
 }
@@ -604,4 +600,48 @@ float CheckCornerDist(VECTOR *p, MAPUNIT *unit)
         break;
     }
     return d;
+}
+
+typedef struct {
+    char pad00[0x10];
+    VECTOR pos;                 /* 0x10 */
+} GLACTOR;
+
+typedef struct {
+    char pad00[4];
+    GLACTOR *pActor;            /* 0x04 */
+    char pad08[0x29F3C];
+    float fFarDist;             /* 0x29F44 */
+} GAMELOOPSTATE;
+
+extern GAMELOOPSTATE GameLoopState;
+
+/* Index of the breakable map unit nearest the player, or -1. */
+int CheckNearMapUnit(void)
+{
+    MAPUNIT *unit;
+    GLACTOR *p;
+    int i;
+    int nBest;
+    float fBest;
+
+    nBest = -1;
+    unit = &MapUnit[0];
+    p = GameLoopState.pActor;
+    fBest = GameLoopState.fFarDist + 1000.0f;
+    for (i = 0; i < 64; i++) {
+        if ((CheckBrokenMapUnit(unit) & 1) && (unit->nFlags & 0x40000)) {
+            float d = CheckCornerDist(&p->pos, unit);
+
+            if (d < fBest) {
+                fBest = d;
+                nBest = i;
+            }
+        }
+        unit++;
+    }
+    if (fBest < GameLoopState.fFarDist) {
+        return nBest;
+    }
+    return -1;
 }

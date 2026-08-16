@@ -2764,3 +2764,4 @@ _extrainfo = 0x002142F0, 0x48; // sceMpegDec.c
 CheckCornerDist = 0x002C3C70, 0x114; // Check.c
 tskUmnPluginList = 0x00A0E1A0, 0x338; // tskUmn.c
 _waitIpuIdle = 0x00213700, 0xA4; // sceMpegDec.c
+CheckNearMapUnit = 0x002C33C0, 0x100; // Check.c
