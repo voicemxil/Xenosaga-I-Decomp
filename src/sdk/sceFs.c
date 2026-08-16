@@ -1224,3 +1224,42 @@ int sceDevctl(char *name, int cmd, char *arg, unsigned int arglen,
     DeleteSema(semid);
     return result;
 }
+
+/* sceAddDrv: register an EE-side device driver.  16-byte request, and
+ * the failure value is -1 rather than the -11 the rest of the family
+ * uses. */
+int sceAddDrv(void *drv)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_t *sd;
+    int done;
+
+    sd = &_send_data;
+    _sceFsWaitS(15);
+    if (_fs_init == 0)
+        sceFsInit();
+    sd->fd = (int)drv;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    _send_data.semid = semid;
+    sd->dst = &result;
+    sd->size = 4;
+    if (sceSifCallRpc(&_cd, 15, 0, sd, 16, &_rcv_data_rpc, 4, 0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -1;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -1;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}

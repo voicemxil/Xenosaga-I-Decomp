@@ -2725,3 +2725,4 @@ GameModePause = 0x00244E28, 0x138; // Game.c
 nmlPacketAddPixelTestPacket = 0x00237030, 0x10C; // nmlPacket.c
 UnduCheckResultCheck = 0x00323638, 0xBC; // Undu.c
 sceDevctl = 0x00206E88, 0x238; // sceFs.c
+sceAddDrv = 0x00205D70, 0x120; // sceFs.c
