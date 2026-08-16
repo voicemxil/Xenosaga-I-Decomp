@@ -216,10 +216,12 @@ extern void SyncDCache(void *start, void *end);
 unsigned char *scePadGetDmaStr(int port, int slot)
 {
     unsigned char *p;
+    int sel;
 
     p = PadInfo[port][slot].dma;
     SyncDCache(p, p + 256);
-    return p + ((*(int *)(p + 88) < *(int *)(p + 216)) << 7);
+    sel = *(int *)(p + 88) < *(int *)(p + 216);
+    return p + (sel << 7);
 }
 
 /* Sample sequence number of the newest frame in the port's buffer. */

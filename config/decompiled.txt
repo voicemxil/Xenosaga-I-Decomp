@@ -2677,3 +2677,4 @@ MenuShopLine = 0x002A7B80, 0x21C; // Menu.c
 RSRC_searchFile = 0x0026D8B0, 0xAC; // RSRC.c
 eBattleWinMain2 = 0x00281DF8, 0x98; // eBattle.c
 sefFreeLineData = 0x002E3C10, 0x84; // sef.c
+scePadGetDmaStr = 0x0020BB98, 0x60; // scePad.c
