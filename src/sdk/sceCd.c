@@ -283,3 +283,90 @@ int sceCdStStat(void)
     mode = (int)&dum_mode;
     return sceCdStream(0, 0, 0, 6, mode);
 }
+
+/* ------------------------------------------------------------------
+ * sceCdSync: is the N-command channel still busy?
+ *
+ * mode 0 blocks (polling every 60us) and always returns 0; any other
+ * mode is a one-shot poll returning 1 while busy.  "Busy" is two
+ * separate tests -- the EE-side callback semaphore flag and the SIF RPC
+ * status of the N-command client block -- written as one `||` so both
+ * branches target the same loop top, which is what the original does.
+ *
+ * The blocking arm is a ROTATED loop (enter at the bottom test), so the
+ * two %hi address temps stay hoisted in s0/s1 across the whole loop.
+ * ------------------------------------------------------------------ */
+
+extern int _sceCd_c_cb_sem;
+extern int _sceCd_cd_ncmd;
+
+int sceCdSync(int mode)
+{
+    if (mode == 0) {
+        if (SCE_CD_debug > 0)
+            scePrintf("N cmd wait\n");
+        goto test;
+        do {
+            sceCdDelayThread(60);
+        test: ;
+        } while (_sceCd_c_cb_sem != 0
+                 || sceSifCheckStatRpc(&_sceCd_cd_ncmd) != 0);
+        return 0;
+    }
+    return _sceCd_c_cb_sem != 0 || sceSifCheckStatRpc(&_sceCd_cd_ncmd) != 0;
+}
+
+/* ------------------------------------------------------------------
+ * The S-command reply template.
+ *
+ * sceCdGetDiskType and sceCdGetError are the same nine-argument
+ * sceSifCallRpc call with a different command number, differing only in
+ * the prechk opcode, the RPC function number and the value returned on
+ * failure.  The reply lands in the fixed 4-byte buffer
+ * `_sceCd_scmdrdata`, which the IOP writes by DMA -- so it is read back
+ * through the uncached-accelerated alias (| 0x20000000), exactly like
+ * sceCdGetReadPos above.
+ *
+ * The read sits in the delay slot of the SignalSema call, i.e. the
+ * value is fetched BEFORE the semaphore is released; a local holds it
+ * across the call in s0.
+ * ------------------------------------------------------------------ */
+
+extern int _sceCd_scmd_prechk(int cmd);
+extern int _sceCd_scmdrdata;
+extern int _sceCd_scmd_semid;
+extern int SignalSema(int sid);
+
+int sceCdGetDiskType(void)
+{
+    int *p;
+    int r;
+
+    if (_sceCd_scmd_prechk(1) == 0)
+        return 0;
+    p = &_sceCd_scmdrdata;
+    if (sceSifCallRpc(&_sceCd_cd_scmd, 3, 0, 0, 0, p, 4, 0, 0) < 0) {
+        SignalSema(_sceCd_scmd_semid);
+        return 0;
+    }
+    r = *(volatile int *)((int)p | 0x20000000);
+    SignalSema(_sceCd_scmd_semid);
+    return r;
+}
+
+int sceCdGetError(void)
+{
+    int *p;
+    int r;
+
+    if (_sceCd_scmd_prechk(3) == 0)
+        return -1;
+    p = &_sceCd_scmdrdata;
+    if (sceSifCallRpc(&_sceCd_cd_scmd, 4, 0, 0, 0, p, 4, 0, 0) < 0) {
+        SignalSema(_sceCd_scmd_semid);
+        return -1;
+    }
+    r = *(volatile int *)((int)p | 0x20000000);
+    SignalSema(_sceCd_scmd_semid);
+    return r;
+}
