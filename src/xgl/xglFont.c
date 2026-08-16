@@ -254,17 +254,35 @@ void xglFontDebugMode(int nMode)
     }
 }
 
-/* TODO: near-miss (4 words). Structure/args/strings all line up; the
- * residue is addressing-mode CSE: the original loads FS.nLoadAddr via
- * the %hi reg with the %lo folded into the lw (4480($v1)) while ours
- * folds it onto the byte-pair's materialized &FS pseudo (0($v0)).
- * *(int *)&FS and pointer-staging variants did not split them.
- * Wave-3 findings: the built lui is IN-PLACE (lui $v0 / addiu $v0,$v0)
- * because CSE rewrites the lw's address to reuse the materialized &FS,
- * killing the hi reg early; orig keeps hi in $v1 across the calls.
- * Tried and failed: volatile read (address CSE unaffected), asm-renamed
- * alias symbol (extra lui, or sdata path), plain/opaque byte-pointer
- * staging (opaque asm passthrough perturbs the call-setup schedule). */
+/* TODO: near-miss (4 words, OPERANDS). Diagnosed exactly: the pass is
+ * gcc 2.96's CSE running with -fcse-skip-blocks (on at -O2). CSE records
+ * the byte pair's materialized &FS pseudo as equivalent to (symbol FS),
+ * then extends its path into BOTH arms of the `if (nBank == 0)` and
+ * rewrites each `lw %lo(FS)($hi)` to `lw 0($&FS)`, which kills the %hi
+ * register and collapses lui/addiu into one register.
+ *   PROOF: compiling this file with -fno-cse-skip-blocks emits the
+ *   original's exact shape -- lui $3,%hi(FS) / addiu $2,$3,%lo(FS) /
+ *   lbu 10($2) / lw $5,%lo(FS)($3) twice -- and xglFontLoad matches.
+ *   It is not usable as a per-file flag: it costs xglFontDebugHex and
+ *   xglFontGetProportionalSize, which match with the flag off.
+ *   -fno-gcse/-fno-rerun-cse-after-loop/-fno-thread-jumps/-fno-regmove/
+ *   -fno-force-mem/-fno-caller-saves/-fno-expensive-optimizations/
+ *   -fno-strict-aliasing/-fno-cse-follow-jumps all leave it unchanged;
+ *   only cse-skip-blocks moves it.
+ * C shapes swept and rejected (all still emit lw 0($v0)): named field
+ * vs *(int *)&FS vs ((int *)&FS)[0]; volatile read of the word;
+ * volatile struct pointer; LAUNDER/LAUNDER_V of the byte-base pointer;
+ * hoisting the word read into a temp (collapses to one lw); early-return
+ * arms; inverted test; switch; ternary (splits, but leaves one call);
+ * goto arms; do/while(0); two separate ifs; extra work in each arm;
+ * memory-clobber barrier before or inside the arms; byte base as
+ * (u_char*)&FS+10 (moves both to %hi(FS+10)).
+ * CLOSEST NON-MATCH: `extern int FSw[] __asm__("FS");` used for the word
+ * read does produce lw %lo(FS)($2) in both arms -- but as a second
+ * SYMBOL_REF it also emits a second lui, so 29 words instead of 28.
+ * What is still needed is one symbol whose (high FS) is shared while the
+ * (lo_sum) is NOT substituted -- i.e. the word read must reach CSE with
+ * an empty table while the %hi stays available. */
 /* Load one of the two font texture pages, returning the previous bank */
 int xglFontLoad(int nBank, int nNow)
 {
