@@ -1720,4 +1720,5 @@ if __name__ == "__main__":
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
          [t for t in (args.rotate_seq or "").split(',') if t],
-         scope(args.zero_quad_store), scope(args.fp_pair_hazard))
+         scope(args.zero_quad_store), scope(args.fp_pair_hazard),
+         [t for t in (args.short_loop_pad or "").split(',') if t])

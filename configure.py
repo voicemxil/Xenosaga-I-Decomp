@@ -212,7 +212,7 @@ FILE_FIX_FLAGS = {
     "sv.c": "",
     "xglPacket.c": "--rotate-seq xglPacketInterpolate:26:2,xglPacketInterpolate:26:5",
     "tskMenuPausePage.c": "--swap-adjacent PauseMenuPage0:12 --rotate PauseMenuPage0:21:3",
-    "xglCd.c": "--swap-adjacent xglCdReadCancel:41!",
+    "xglCd.c": "--swap-adjacent xglCdReadCancel:41! --short-loop-pad FileSelectListReload:3:5,FileSelectListReload:4:0,FileSelectListReload:5:0",
     "xglDma.c": "--barrier-return-store xglDmaMFIFOKick --swap-adjacent xglDmaMFIFOKick:14",
     "Font.c": "--branch-likely FontTestP1:2",
     "Drill.c": "--mtc1-nop DrillZMoveFunc:1,DrillPowerOffFunc:1",
