@@ -674,6 +674,7 @@ void TMENU_updateDefault(TMENU *t)
     int nCount;
     int c;
     short n;
+    short nPhase;
     short h58;
     signed char cur;
     signed char nNew;
@@ -826,11 +827,11 @@ void TMENU_updateDefault(TMENU *t)
             } else {
                 nB = 1;
             }
-            t->h30 = t->h30 + 1;
-            c = t->h30;
+            nPhase = t->h30 + 1;
             p = t->pComp[1];
             p->u14.n = (nB << 16) | (nA << 8);
-            if (c >= 8) {
+            t->h30 = nPhase;
+            if (nPhase >= 8) {
                 t->pComp[2]->n18 = 128;
                 t->pComp[3]->n18 = 128;
             }
