@@ -1330,3 +1330,28 @@ int sceSifGetOtherData(SifRpcClientData *cd, void *src, void *dest,
     }
     return 0;
 }
+
+/* _request_rdata: the server side's reply path.  A receive-data packet is
+ * taken from the round-robin pool, stamped with the requester's packet
+ * address and client data and the "receive data" opcode, and sent back
+ * with the request's own source/destination/size triple.
+ *
+ * TODO: near-miss, 15 of 24 words, SCHEDULING only -- the sibling call
+ * (`j isceSifSendCmd` after the epilogue) and all 24 instructions are
+ * right, but our build sinks the `pkt->pkt_addr = req->pkt_addr` load and
+ * store to the very end where the original issues them first and lets the
+ * 0x8000000c materialisation and the argument loads fill in around them.
+ * Swept without success: the three stores in both source orders, and
+ * reading both copied fields into locals before any store (the
+ * GameResourceAlloc lever) -- the post-reload scheduler produces the same
+ * order from all three shapes. */
+void _request_rdata(SifRpcPacket *req, SifRpcData *rd)
+{
+    SifRpcPacket *pkt = _sceRpcGetFPacket(rd);
+
+    pkt->pkt_addr = req->pkt_addr;
+    pkt->client = req->client;
+    pkt->sid = 0x8000000c;
+    isceSifSendCmd(0x80000008, pkt, 64, (void *)req->sid,
+                   (void *)req->ssize, (int)req->recv);
+}
