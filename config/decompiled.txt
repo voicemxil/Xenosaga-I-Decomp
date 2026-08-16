@@ -2669,3 +2669,5 @@ RSRC_create = 0x0026D478, 0x78; // RSRC.c
 GameResourcePreLoad = 0x0024C4F8, 0x9C; // Game.c
 scDestroyScript = 0x002E9D78, 0xD0; // sc.c
 SsdGetTimeCode = 0x002418F8, 0x7C; // ssd.c
+mceStorePwd = 0x0020F800, 0x84; // sceMc.c
+mceIntrReadFixAlign = 0x0020F048, 0x90; // sceMc.c

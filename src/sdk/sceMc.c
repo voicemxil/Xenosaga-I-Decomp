@@ -409,7 +409,7 @@ int sceMcDelete(int port, int slot, const char *name)
 
 extern int sifParamNext[48];        /* 0x00997440, 192-byte align scratch */
 extern void sceSifWriteBackDCache(void *addr, int size);
-extern void mceIntrReadFixAlign(void);
+extern void mceIntrReadFixAlign(void *arg);
 
 int sceMcRead(int fd, void *buf, int size)
 {
@@ -444,7 +444,7 @@ int sceMcRead(int fd, void *buf, int size)
  * destination pointer. */
 
 extern char currentDir[1024];       /* 0x00997500 */
-extern void mceStorePwd(void);
+extern void mceStorePwd(char *dst);
 
 int sceMcChdir(int port, int slot, const char *name, char *pwd)
 {
@@ -612,4 +612,62 @@ int sceMcRename(int port, int slot, const char *name, const char *newname)
     else
         SignalSema(semaidRegFunc);
     return rc;
+}
+
+/* ------------------------------------------------------------------
+ * The two RPC end functions.  Both run on the SIF interrupt after the
+ * IOP's reply DMA has landed, so both read the shared blocks through
+ * the uncached-accelerated alias.
+ * ------------------------------------------------------------------ */
+
+extern unsigned int strlen(const char *s);
+extern void *memcpy(void *dst, const void *src, int n);
+
+/* mceStorePwd: copy the current directory the IOP just filled in into
+ * the caller's buffer, clamped to 1023 characters.  strlen is called
+ * twice -- the clamp test and the length -- which is why the compare
+ * result feeds a branch-likely rather than a cmov, and the source
+ * pointer is re-formed for the memcpy instead of being held. */
+void mceStorePwd(char *dst)
+{
+    char *p;
+    int len;
+
+    if (dst == 0)
+        return;
+    p = (char *)((int)currentDir | 0x20000000);
+    if (strlen(p) < 1024)
+        len = strlen(p);
+    else
+        len = 1023;
+    memcpy(dst, (char *)((int)currentDir | 0x20000000), len);
+    dst[len] = 0;
+}
+
+/* mceIntrReadFixAlign: sceMcRead's DMA can only land on aligned words,
+ * so the head and tail bytes are staged in the scratch block and copied
+ * into the caller's buffer here.  Each loop re-loads its count from the
+ * block every iteration -- the bound lives in the loop header, not in a
+ * local above it. */
+void mceIntrReadFixAlign(void *arg)
+{
+    int *p;
+    unsigned char *d;
+    int i;
+
+    p = (int *)((int)arg | 0x20000000);
+    if (p[0] != 0) {
+        d = (unsigned char *)p[2];
+        for (i = 0; i < p[0]; i++) {
+            unsigned char *s = (unsigned char *)p + 16;
+            *d++ = s[i];
+        }
+    }
+    if (p[1] != 0) {
+        d = (unsigned char *)p[3];
+        for (i = 0; i < p[1]; i++) {
+            unsigned char *s = (unsigned char *)p + 80;
+            *d++ = s[i];
+        }
+    }
 }
