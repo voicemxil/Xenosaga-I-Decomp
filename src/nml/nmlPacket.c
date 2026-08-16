@@ -547,6 +547,19 @@ void nmlPacketAddScreen(void *pModel)
 }
 
 /* Queue a raw 64-bit (data, register) pair from a scratchpad entry */
+/* TODO: near-miss, 14/17 words. Semantics verified: the dsll32/dsrl32
+ * pair (the u_int -> u_long zero-extension of nReg) is present in both.
+ * The three missing words are all register COPIES the original never
+ * coalesced -- `move a3,a2` before incrementing n, `move v1,a2` before
+ * adding the table base, and `move a2,v1` before the first sd, so the two
+ * stores use two different registers holding the same address -- plus the
+ * original materialising &g_nGsEntry into $t1 for the write while reading
+ * the same variable gp-relative in one word. That combination looks like
+ * a build with register coalescing off for this function, not a source
+ * shape: swept direct-read/direct-write, read-direct/write-through-pointer,
+ * split n/nNext temporaries, both store orders, array-index vs pointer
+ * form, and a LAUNDER on the entry pointer; every one of them lands on
+ * 13 or 14 words, never 17. */
 void packet_gs_entry64(u_int nReg, u_long *pData)
 {
     int *pn;
