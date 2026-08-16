@@ -482,7 +482,7 @@ void set_ot(int nZ)
     u_char *q;
 
     p = (FSOT *)((u_char *)FS.aOT + ((nZ >> 22) & 0x3C));
-    nOfs = (u_short)(FS.pStream - (u_char *)FS.aOT);
+    nOfs = (u_short)((u_int)FS.pStream - (u_int)FS.aOT);
     q = (u_char *)FS.aOT + p->nTail;
     q[0] = (u_char)nOfs;
     q[1] = (u_char)(nOfs >> 8);
