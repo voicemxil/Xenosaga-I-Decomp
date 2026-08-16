@@ -1138,3 +1138,41 @@ int sefIsFinishEffect2(int nEftNo)
     }
     return nHits < 1U;
 }
+
+/* --- sefFreeSchedulerCf: release a scheduler slot -- stop its sound,
+ * destroy all 32 effect-data records, then clear the header. The loop
+ * counter is dead so gcc runs it down from 31.
+ *
+ * The four header stores come out in neither source nor address order;
+ * an exhaustive 24-way permutation search picked this one (nState,
+ * nUsed, nScriptA, nScriptB). Only two of the 24 orderings reproduce
+ * the original's sh/sh/sw/sh sequence. --- */
+extern void xglSoundEffectStopID(int nHandle, int a);
+
+void sefFreeSchedulerCf(void *pArg)
+{
+    SEF_SCHED_SLOT *p;
+    char *q;
+    int i;
+
+    p = (SEF_SCHED_SLOT *)pArg;
+    if (p == 0) {
+        return;
+    }
+    if (p->nUsed == 0) {
+        return;
+    }
+    if (p->nSoundHandle > 0) {
+        xglSoundEffectStopID(p->nSoundHandle, 0);
+        p->nSoundHandle = 0;
+    }
+    q = p->aEffect[0];
+    for (i = 0; i < 32; i++) {
+        sefDestroyEffectData((SEF_EFFDATA *)q);
+        q += 48;
+    }
+    p->nState = 0;
+    p->nUsed = 0;
+    p->nScriptA = -1;
+    p->nScriptB = -1;
+}
