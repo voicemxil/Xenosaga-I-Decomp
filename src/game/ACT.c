@@ -950,3 +950,47 @@ void ACT_DrawShadowBegin(void)
     D_00478EE0[18] = mscal | 0x80000;
     nmlModelDirectSend(1, D_00478EE0, 10);
 }
+
+/* The per-actor render environment block, at ACTOR + 0x920. */
+typedef struct {
+    float fFogDist[4];              /* 0x00 */
+    float fFogColour[4];            /* 0x10 */
+    float fLightDir[3][4];          /* 0x20 */
+    float fLightColour[3][4];       /* 0x50 */
+    int nFlags;                     /* 0x80 */
+    u8 pad84[0x1C];                 /* 0x84 */
+    float fTransparency;            /* 0xA0 */
+    u8 padA4[0x14];                 /* 0xA4 */
+    long nAlpha;                    /* 0xB8 */
+} DRAWENV;
+
+extern void nmlModelSetAlpha(long);
+extern void nmlModelSetFogCol(float *);
+extern void nmlModelSetFogDist(float, float, float, float);
+extern void nmlModelSetPointLight(int, float *, float *);
+
+/* Push the actor's stored render environment into the model renderer. */
+void ACT_setDrawEnv(ACTOR *a)
+{
+    DRAWENV *e = (DRAWENV *)((char *)a + 0x920);
+    int nFlags = e->nFlags;
+    int i;
+
+    nmlModelSetZwrite(nFlags & 2);
+    nmlModelSetStencil(nFlags & 4);
+    if ((nFlags & 1) != 0) {
+        nmlModelSetToumei(nFlags & 1);
+        nmlModelSetAlpha(e->nAlpha);
+        nmlModelSetTransparency(e->fTransparency);
+    }
+    if ((nFlags & 8) != 0) {
+        nmlModelSetFogCol(e->fFogColour);
+        nmlModelSetFogDist(e->fFogDist[0], e->fFogDist[1], e->fFogDist[2],
+                           e->fFogDist[3]);
+    }
+    if ((nFlags & 0x20) != 0) {
+        for (i = 0; i < 3; i++) {
+            nmlModelSetPointLight(i, e->fLightDir[i], e->fLightColour[i]);
+        }
+    }
+}
