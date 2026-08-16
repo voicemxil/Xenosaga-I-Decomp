@@ -81,7 +81,8 @@ extern int sceSifFreeSysMemory(int addr);
  * sceSifLoadElf below hard-codes to "all". */
 extern int _sceSifLoadElfPart(const char *path, const char *sec, void *dest,
                               int mode);
-extern int _sceSifLoadModuleBuffer(int a0, int a1, int a2, int a3);
+extern int _sceSifLoadModuleBuffer(int nAddr, int arglen, const void *args,
+                                   int *result);
 extern int _sceSifLoadModule(const char *path, int arglen, const void *args,
                              int *result, int mode);
 
@@ -99,7 +100,7 @@ int sceSifLoadModuleBuffer(int a0, int a1, int a2)
 {
     int local;
 
-    return _sceSifLoadModuleBuffer(a0, a1, a2, (int)&local);
+    return _sceSifLoadModuleBuffer(a0, a1, (const void *)a2, &local);
 }
 
 int sceSifLoadStartModule(int a0, int a1, int a2, int a3)
@@ -110,7 +111,7 @@ int sceSifLoadStartModule(int a0, int a1, int a2, int a3)
 
 int sceSifLoadStartModuleBuffer(int a0, int a1, int a2, int a3)
 {
-    return _sceSifLoadModuleBuffer(a0, a1, a2, a3);
+    return _sceSifLoadModuleBuffer(a0, a1, (const void *)a2, (int *)a3);
 }
 
 int sceSifLoadModule(int a0, int a1, int a2)
@@ -971,3 +972,51 @@ int _sceSifLoadModule(const char *pPath, int arglen, const void *args,
     *result = n;
     return r;
 }
+
+/* _sceSifLoadModuleBuffer: loadfile RPC opcode 6.  Instruction for
+ * instruction the same function as sceSifStopModule above with a
+ * different opcode -- the send block's first word is the buffer address
+ * instead of a module id. */
+int _sceSifLoadModuleBuffer(int nAddr, int nArgLen, const void *args,
+                            int *result)
+{
+    PIN(int arglen, "$17");
+    PIN(int addr, "$19");
+    int r, n;
+
+    arglen = nArgLen;
+    addr = nAddr;
+    if (_lf_bind(addr) < 0)
+        return (int)0xffff0000;
+    if (_lf_version() != 0)
+        return (int)0xfffefffc;
+
+    _senddata.arg = addr;
+    if (args != 0)
+    {
+        if (arglen >= 253)
+        {
+            memcpy(_senddata.sec, args, 252);
+            _senddata.pad = 252;
+        }
+        else
+        {
+            memcpy(_senddata.sec, args, arglen);
+            _senddata.pad = arglen;
+        }
+    }
+    else
+    {
+        _senddata.pad = 0;
+    }
+
+    if (sceSifCallRpc(&cd_00994A40, 6, 0, &_senddata, 512,
+                      &_senddata, 8, 0, 0) < 0)
+        return (int)0xfffeffff;
+
+    n = _senddata.pad;
+    r = _senddata.arg;
+    *result = n;
+    return r;
+}
+
