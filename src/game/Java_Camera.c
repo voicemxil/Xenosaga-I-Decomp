@@ -331,6 +331,50 @@ void Java_xeno_Camera_transCNS__Ljava_lang_Object_FFF(void *pEnv, JVAL *pArgs, J
     pObj->trans.cns.fZ = aPos[2];
 }
 
+/* TODO: near-miss - the original schedules the third argument's `lwc1` ahead of the
+   first two and interleaves the `ld` epilogue with the closing float stores; the
+   argument-order and declaration-order sweeps all keep the loads in source order. */
+void Java_xeno_Camera_viewCNS__Ljava_lang_Object_FFF(void *pEnv, JVAL *pArgs, JVAL *pRet)
+{
+    float fX;
+    float fY;
+    float fZ;
+    float aPos[3];
+    TCAMERA *pObj;
+    void *pTarget;
+    int nOfs;
+
+    pObj = (TCAMERA *)pArgs[0].p;
+    /* The Z component is read first -- that ordering is what puts the
+       three argument loads in the original's $f2/$f0/$f1 order; reading
+       them straight into aPos[] in index order costs three words. */
+    fZ = pArgs[4].f;
+    fX = pArgs[2].f;
+    fY = pArgs[3].f;
+    aPos[0] = fX;
+    aPos[1] = fY;
+    aPos[2] = fZ;
+    pTarget = pArgs[1].p;
+    xglStudioGetCamera2(pObj->nIndex);
+    pObj->nViewMode = 0x14;
+    /* A target that is neither a Chr nor a Unit leaves nTarget alone but
+       still binds and moves the camera -- the original falls through to
+       the stores below rather than returning. */
+    if (JNI_isInstanceOf(pTarget, classJava_xeno_Chr) == 1) {
+        nOfs = lookupClassField(classJava_xeno_Chr,
+            loadConstString(D_004DC178, -1), 0)->nOffset;
+        pObj->view.cns.nTarget = *(int *)((char *)pTarget + nOfs) + 0x10;
+    } else if (JNI_isInstanceOf(pTarget, classJava_xeno_Unit) == 1) {
+        nOfs = lookupClassField(classJava_xeno_Unit,
+            loadConstString(D_004DC178, -1), 0)->nOffset;
+        pObj->view.cns.nTarget = *(int *)((char *)pTarget + nOfs) + 0x10;
+    }
+    pObj->view.cns.nBind = 1;
+    pObj->view.cns.fX = aPos[0];
+    pObj->view.cns.fY = aPos[1];
+    pObj->view.cns.fZ = aPos[2];
+}
+
 /* Drive the camera's position from a spline */
 void Java_xeno_Camera_transSPL__aFI(void *pEnv, JVAL *pArgs, JVAL *pRet)
 {
