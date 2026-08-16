@@ -1,3 +1,15 @@
+#include "matching.h"
+
+/* EE semaphore parameter block (SDK ee_sema_t). */
+typedef struct t_ee_sema {
+    int   count;
+    int   max_count;
+    int   init_count;
+    int   wait_threads;
+    unsigned int attr;
+    unsigned int option;
+} ee_sema_t;
+
 /*
  * PS2 SDK kernel syscall stubs (the SDK's hand-written kernel.s table).
  * Each entry loads the syscall number into $v1 and traps; the C form
@@ -336,7 +348,7 @@ void RFU063(void)
     __asm__ __volatile__("li $3,63\n\tsyscall");
 }
 
-void CreateSema(void)
+int CreateSema(ee_sema_t *param)
 {
     __asm__ __volatile__("li $3,64\n\tsyscall");
 }
@@ -386,12 +398,12 @@ void RFU073(void)
     __asm__ __volatile__("li $3,73\n\tsyscall");
 }
 
-void SetOsdConfigParam(void)
+void SetOsdConfigParam(int *param)
 {
     __asm__ __volatile__("li $3,74\n\tsyscall");
 }
 
-void GetOsdConfigParam(void)
+void GetOsdConfigParam(int *param)
 {
     __asm__ __volatile__("li $3,75\n\tsyscall");
 }
@@ -696,7 +708,7 @@ void _InitTLB(void)
     __asm__ __volatile__("li $3,130\n\tsyscall");
 }
 
-void setup(void)
+void setup(int a, int b)
 {
     __asm__ __volatile__("li $3,116\n\tsyscall");
 }
@@ -756,7 +768,7 @@ void ExpandScratchPad(void)
     __asm__ __volatile__("li $3,89\n\tsyscall");
 }
 
-void FindAddress(void)
+void *FindAddress(void *fn)
 {
     __asm__ __volatile__("li $3,131\n\tsyscall");
 }
@@ -800,4 +812,69 @@ int ExecPS2(void *entry, void *gp, int argc, char **argv)
 {
     TerminateLibrary();
     return _ExecPS2(entry, gp, argc, argv);
+}
+
+/* Boot-time library setup.
+ *
+ * supplement_crt0 creates the two counting semaphores the C runtime needs
+ * (the general one and the exception-handler one) and stashes their ids.
+ * PatchIsNeeded asks the OSD whether the console needs the "spu2 reverb"
+ * era patch by writing a probe value into the config word and reading back
+ * whether the field stuck. GetSystemCallTableEntry hands the kernel its own
+ * syscall table pointer and then walks it to find this build's entry.
+ */
+
+extern void supplement_crt0(void);
+extern void *GetSystemCallTableEntry(void);
+extern void InitAlarm(void);
+extern void InitThread(void);
+extern void InitExecPS2(void);
+extern void InitTLBFunctions(void);
+extern void kFindAddress(void);
+extern int SysEntry_004AA358[];
+extern int __sce_sema_id;
+extern int __sce_eh_sema_id;
+
+void supplement_crt0(void)
+{
+    ee_sema_t sema;
+    ee_sema_t ehsema;
+
+    ehsema.init_count = 1;
+    sema.max_count = 1;
+    sema.init_count = 1;
+    ehsema.max_count = 1;
+    __sce_sema_id = CreateSema(&sema);
+    __sce_eh_sema_id = CreateSema(&ehsema);
+}
+
+void *GetSystemCallTableEntry(void)
+{
+    setup(SysEntry_004AA358[0], SysEntry_004AA358[1]);
+    return (char *)FindAddress(kFindAddress) - 524;
+}
+
+int PatchIsNeeded(void)
+{
+    int cfg;
+    int probe;
+    PIN(int c, "$3");
+
+    GetOsdConfigParam(&cfg);
+    PASSTHRU(c, cfg);
+    probe = (c & 0xFFFF1FFF) | 0x2000;
+    SetOsdConfigParam(&probe);
+    GetOsdConfigParam(&probe);
+    SetOsdConfigParam(&cfg);
+    return (((unsigned int)probe >> 13) & 7) == 0;
+}
+
+void _InitSys(void)
+{
+    supplement_crt0();
+    GetSystemCallTableEntry();
+    InitAlarm();
+    InitThread();
+    InitExecPS2();
+    InitTLBFunctions();
 }
