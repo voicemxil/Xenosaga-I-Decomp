@@ -2611,3 +2611,4 @@ MenuCfTaikiPop = 0x002752E0, 0x3C; // Menu.c
 sceCdGetDiskType = 0x0020DF28, 0x98; // sceCd.c
 sceCdGetError = 0x0020DFC0, 0x98; // sceCd.c
 subTreeLineDraw_type_1 = 0x002BBFB8, 0x64; // sub.c
+MenuShopSortSet = 0x002A36D0, 0x1C8; // Menu.c

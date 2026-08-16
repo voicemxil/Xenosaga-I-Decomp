@@ -1007,8 +1007,8 @@ void MenuCfTaikiPush(void)
     int *src;
     int *dst;
     int i;
-    int v;
-    int cont;
+    PIN(int v, "$2");
+    PIN(int cont, "$3");
 
     base = sRender_0;
     LAUNDER(base);
@@ -1022,8 +1022,8 @@ void MenuCfTaikiPush(void)
         LAUNDER(cont);
         *src = 0;
         *dst = v;
-        dst++;
         src++;
+        dst++;
     } while (cont != 0);
 }
 
@@ -3711,7 +3711,77 @@ typedef struct {
 } SHOPWINSP;
 extern SHOPWORK *MenuShopWork;
 extern SHOPWINSP *MenuShopWinSP;
-extern void MenuShopSortSet(int, int, int, int);
+/* Shop sort-list source table: one entry per sort id -- the id list, the
+   category tag folded into the high half of each sort word, and the cap. */
+typedef struct {
+    short *pList;
+    int nCat;
+    int nMax;
+} SHOPSORTENT;
+typedef struct {
+    short list[9][20];         /* 0x000: nine 20-entry shop stock id lists */
+    unsigned short agws[4];    /* 0x168: AGWS units offered for trade-in */
+} SHOPDATA;
+extern SHOPDATA ShopData;
+
+/* Rebuild sort row nRow from shop id list nType, tagging each id with its
+   category; sort id 8 is the scenario-gated special list. */
+void MenuShopSortSet(int nRow, int nType, int arg2, int arg3)
+{
+    int *pOut;
+
+    pOut = MenuSortAddrGet(nRow);
+    {
+        SHOPSORTENT tbl[11] = {
+            { ShopData.list[0], 1, 20 },
+            { ShopData.list[1], 3, 20 },
+            { ShopData.list[2], 5, 20 },
+            { ShopData.list[3], 4, 20 },
+            { ShopData.list[4], 3, 20 },
+            { ShopData.list[5], 5, 20 },
+            { ShopData.list[6], 4, 20 },
+            { (short *)ShopData.agws, 7, 4 },
+            { 0, 0, 0 },
+            { ShopData.list[7], 11, 20 },
+            { ShopData.list[8], 12, 20 }
+        };
+        short *p;
+        int n;
+        int v;
+
+        nType = (nType == 0x12) ? 9 : nType;
+        nType = (nType == 0x13) ? 10 : nType;
+        if (nType == 8) {
+            if (MenuScenarioNo >= 115) {
+                *pOut = 0x20035;
+                pOut++;
+                *pOut = 0x20036;
+                pOut++;
+            }
+            if (MenuScenarioNo >= 301) {
+                *pOut = 0x20037;
+                pOut++;
+            }
+        } else {
+            n = 0;
+            if (tbl[nType].nMax > 0) {
+                p = tbl[nType].pList;
+                do {
+                    v = *p;
+                    p++;
+                    if (v == 0) {
+                        break;
+                    }
+                    n++;
+                    *pOut = (v & 0xFFFF) + (tbl[nType].nCat << 16);
+                    pOut++;
+                } while (n < tbl[nType].nMax);
+            }
+        }
+        *pOut = 0;
+    }
+}
+
 extern void MenuShopListColorChange(int, int);
 extern void WindowSPSelect(void *, int);
 extern char D_004C7858[];
@@ -6987,12 +7057,6 @@ char *MenuFileNameGet(short nId, int nType)
 
 /* The shop's global work block. The AGWS trade-in list is four unsigned
    short ids at 0x168; a zero entry is an empty slot. */
-typedef struct {
-    char pad000[0x168];
-    unsigned short agws[4];    /* 0x168: AGWS units offered for trade-in */
-} SHOPDATA;
-
-extern SHOPDATA ShopData;
 extern int PartyTakeAgwsCheck(int nId);
 
 /* Drop any AGWS the party already owns from the trade-in list, then close
