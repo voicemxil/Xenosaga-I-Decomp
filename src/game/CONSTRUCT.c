@@ -87,3 +87,84 @@ void CONSTRUCT_FADE_CONTROL(FADECTRL *p)
     p->a2C = 0;
     p->a30 = 0;
 }
+
+/* Quadword zero-fill of the global fog/point-light blocks: the original
+   clears them with `sq zero`, which is what a mode(TI) store compiles to. */
+typedef int MODELSYS_QUAD __attribute__((mode(TI)));
+
+typedef struct {
+    int a00;
+    int a04;
+    int a08;
+    int a0C;
+} SUBWINDOW;
+
+SUBWINDOW g_aSubWindow;
+
+/* Small-data model-system flags, in memory order (two slots in the run
+   belong to other translation units). */
+int s_nModel;
+int s_nBlocks;
+int s_nDirect;
+int s_nBlocksAlpha;
+int s_nBlocksAlphaLast;
+int s_nAnotherStudio;
+int s_nUseStealth;
+int s_nUseGnosys;
+int s_nUseZwrite;
+int s_nMapAlphaEntry;
+int s_nEffectWrite;
+int s_nMapLast;
+int s_nPause;
+int s_nMenu;
+int s_nFrameLockOff;
+int s_nMainCameraWarp;
+int s_nRenderCancel;
+int s_nRenderCancelOld;
+
+MODELSYS_QUAD s_inGblPointC[4];
+MODELSYS_QUAD s_inGblFogCol;
+MODELSYS_QUAD s_inGblFogPara;
+
+/* Resets every model-system global to its power-on state.
+   PARKED (34 diffs, right length).  Blocked on the SAME TI-mode
+   zero-store wall documented at Java_xeno_Chr_setPointLightReset__ in
+   Java_Chr.c: the original stores $0 directly with `sq zero,0(a0)`, and
+   gcc 2.96 always materialises the zero into a register first
+   (`por a1,zero,zero`).  That extra def also lets the scheduler
+   interleave the six quadword stores into the run of small-data `sw`s,
+   which is where the rest of the diff comes from.  This function is a
+   second consumer for the requested fix_cc_asm.py peephole (rewrite a
+   `por $X,$0,$0` feeding only `sq` into a nop and retarget the stores to
+   $0) -- worth 160 bytes here on top of the 132 in Java_Chr.c. */
+void CONSTRUCT_MODELSYSTEM(void)
+{
+    g_aSubWindow.a00 = 2;
+    g_aSubWindow.a0C = 0;
+    s_nEffectWrite = 1;
+    s_nModel = 0;
+    s_nBlocks = 1;
+    s_nDirect = 0;
+    s_nBlocksAlpha = 0;
+    s_nBlocksAlphaLast = 0;
+    s_nAnotherStudio = 0;
+    s_nUseStealth = 0;
+    s_nUseGnosys = 0;
+    s_nUseZwrite = 0;
+    s_nMapAlphaEntry = 0;
+    s_nMapLast = 0;
+    s_nMainCameraWarp = 0;
+    s_nRenderCancel = 0;
+    s_nRenderCancelOld = 0;
+    s_nFrameLockOff = 0;
+    s_nPause = 0;
+    s_nMenu = 0;
+    g_aSubWindow.a04 = 0;
+    g_aSubWindow.a08 = 0;
+    s_inGblPointC[0] = 0;
+    s_inGblPointC[1] = 0;
+    s_inGblPointC[2] = 0;
+    s_inGblPointC[3] = 0;
+    s_inGblFogCol = 0;
+    s_inGblFogPara = 0;
+}
