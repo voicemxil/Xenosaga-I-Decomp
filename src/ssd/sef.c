@@ -2374,3 +2374,130 @@ void sefLerpIVector2(SEF_KEY *pTbl, SEF_LERP *pKey)
 store:
     pDst[3] = -n;
 }
+
+/* --- sefPushEffect / sefPopEffect: save and restore the whole 128-slot
+ * scheduler across a scene change.  Only a narrow slice of each 0xAB0
+ * slot survives -- three qwords of transform at +0x80..+0xA0 and eight
+ * scalars -- packed into an 80-byte record in _savePrm. --- */
+
+typedef int SEF_PUSH128 __attribute__((mode(TI)));
+
+typedef struct
+{
+    char         pad0000[0x80];
+    SEF_PUSH128  q0080;      /* 0x080 */
+    SEF_PUSH128  q0090;
+    SEF_PUSH128  q00A0;
+    char         pad00B0[0x6B0 - 0xB0];
+    int          nUsed;      /* 0x6B0 */
+    int          pad06B4;
+    int          f06B8;      /* 0x6B8 */
+    int          f06BC;
+    int          f06C0;
+    int          f06C4;
+    int          f06C8;
+    char         pad06CC[0xA78 - 0x6CC];
+    unsigned short nActorID; /* 0xA78 */
+    char         pad0A7A[0xA8C - 0xA7A];
+    int          nFlags;     /* 0xA8C */
+    char         pad0A90[0xA9A - 0xA90];
+    unsigned char f0A9A;     /* 0xA9A */
+    char         pad0A9B[0xAB0 - 0xA9B];
+} SEF_PUSH_SLOT;             /* 0xAB0 */
+
+typedef struct
+{
+    SEF_PUSH128  q0000;      /* 0x00 */
+    SEF_PUSH128  q0010;
+    SEF_PUSH128  q0020;
+    int          f0030;      /* 0x30 */
+    int          f0034;
+    int          f0038;
+    int          f003C;
+    int          f0040;
+    int          f0044;
+    unsigned short f0048;
+    unsigned char f004A;
+    char         pad004B[0x50 - 0x4B];
+} SEF_SAVE_REC;              /* 0x50 */
+
+extern SEF_PUSH_SLOT _pushSlots[] __asm__("_scheduler");
+extern SEF_SAVE_REC _savePrm[];
+
+/* Two views of one record, twice over: the qword block moves as a byte
+ * offset added to three hoisted bases at +0x80/+0x90/+0xA0 (and +0/+16
+ * /+32 on the destination), while the scalar tail moves through walking
+ * pointers biased into the middle of each record, so its first fields
+ * are reached at negative offsets. */
+typedef struct
+{
+    int            f0000;      /* slot + 0x6C0 */
+    int            f0004;
+    int            f0008;
+    char           pad000C[0x3B8 - 0x0C];
+    unsigned short f03B8;      /* slot + 0xA78 */
+    char           pad03BA[0x3CC - 0x3BA];
+    int            f03CC;      /* slot + 0xA8C */
+    char           pad03D0[0x3DA - 0x3D0];
+    unsigned char  f03DA;      /* slot + 0xA9A */
+    char           pad03DB[0xAB0 - 0x3DB];
+} SEF_PUSH_SRCV;
+
+typedef struct
+{
+    int            f0000;      /* record + 0x40 */
+    int            f0004;
+    unsigned short f0008;
+    unsigned char  f000A;
+    char           pad000B[0x50 - 0x0B];
+} SEF_PUSH_DSTV;
+
+/* SWEPT, 50 words vs retail's 64. The scalar tail comes out exactly
+ * right in this shape -- two walking pointers biased into the middle of
+ * each record, reading and writing at negative offsets, which is the
+ * whole point of the views above. What does NOT come out is the qword
+ * block: retail keeps SIX hoisted base registers (dst+0/+16/+32 and
+ * src+0x80/+0x90/+0xA0) and adds a plain byte offset to each, where gcc
+ * strength-reduces all three columns into one walking pointer with
+ * 128/144/160 offsets (50 words). Giving each column its own named
+ * `char *` base -- the documented offset-first lever -- keeps all six
+ * bases but then overruns the register file and spills (76 words). The
+ * missing ingredient is whatever makes gcc keep six bases live AND
+ * still fit; nothing tried reaches it. */
+void sefPushEffect(void)
+{
+    char *pS;
+    char *pD;
+    SEF_PUSH_SRCV *p;
+    SEF_PUSH_DSTV *q;
+    int nS;
+    int nD;
+    int i;
+
+    sefMemZero(_savePrm, 10240);
+    pD = (char *)_savePrm;
+    pS = (char *)_pushSlots;
+    p = (SEF_PUSH_SRCV *)(pS + 0x6C0);
+    q = (SEF_PUSH_DSTV *)(pD + 0x40);
+    nS = 0;
+    nD = 0;
+    for (i = 127; i >= 0; i--) {
+        if (((int *)p)[-4] != 0) {
+            *(SEF_PUSH128 *)(nD + pD) = *(SEF_PUSH128 *)(nS + (pS + 0x80));
+            *(SEF_PUSH128 *)(nD + (pD + 16)) = *(SEF_PUSH128 *)(nS + (pS + 0x90));
+            *(SEF_PUSH128 *)(nD + (pD + 32)) = *(SEF_PUSH128 *)(nS + (pS + 0xA0));
+            ((int *)q)[-4] = ((int *)p)[-2];
+            ((int *)q)[-3] = ((int *)p)[-1];
+            ((int *)q)[-2] = p->f0000;
+            ((int *)q)[-1] = p->f0004;
+            q->f0000 = p->f0008;
+            q->f0004 = p->f03CC;
+            q->f0008 = p->f03B8;
+            q->f000A = p->f03DA;
+        }
+        q = (SEF_PUSH_DSTV *)((char *)q + 0x50);
+        p = (SEF_PUSH_SRCV *)((char *)p + 0xAB0);
+        nD += 0x50;
+        nS += 0xAB0;
+    }
+}
