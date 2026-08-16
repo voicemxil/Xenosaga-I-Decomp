@@ -220,6 +220,12 @@ do_close:
 done:
     PASSTHRU(pEnd, &LW);
     pEnd->nStatus = 0;
+    /* The epilogue restores $s1 before $s0 in the original -- the mirror
+     * of its own prologue save order -- while gcc emits the two `ld`s in
+     * increasing register number.  Pure scheduling:
+     * --swap-adjacent xglCdReadCancel:41! (forced, because swap_ok will
+     * not reorder two memory ops it cannot prove disjoint; these are two
+     * loads from distinct stack slots). */
 }
 
 /* Return whether a read request is still in progress */

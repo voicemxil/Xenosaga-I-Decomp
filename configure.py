@@ -186,6 +186,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "xglCd.c": "--swap-adjacent xglCdReadCancel:41!",
     "xglDma.c": "--barrier-return-store xglDmaMFIFOKick --swap-adjacent xglDmaMFIFOKick:14",
     "Font.c": "--branch-likely FontTestP1:2",
     "Drill.c": "--mtc1-nop DrillZMoveFunc:1,DrillPowerOffFunc:1",
