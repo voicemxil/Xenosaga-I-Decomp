@@ -319,6 +319,13 @@ void subEtherTreeRightMain(ETRIGHT *p)
         bFlags = p->bFlags;
         if ((unsigned char)(bFlags & 1) != 0) {
             switch (p->nMode) {
+            /* The idle case must be spelled out. With only cases 1..3 the
+               node list has three entries and balance_case_nodes splits at
+               the middle, rooting the decision tree at 2; a fourth node
+               roots it at 1, which is the `beq 1` / `slti 2` / `beq 2` /
+               `beql 3` chain the original has. */
+            case 0:
+                break;
             case 1:
                 n = p->nWidth + 8;
                 p->nWidth = n;
@@ -337,8 +344,8 @@ void subEtherTreeRightMain(ETRIGHT *p)
                     break;
                 }
                 p->nWidth = 0;
-                p->bFlags = bFlags & 0xFE;
                 p->nMode = 0;
+                p->bFlags = bFlags & 0xFE;
                 break;
             }
         }
