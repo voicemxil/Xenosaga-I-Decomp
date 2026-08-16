@@ -50,3 +50,39 @@ void WindowDXSet(void *pWin)
     *(s8 *)(p + 0x2E) = -128;
     *(s8 *)(p + 0x2C) = -128;
 }
+
+/* Drive the window's lifecycle state from an outside request.
+ *
+ * Only two requests are filtered: an open (1) is refused unless the window
+ * is idle (-1/0) or on its way out (4/5), and a close (4) is only accepted
+ * from the fully-open state (3). Everything else is written straight
+ * through.
+ *
+ * The idle test is written as the wrap-around byte range the original
+ * emits: for the unsigned byte, (u8)(nState + 1) < 2 is exactly
+ * nState == -1 || nState == 0, and it is the form 2.96 produces here. */
+void WindowDXFlagChange(void *pWin, int nFlag)
+{
+    char *p = (char *)pWin;
+    u8 nState;
+
+    switch (nFlag) {
+    case 1:
+        nState = *(u8 *)(p + 0x10);
+        if ((u8)(nState + 1) < 2 || (s8)nState == 4 || (s8)nState == 5) {
+            *(s8 *)(p + 0x10) = 1;
+        }
+        break;
+    case 3:
+        *(s8 *)(p + 0x10) = 3;
+        break;
+    case 4:
+        if (*(s8 *)(p + 0x10) == 3) {
+            *(s8 *)(p + 0x10) = 4;
+        }
+        break;
+    default:
+        *(s8 *)(p + 0x10) = nFlag;
+        break;
+    }
+}

@@ -11,7 +11,9 @@ typedef struct {
 } TCAMERA_XGL_CAMERA;
 
 typedef struct {
-    char data[0x12C0];
+    char pad000[0xC];
+    int aChannel[4];           /* 0x00C: the four animation channel modes */
+    char pad01C[0x12C0 - 0x1C];
 } TCAMERA_WORK;
 
 extern TCAMERA_WORK tcamera[];
@@ -96,4 +98,31 @@ void TCAMERA_fovSPL(TCAMERA_XGL_CAMERA *pCamera, void *pSpline)
 /* This hook was retained by the camera API but is empty in the shipped game. */
 void TCAMERA_setFCurve(void)
 {
+}
+
+/* 128-bit quantities move as a unit through lq/sq on the EE. */
+typedef int TCAMERA_QUAD __attribute__((mode(TI)));
+
+/* The interest point the MPack (pre-baked motion) camera path aims at. */
+extern TCAMERA_QUAD mpack_interest;
+
+void TCAMERA_mpackGetInterest(TCAMERA_QUAD *pInterest)
+{
+    *pInterest = mpack_interest;
+}
+
+/* Reset every timeline camera's four animation channels to mode 16. */
+void TCAMERA_init(void)
+{
+    TCAMERA_WORK *pCam;
+    int i;
+    int j;
+
+    pCam = tcamera;
+    for (i = 0; i < 8; i++) {
+        for (j = 3; j >= 0; j--) {
+            pCam->aChannel[j] = 16;
+        }
+        pCam++;
+    }
 }
