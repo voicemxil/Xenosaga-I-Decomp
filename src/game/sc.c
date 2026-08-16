@@ -885,11 +885,11 @@ void scInitScript(void)
     _cmdPut = 0;
     slot = 0;
     do {
-        _scriptWork[slot].dataIdx = -1;
-        _scriptWork[slot].field446 = 0;
-        _scriptWork[slot].pTable = 0;
-        _scriptWork[slot].nTask = 0;
         _scriptWork[slot].field44A = 0;
+        _scriptWork[slot].nTask = 0;
+        _scriptWork[slot].pTable = 0;
+        _scriptWork[slot].field446 = 0;
+        _scriptWork[slot].dataIdx = -1;
         t = (SCTASK_ENT *)((char *)_scriptWork + (slot << 10) + slot * 80);
         i = 0;
         do {
@@ -933,4 +933,38 @@ void scExecScript(void)
         }
         slot = slot + 1;
     } while (slot < 16);
+}
+
+extern void func_A32FA8(char *pText);
+extern char D_004DBB48[];
+extern char D_004CC898[];
+
+/* MOVIE: the operand is an inline movie-name string; the cursor steps over
+ * it exactly as scPRINTScript does. Outside an event the name is echoed
+ * through the debug text hook. */
+int scMOVIEScript(SCOBJ *o)
+{
+    char buf[256];
+    int *cmd = &o->cmdBuf[0];
+    char *s = 0;
+    int *p0 = (int *)((int)cmd + o->field54 * 4);
+    int adr = *p0;
+    int *slot;
+    int len;
+    int step;
+    int nEvent;
+    if (adr != 0) {
+        s = (char *)D_0041E7D0[_nowScript].pTable + adr * 2;
+    }
+    len = strlen(s);
+    nEvent = _nowEvent;
+    step = (len & 1) ? len + 1 : len + 2;
+    step = step / 2;
+    slot = (int *)((int)cmd + o->field54 * 4);
+    *slot = *slot + step;
+    if (nEvent == 0) {
+        sprintf(buf, D_004DBB48, D_004CC898, s);
+        func_A32FA8(buf);
+    }
+    return 1;
 }
