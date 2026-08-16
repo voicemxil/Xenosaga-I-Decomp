@@ -96,22 +96,19 @@ int FileCheckSumCheck(void *data)
    goto form (no NOTE_INSN_LOOP_BEG) is the only shape that reproduces it. */
 void FileObjectJpegDecChange(int number)
 {
-    int i = 0;
-    int off = 0;
+    int i;
+    int off;
     char *p;
 
-loop:
-    if (i >= 5) {
-        return;
+    for (i = 0, off = 0; i < 5; i++) {
+        p = (char *)(off + (int)FileJpegDec);
+        off = 0xE100 + off;
+        if (p[1] == number) {
+            p[1] = -1;
+            FileJpegDecode(number);
+            break;
+        }
     }
-    i++;
-    p = (char *)(off + (int)FileJpegDec);
-    off = 0xE100 + off;
-    if (p[1] != number) {
-        goto loop;
-    }
-    p[1] = -1;
-    FileJpegDecode(number);
 }
 
 void FileObjectJpegSet(void)

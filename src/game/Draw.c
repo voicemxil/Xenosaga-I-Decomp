@@ -49,6 +49,7 @@ void DrawBackReset(void *work)
 {
     DRAW_BACK_PACKET *packet = (DRAW_BACK_PACKET *)work;
     draw_u64 *direct = packet->direct;
+    unsigned int f = sRender.nFrontFbp;
 
     direct[0] = 0x1000000000008003UL;
     direct[1] = 0xE;
@@ -56,7 +57,7 @@ void DrawBackReset(void *work)
     direct[3] = 0x3F;
     direct[4] = 0x31000000;
     direct[5] = 0x4E;
-    direct[6] = sRender.nFrontFbp | 0x80000;
+    direct[6] = f | 0x80000;
     direct[7] = 0x4C;
     sceVif1PkAddDirectDataN(packet->packet, direct, 4);
 }
@@ -66,6 +67,7 @@ void DrawBackSet(void *work)
 {
     DRAW_BACK_PACKET *packet = (DRAW_BACK_PACKET *)work;
     draw_u64 *direct = packet->direct;
+    unsigned int f = sRender.nDrawFbp;
 
     direct[0] = 0x1000000000008003UL;
     direct[1] = 0xE;
@@ -73,7 +75,7 @@ void DrawBackSet(void *work)
     direct[3] = 0x3F;
     direct[4] = 0x100000000UL;
     direct[5] = 0x4E;
-    direct[6] = sRender.nDrawFbp | 0x80000;
+    direct[6] = f | 0x80000;
     direct[7] = 0x4C;
     sceVif1PkAddDirectDataN(packet->packet, direct, 4);
 }
