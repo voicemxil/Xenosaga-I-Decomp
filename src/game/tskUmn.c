@@ -43,6 +43,10 @@ typedef struct {
             char pad[2];
             signed char nSel;           /* 0x52: analysed monster id */
         } db;
+        struct {
+            signed char nLo;            /* 0x50 */
+            signed char nHi;            /* 0x51 */
+        } ex;
     } u;
     char pad54[0x5C - 0x54];
     signed char nMailSel;               /* 0x5C: mail hint-slot cursor */
@@ -80,7 +84,7 @@ typedef struct {
 
 extern void WindowDXSet(WINDOWDX *pWin);
 extern void WindowDXMain(WINDOWDX *pWin);
-extern void MoveSlide(short *pPos, short *pTarget, float fSpeed);
+extern void MoveSlide(void *pPos, void *pTarget, float fSpeed);
 extern void MenuInfoWindow(void);
 
 /* --- eMessage work hung off a Pas window (header at +0x0C) --- */
@@ -886,5 +890,151 @@ void tskUmnDataBaseAnalisis(TSK_ANALISIS *pTask, void *pParam)
     }
     if (w->bOpen != 0) {
         eBattleWinMain3();
+    }
+}
+
+/* --- plugin screen: the "Num" counter window over the plugin list --- */
+
+typedef struct {
+    char pad00[4];
+    unsigned short nX;                  /* 0x04 */
+    unsigned short nY;                  /* 0x06 */
+    int nColor;                         /* 0x08 */
+    char pad0C[0x20 - 0x0C];
+} EXTAGFONT;
+
+typedef struct {
+    unsigned short nX;                  /* 0x00 */
+    unsigned short nY;                  /* 0x02 */
+    int nColor;                         /* 0x04 */
+    short nW;                           /* 0x08 */
+    short nH;                           /* 0x0A */
+    char pad0C[0x70 - 0x0C];
+} EXRIBBON;
+
+typedef struct {
+    short nX;                           /* 0x00 */
+    short nY;                           /* 0x02 */
+    int nColor;                         /* 0x04 */
+    char pad08[6];
+    unsigned char nDigits;              /* 0x0E */
+    unsigned char nAlign;               /* 0x0F */
+    char pad10[4];
+    int nValue;                         /* 0x14 */
+    char pad18[0x84 - 0x18];
+} EXNUMBER;
+
+typedef struct {
+    unsigned char nMode;                /* 0x000 */
+    unsigned char bReady;               /* 0x001 */
+    char pad002[2];
+    short nW;                           /* 0x004 */
+    short nH;                           /* 0x006 */
+    int nColor;                         /* 0x008 */
+    unsigned short nX;                  /* 0x00C */
+    unsigned short nY;                  /* 0x00E */
+    EXTAGFONT tag;                      /* 0x010 */
+    EXRIBBON rib;                       /* 0x030 */
+    EXNUMBER num;                       /* 0x0A0 */
+} UMN_EXWIN;
+
+extern void eRibbonSet(EXRIBBON *pRib, int nId, int nX, int nY);
+extern void eRibbonMain(EXRIBBON *pRib, int nColor);
+extern void eTagFontSet(EXTAGFONT *pTag, char *pText);
+extern void eTagFontMain(EXTAGFONT *pTag, int nColor);
+extern void eNumberSet(EXNUMBER *pNum, int nValue);
+extern void eNumberMain(EXNUMBER *pNum, int nY, int nAlign);
+
+/* TODO: PARKED at 107/134 words (136 orig), all inside the per-frame
+ * loop. Behaviour, constants, struct offsets and the loop SHAPE are
+ * recovered: `for (i = 0; i < 1; i++)` reproduces the reversed counter
+ * (s6 from 0, `bgez` at the latch) alongside a separate byte-offset biv,
+ * and computing the element pointer as `(T *)((char *)w + n)` rather
+ * than `w[i]` is what turns the latch into `addu s0,s4,s5` -- that edit
+ * alone moved the built length from 520 to 536 bytes.
+ *
+ * What is left is giv GROUPING. The original keeps FOUR address bases
+ * live across the loop (s0 = w+n, s1 = w+24+n, s2 = w+144+n,
+ * s3 = w+52+n) and, because of the resulting pressure, does NOT hoist
+ * the loop-invariant constants 3 and 2 into callee-saved registers. Our
+ * build's combine_givs merges all four into one base plus offsets and
+ * then has registers spare for the two constants, so it saves s0..s7
+ * where the original saves s0..s8. The groups do not line up with the
+ * sub-objects (s2 covers every short in all three, s3 covers three ints
+ * spread across two), so they are not reachable by introducing
+ * sub-object pointers -- swept: `w[i]` indexing, a walking `p++`,
+ * per-sub-object pointers, and hoisting the UmnWork reads.
+ *
+ * Slides the plugin-count ribbon in while the plugin list is on pages
+ * 16/17 and parks it off the left edge otherwise; the counter itself is
+ * the packed lo/hi pair UmnWork keeps for the screen, plus one. */
+void tskUmnPluginExWin(TSK_TASK *pTask, UMN_EXWIN *w)
+{
+    /* The retail overlay reserves 24 bytes here; a <=8-byte static
+     * would be routed through $gp by -G8, which an overlay cannot use
+     * to reach its own data. */
+    static char msg00[24] = "\001Num";
+    short nTarget;
+
+    if (UmnWork.nScene != 4) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nW = 528;
+        w->nH = 32;
+        w->nColor = 0x00FFFFF0;
+        w->nX = -272;
+        w->nY = 48;
+        eRibbonSet(&w->rib, 3, -272, 48);
+        w->rib.nW = 256;
+        w->rib.nH = 24;
+        eTagFontSet(&w->tag, msg00);
+        eNumberSet(&w->num, 0);
+        w->nMode = 0;
+        w->bReady = 0;
+        break;
+    case 2: {
+        int i;
+        int n;
+        int nPage = UmnWork.nPage;
+
+        nTarget = -272;
+        if (nPage < 18) {
+            if (nPage >= 16) {
+                nTarget = 0;
+            }
+        }
+        n = 0;
+        for (i = 0; i < 1; i++) {
+            UMN_EXWIN *p = (UMN_EXWIN *)((char *)w + n);
+            int nColor;
+            int nColor2;
+            unsigned short nY;
+
+            MoveSlide(&p->nX, &nTarget, 3.0f);
+            p->rib.nX = p->nX;
+            p->rib.nY = p->nY;
+            nColor = w->nColor;
+            p->rib.nColor = nColor;
+            eRibbonMain(&p->rib, nColor);
+            nColor2 = p->rib.nColor + 1;
+            p->tag.nX = p->nX + 188;
+            p->tag.nColor = nColor2;
+            p->tag.nY = p->nY + 4;
+            eTagFontMain(&p->tag, nColor2);
+            nY = p->tag.nY;
+            p->num.nX = p->tag.nX + 30;
+            p->num.nColor = p->tag.nColor;
+            p->num.nDigits = 3;
+            p->num.nY = nY;
+            p->num.nValue = UmnWork.u.ex.nLo + (UmnWork.u.ex.nHi << 16) + 1;
+            p->num.nAlign = 2;
+            eNumberMain(&p->num, nY, 2);
+            n += sizeof(UMN_EXWIN);
+        }
+        break;
+    }
     }
 }
