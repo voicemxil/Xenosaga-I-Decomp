@@ -1741,6 +1741,7 @@ void tskUmnMailMenu(TSK_TASK *pTask, UMN_MAILMENU *w)
     short nTarget2;
     short nTargetOut2;
     int i;
+    int nOn;
 
     if (UmnWork.nScene != 1) {
         pTask->nState = -1;
@@ -1790,18 +1791,17 @@ void tskUmnMailMenu(TSK_TASK *pTask, UMN_MAILMENU *w)
                 if (UmnWork.nMailSel != 0) {
                     w->row[1].bGray = 1;
                 }
-                if (UmnWork.u54.mail.bReplyReady == 0) {
-                    w->row[2].bGray = 1;
-                } else if (UmnWork.u54.mail.bReplyOpen == 0) {
-                    w->row[2].bGray = 1;
-                } else {
+                if (UmnWork.u54.mail.bReplyReady && UmnWork.u54.mail.bReplyOpen) {
                     w->row[2].bGray = 0;
+                } else {
+                    w->row[2].bGray = 1;
                 }
                 w->win2.nX = -125;
                 w->win2.nY = 176;
                 w->sel2.pRows = w->row;
-                w->win2.nState = 1;
-                w->bVisible2 = 1;
+                nOn = 1;
+                w->bVisible2 = nOn;
+                w->win2.nState = nOn;
                 w->sel2.nSel = 0;
                 WindowDXMain((WINDOWDX *)&w->win2);
                 w->win2.nState = 3;
