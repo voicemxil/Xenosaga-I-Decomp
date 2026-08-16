@@ -886,10 +886,10 @@ void scInitScript(void)
     slot = 0;
     do {
         _scriptWork[slot].dataIdx = -1;
-        _scriptWork[slot].pTable = 0;
         _scriptWork[slot].field446 = 0;
-        _scriptWork[slot].field44A = 0;
+        _scriptWork[slot].pTable = 0;
         _scriptWork[slot].nTask = 0;
+        _scriptWork[slot].field44A = 0;
         t = (SCTASK_ENT *)((char *)_scriptWork + (slot << 10) + slot * 80);
         i = 0;
         do {
