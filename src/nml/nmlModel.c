@@ -1,5 +1,17 @@
 #include "matching.h"
 
+/* Steering, in the same family as matching.h's LAUNDER/SCHED_NOP: an empty
+ * volatile asm emits nothing at all, but it stops gcc 2.96's sibling-call
+ * pass from rewriting a preceding `jal callee` + return into `j callee`.
+ * The original build only sibcall-converted the switch arms that end in an
+ * explicit jump to the epilogue, not the last arm that falls into it.
+ * Vanishes in a portable build. */
+#ifdef MATCHING
+#define NO_SIBCALL() __asm__ __volatile__("")
+#else
+#define NO_SIBCALL() ((void) 0)
+#endif
+
 /* Normal-map model rendering global state accessors */
 
 typedef int TI __attribute__((mode(TI)));
@@ -1500,11 +1512,6 @@ int nmlModelCalcClipStudio(void *pPos, int nStudio)
 extern unsigned short D_004B9102[];
 
 /* Configure the back buffer and fade cancels for each movie-finish mode */
-/* TODO: near-miss (6 diffs, 66 orig vs 69 built) -- all five case bodies
- * match; only the source-last case (mode 4) differs: the original keeps
- * jal nmlModelSetFadeInCancel and falls through into the shared
- * epilogue, while ours sibcall-converts it (j) and emits a separate
- * default epilogue. default:break; does not change it. */
 void nmlModelSendSignalMovieFinish(int mode)
 {
     switch (mode) {
@@ -1529,6 +1536,7 @@ void nmlModelSendSignalMovieFinish(int mode)
     case 4:
         nmlModelSetBackBuffer(D_0095BB44[0], 1, D_004B9102[0], 1);
         nmlModelSetFadeInCancel(30);
+        NO_SIBCALL();
         break;
     default:
         break;
