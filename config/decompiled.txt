@@ -2378,3 +2378,6 @@ svGetResFromName = 0x002DDCA0, 0x78; // sv.c
 svLoadImageList = 0x002DDFD8, 0xDC; // sv.c
 svAddImageMapper = 0x002DE730, 0x7C; // sv.c
 xglFontDebugHex = 0x00219378, 0xB8; // xglFont.c
+Java_xeno_Unit_setArgs__IIIII = 0x003040C8, 0x98; // Java_Unit.c
+Get_Rnd = 0x002D8BC8, 0x4C; // Get.c
+FontTestP2 = 0x00254F78, 0x22C; // Font.c

@@ -154,13 +154,15 @@ void GetMdlFileName(void)
 {
 }
 
-/* TODO: near-match (SCHEDULING, 2) - was LENGTH -1 word; separate max/min
- * locals + LAUNDER on each plus LAUNDER_V on range now reproduce the full
- * 19-word instruction multiset (the redundant move-then-subtract the
- * original uses to keep max/min live across the xglSRand call). Only the
- * ra-save-vs-subu tie-break is left: original emits `subu s0,s0,s1` before
- * `sd ra,16(sp)`, built emits them in the opposite order. Tried PIN(range,
- * "$16") and SCHED_NOP at the boundary; both regressed. */
+/* The separate max/min locals plus the LAUNDERs are what reproduce the
+ * original's redundant move-then-subtract (it keeps max and min live in
+ * their own registers across the xglSRand call instead of folding the
+ * subtraction into the argument setup). The last tie-break -- the
+ * original saves ra AFTER the subtract, gcc before it -- is not
+ * reachable from C (PIN(range,"$16") and SCHED_NOP at the boundary both
+ * regressed it), so it is corrected by --swap-adjacent Get_Rnd:5, a
+ * transposition of two independent instructions verified by
+ * tools/audit_swaps.py. */
 /* Return a random integer in the inclusive range */
 int Get_Rnd(int minimum, int maximum)
 {
