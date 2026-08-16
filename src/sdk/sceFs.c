@@ -315,3 +315,58 @@ int sceDclose(int fd)
         r = 0;
     return r;
 }
+
+/* sceClose: sceDclose's template with the EE-side slot index added to
+ * the request block, so the IOP can release its side too. */
+int sceClose(int fd)
+{
+    ee_sema_t sema;
+    int result;
+    iob_t *p;
+    int semid;
+    fs_send_t *sd;
+    int done;
+    int r;
+    int lim;
+
+    sd = &_send_data;
+    p = get_iob(fd);
+    _sceFsWaitS(1);
+    if (_fs_init == 0) {
+        _sceFsSigSema();
+        return -1;
+    }
+    if (p == 0 || p->used == 0) {
+        _sceFsSigSema();
+        return -9;
+    }
+    sd->fd = p->fd;
+    sd->index = p - _iob;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    _send_data.semid = semid;
+    sd->dst = &result;
+    sd->size = 4;
+    if (sceSifCallRpc(&_cd, 1, 0, sd, 20, &_rcv_data_rpc, 4, 0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    p->used = 0;
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    r = result;
+    lim = -1;
+    LAUNDER(lim);
+    if (lim < r)
+        r = 0;
+    return r;
+}
