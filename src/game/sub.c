@@ -879,3 +879,66 @@ int subPosSet(ETNODE *node)
     }
     return n;
 }
+
+extern ETLINE2 *EtherTreeLine2;
+extern int subLine2_OpenType_1(ETLINE2 *p);
+
+/* PARKED at 46 of 54 words. Everything after the dispatch matches: the
+   nChildren fan-out (== 1 -> OpenType_0 then OpenType_1, 2..3 -> straight
+   to OpenType_1, anything else -> nMode = 2) and the state-3 teardown come
+   out instruction-for-instruction, including the `andi flags,0xfe` in the
+   branch delay slot.
+
+   What is left is the SWITCH PIVOT. The original's decision tree is rooted
+   at case 1 -- `beq a0,1` to an out-of-line arm, then `slti a0,2` to the
+   default, then `beq 2` / `beq 3` -- i.e. an ascending right-leaning tree.
+   ee-gcc balances a three-node tree at the MIDDLE and roots it at case 2
+   (`li a1,2; beq a0,a1; slti a0,3`), which rotates the whole dispatch.
+   Swept, all inert on the pivot: splitting `n < 2 || n >= 4` into two ifs
+   (recovers the original's two separate slti, +2 words elsewhere),
+   LAUNDER_V on a per-store copy of the constant 2 (the shared `li a1,2` is
+   the case LABEL, not the store -- laundering the stores does not move
+   it), adding a redundant empty `case 4`, and a nested `default: switch`.
+   An if/else-if chain (51 words) is worse in a different way: it inlines
+   the case-1 arm as a fallthrough instead of branching forward to an arm
+   laid out after the join, so the switch shape here is right and only the
+   pivot is wrong. Likely permuter/flag territory, not a source shape.
+
+   Drive the animated connector: grow it toward the target (type 0 first
+   when the target is a single-child node, then type 1), and tear it down
+   again in state 3. */
+void EtherTreeLine2Main(void)
+{
+    ETLINE2 *p;
+    unsigned char flags;
+    int n;
+
+    if ((unsigned char)(EtherTreeSystem->bFlags & 1) != 0) {
+        p = EtherTreeLine2;
+        flags = p->bFlags;
+        if ((unsigned char)(flags & 1) != 0) {
+            switch (p->nMode) {
+            case 1:
+                n = p->pTarget->nChildren;
+                if (n == 1) {
+                    if (subLine2_OpenType_0(p) == 0) {
+                        break;
+                    }
+                } else if (n < 2 || n >= 4) {
+                    p->nMode = 2;
+                    break;
+                }
+                if (subLine2_OpenType_1(p) != 0) {
+                    p->nMode = 2;
+                }
+                break;
+            case 2:
+                break;
+            case 3:
+                p->nMode = 0;
+                p->bFlags = flags & 0xFE;
+                break;
+            }
+        }
+    }
+}
