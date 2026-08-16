@@ -26,6 +26,7 @@ extern void *rsrcDefaultPath;
 extern int infoIndex;
 extern int infoLength;
 extern u_int RSRC_loadFileSub(RSRC *pResource, void *pPath, void *pFile);
+extern void *memset(void *pDest, int nValue, u_int nSize);
 
 void RSRC_inactiveSource(RSRC *pResource, u_int pSource)
 {
@@ -201,4 +202,21 @@ RSRCITEM *RSRC_getDirtyItem(RSRC *pResource, u_int nSize)
         pItem++;
     }
     return 0;
+}
+
+/* Carve a resource heap out of [pBase, pBase+nSize): the RSRC header sits
+   in the last 32 bytes and the item table grows down from it. */
+RSRC *RSRC_create(void *pBase, u_int nSize, int nItemCapacity)
+{
+    RSRC *pResource;
+
+    memset(pBase, 0, nSize);
+    pResource = (RSRC *)((u_int)pBase + nSize - 32);
+    pResource->nSize = nSize - nItemCapacity * 16 - 32;
+    pResource->pBase = (u_int)pBase;
+    pResource->pCurrent = (u_int)pBase;
+    pResource->nItemCapacity = nItemCapacity;
+    pResource->pItems = (RSRCITEM *)((u_int)pResource - nItemCapacity * 16);
+    pResource->nItemCount = 0;
+    return pResource;
 }

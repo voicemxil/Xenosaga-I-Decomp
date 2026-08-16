@@ -2665,3 +2665,4 @@ sceMcGetDir = 0x0020F6A8, 0x158; // sceMc.c
 sefIsFinishEffect2 = 0x002E7AA8, 0x88; // sef.c
 HitCheckUwamonoAt = 0x002C4250, 0xBC; // Hit.c
 sceMcGetInfo = 0x0020F520, 0x184; // sceMc.c
+RSRC_create = 0x0026D478, 0x78; // RSRC.c
