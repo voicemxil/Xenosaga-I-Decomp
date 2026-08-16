@@ -2710,3 +2710,5 @@ CheckWallAttr = 0x00322840, 0xD4; // Undu.c
 sceReadlink = 0x002072A0, 0x1C8; // sceFs.c
 sceSymlink = 0x002070C0, 0x1E0; // sceFs.c
 xglPadInitial = 0x0021BA68, 0x118; // xglPad.c
+UnduCheckSubCheckAll = 0x003227B0, 0x90; // Undu.c
+sceRename = 0x00206618, 0x1F0; // sceFs.c

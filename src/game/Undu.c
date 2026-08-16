@@ -156,3 +156,31 @@ int CheckWallAttr(WALL_UNIT *unit, unsigned short *pId)
     }
     return 1;
 }
+
+typedef struct {
+    char pad_00[0x54];
+    int nList;
+    char pad_58[8];
+    char *pList;
+} UNDU_CHECK;
+
+extern float UnduCheckSub(UNDU_CHECK *chk, char *entry);
+extern void UnduCheckSubHeightCheck(float height, UNDU_CHECK *chk, char *entry);
+
+/* Height-test every entry of the check list; -1000.0f is the "no hit"
+   height (the same sentinel UnduParamInit writes to field_14). */
+void UnduCheckSubCheckAll(UNDU_CHECK *chk)
+{
+    int i;
+    char *entry;
+    float height;
+
+    entry = chk->pList;
+    for (i = 0; i < chk->nList; i++) {
+        height = UnduCheckSub(chk, entry);
+        if (height != -1000.0f) {
+            UnduCheckSubHeightCheck(height, chk, entry);
+        }
+        entry += 24;
+    }
+}
