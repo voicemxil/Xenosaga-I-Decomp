@@ -455,3 +455,93 @@ int srsGetFileLen(int nFileNo)
     }
     return -1;
 }
+
+/* --- sres*: the resource-memory record.  Two blocks come out of the sm*
+ * heap -- the common image (0x25800) and the cf image (0x3E000) -- and
+ * each is handed to the image mapper through a stack slot. --- */
+
+typedef struct
+{
+    void *pCommon;          /* 0x00 */
+    char  pad0004[0x38];
+    void *pCf;              /* 0x3C */
+    char  pad0040[0x160];
+} SRS_MEMRES;
+
+extern SRS_MEMRES _srsMemRes;
+extern char D_004CC6F0[];
+extern char D_004CC700[];
+extern char D_004CC710[];
+extern void *memset(void *, int, unsigned int);
+extern void *smAlloc(unsigned int nBytes);
+extern void smFree(void *p);
+extern void svAddImageMapper(int a, int b, void **pp, int n);
+extern void svDeleteImageMapper(int n);
+extern void sresFreeReloaderMemory(int n);
+
+void sresInitMemoryRes(void)
+{
+    memset(&_srsMemRes, 0, sizeof(SRS_MEMRES));
+}
+
+void sresLoadCommonMemory(void)
+{
+    SRS_MEMRES *p = &_srsMemRes;
+    void *pTmp[8];
+    void *pMem;
+    int n;
+
+    if (p->pCommon != 0) {
+        return;
+    }
+    pMem = smAlloc(0x25800);
+    p->pCommon = pMem;
+    if (pMem != 0) {
+        n = fileLoad((int)pMem, (int)D_004CC6F0, 0);
+        /* Two separate tests, not `n >= 0 && n <= K`: written as one
+         * expression gcc folds the pair into a single unsigned compare
+         * and loses retail's bltz. */
+        if (n >= 0) {
+            if (n <= 0x25800) {
+                pTmp[0] = p->pCommon;
+                svAddImageMapper(0, 0, pTmp, 3000);
+            }
+        }
+    }
+    memset(_loadEsdData, 0, 0xC800);
+    fileLoad((int)_loadEsdData, (int)D_004CC700, 0);
+}
+
+void sresLoadCfMemory(void)
+{
+    SRS_MEMRES *p = &_srsMemRes;
+    void *pTmp[8];
+    void *pMem;
+
+    if (p->pCf != 0) {
+        return;
+    }
+    pMem = smAlloc(0x3E000);
+    p->pCf = pMem;
+    if (pMem == 0) {
+        return;
+    }
+    if (fileLoad((int)pMem, (int)D_004CC710, 0) < 0) {
+        return;
+    }
+    pTmp[0] = p->pCf;
+    svAddImageMapper(15, 0, pTmp, 3500);
+}
+
+void sresFreeMemoryRes(void)
+{
+    SRS_MEMRES *p;
+
+    sresFreeReloaderMemory(1);
+    p = &_srsMemRes;
+    if (p->pCommon != 0) {
+        svDeleteImageMapper(0);
+        smFree(p->pCommon);
+        p->pCommon = 0;
+    }
+}

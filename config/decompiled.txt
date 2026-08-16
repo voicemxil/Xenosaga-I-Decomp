@@ -2865,3 +2865,4 @@ _change_addr = 0x00202748, 0xC; // sceSif.c
 _set_sreg = 0x00202728, 0x1C; // sceSif.c
 isceSifSendCmd = 0x00202C58, 0x3C; // sceSif.c
 _search_svdata = 0x002033E0, 0x4C; // sceSif.c
+sresLoadCommonMemory = 0x002E8D28, 0xBC; // srsGet.c
