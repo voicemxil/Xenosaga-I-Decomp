@@ -970,18 +970,21 @@ void nmlModelSetFilter(int flag, float a, float b)
 {
     LAYOUT *p = &s_inLayout;
 
+    p->nFilterFlag = flag;
     if (a < 0.0f) {
         a = 0.0f;
     }
     if (128.0f < a) {
         a = 128.0f;
     }
-    p->nFilterFlag = flag;
+    p->aFogDist[4] = a;
     p->aFogDist[5] = b;
     if ((flag & 2) != 0) {
-        p->aFogDist[4] = a;
+        /* Unconditional inside the flag test: the original puts this store
+         * in the delay slot of the D_0033868C bne, which only works if it
+         * runs on both arms. */
+        s_nUseStealth = 1;
         if (D_0033868C[0] == 2) {
-            s_nUseStealth = 1;
             if (SCRIPT_getCfTime() < 2) {
                 s_nUseStealth = 0;
             }
