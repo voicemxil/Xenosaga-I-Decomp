@@ -314,22 +314,14 @@ JNT_ELEMENT *JNT_getRootElement(JNT_MODEL *pModel)
     return (JNT_ELEMENT *)((char *)pBlock + pBlock->nSize);
 }
 
-/* FLAG REQUEST (verified, not yet wired into configure.py -- left
- * UNREGISTERED below per the hard rule that only a fresh non---built
- * checkfile.py MATCH may be registered). Source-only tuning gets this
- * to a single diff: the nVersion>=2 test compiles to `bnezl` (branch
- * likely) here but the original used the plain `bnez` form with the
- * identical delay-slot fill (`addiu v0,a1,16`, safe on both paths
- * either way) -- gcc 2.96's delayed-branch pass picked the other
- * annul bit for this site with no reachable source-level lever (same
- * class of nondeterminism as tools/fix_cc_asm.py's --branch-likely /
- * --branch-unlikely doc comment describes). Verified MATCH (byte
- * identical, all 32 words) with the existing JNT.c flags plus:
+/* gcc 2.96 emitted the nVersion>=2 test as `bnezl` (branch-likely);
+ * the original used the plain `bnez` with the identical delay-slot
+ * fill (`addiu v0,a1,16`), which is dead on the fall-through path, so
+ * the annul bit carries no semantics here. Nothing at source level
+ * reaches gcc's delayed-branch annul choice, so this one is steered:
  *   --branch-unlikely JNT_setModel:1
- * (site index 1 = the second conditional branch emitted in the
- * function, 0-based; site 0 is the `pModel == 0` check, which already
- * comes out plain). Once wired, register:
- *   JNT_setModel = 0x00313BB0, 0x80; // JNT.c
+ * (site index 1 = second conditional branch, 0-based; site 0 is the
+ * `pModel == 0` check, which already comes out plain).
  */
 
 /* Bind a model and its handle, and locate the root element. Version 0/1

@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Native bindings for the script VM's xeno.Stage class */
 
 typedef union {
@@ -104,8 +106,6 @@ void GameBgDrawType2Entry(char *);
 void xglRenderClearColor(unsigned int);
 
 /* Bind a script method to the stage thread and start it */
-/* TODO: not matching - four loads in the findMethod argument block are
-   scheduled the other way round and the mode test comes out bne, not bnel */
 void Java_xeno_Stage_start__ILjava_lang_Object_(JTHREAD *pEnv, JVAL *pArgs, JVAL *pRet)
 {
     int nClass = classJava_xeno_Stage;
@@ -115,6 +115,11 @@ void Java_xeno_Stage_start__ILjava_lang_Object_(JTHREAD *pEnv, JVAL *pArgs, JVAL
     JTHREAD *pThread;
     void *pMethod;
     int nStage;
+    /* The original keeps the object's class-vtable pointer in $v1 across
+     * the loadConstString call setup; gcc 2.96 picks $v0 and then shifts
+     * every other temp in the block by one register. Naming the pointer
+     * and pinning it puts the whole block back. */
+    PIN(char *pVtbl, "$3");
 
     if (JNI_isInstanceOf((int)obj, nClass) == 0) {
         pRet->i = 0;
@@ -127,10 +132,13 @@ void Java_xeno_Stage_start__ILjava_lang_Object_(JTHREAD *pEnv, JVAL *pArgs, JVAL
     if (pArgs[1].i != 1) {
         return;
     }
-    *(int *)(nStage + 0xC) = 0;
+    /* Statement order is load-before-store here: the original schedules
+     * the pArgs[2] load ahead of the stage-field clear. */
     pName = (JSTRING *)pArgs[2].p;
+    *(int *)(nStage + 0xC) = 0;
     pArr = pName->pArray;
-    nClass = *(int *)*(int *)obj;
+    pVtbl = *(char **)obj;
+    nClass = *(int *)pVtbl;
     pMethod = findMethod(nClass, loadConstString(pArr->pData, pArr->nLength), TYPE_Void);
     pThread = JTHREAD_get(nStage);
     if (pThread != 0) {
