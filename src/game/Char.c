@@ -1,39 +1,32 @@
 /* Char* - character status/equip-menu logic */
 
 typedef struct {
-    short field_0;    /* 0x00 */
-    short field_2;    /* 0x02 */
+    unsigned short field_0;   /* 0x00 */
+    unsigned short field_2;   /* 0x02 */
     char pad04[0x30];
     short field_34;   /* 0x34 */
     short field_36;   /* 0x36 */
 } CHARREC;
 
-extern void func_A191C0(int nNo);
+/* Returns the character's live status record -- the recovery below writes
+   through it, which is where the original's second live pointer comes from. */
+extern CHARREC *func_A191C0(int nNo);
 extern CHARREC *func_00A11108(int nNo, void *p1, void *p2);
 
-/* TODO: not matching - REGISTER class near-miss. The original keeps the
-   func_00A11108 return pointer in TWO places: the fresh v0 (used for both
-   lhu loads) and a copied-out s0 (used for both sh stores). Every natural
-   C shape (single pointer var, split src/dst vars, self-assignment,
-   volatile) either collapses to one register (v0 only, 4 instructions
-   short) or forces a stack spill (volatile). Not reachable from source. */
 /* Fully heal every playable character's HP/EP to their maximums */
 void CharactorAllRecovery(void)
 {
     int i;
     char buf1[16];
     char buf2[16];
-    CHARREC *p;
-    short hp;
-    short ep;
+    CHARREC *pDst;
+    CHARREC *pSrc;
 
     for (i = 1; i < 0xC; i++) {
-        func_A191C0(i);
-        p = func_00A11108(i, buf1, buf2);
-        hp = p->field_0;
-        ep = p->field_2;
-        p->field_34 = hp;
-        p->field_36 = ep;
+        pDst = func_A191C0(i);
+        pSrc = func_00A11108(i, buf1, buf2);
+        pDst->field_34 = pSrc->field_0;
+        pDst->field_36 = pSrc->field_2;
     }
 }
 
