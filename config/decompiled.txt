@@ -2776,3 +2776,4 @@ sefCreateEffect = 0x002E7570, 0xAC; // sef.c
 nmlPacketAddGsFlush = 0x00236658, 0x174; // nmlPacket.c
 tskUmnMailHensin = 0x00A07B38, 0x378; // tskUmn.c
 ACT_loadMotion = 0x00308228, 0x104; // ACT.c
+nmlPacketAddGsFlushWide = 0x002367D0, 0x17C; // nmlPacket.c

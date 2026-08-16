@@ -1,3 +1,9 @@
+NewVu1GsKickWide = 0x00000028; 
+NewVu1TexEnvGsKickWide = 0x00000028; 
+NewVu1EnvGsKickWide = 0x00000028; 
+NewVu1ProGsKickWide = 0x00000028; 
+NewVu1AddGsKickWide = 0x00000028; 
+NewVu1DropGsKickWide = 0x00000028; 
 NewVu1AddEnvGsKick = 0x00000000; // type:func
 Vu0CallSin = 0x00000020; // type:func
 NewVu1AddEnvGsKickWide = 0x00000028; // type:func

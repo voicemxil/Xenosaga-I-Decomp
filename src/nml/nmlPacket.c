@@ -922,3 +922,67 @@ void nmlPacketAddGsFlush(void)
     }
     g_nGsEntry = 0;
 }
+
+/* The wide-screen GS-kick entries; all of these link at 0x28. */
+extern char NewVu1GsKickWide[];
+extern char NewVu1TexEnvGsKickWide[];
+extern char NewVu1EnvGsKickWide[];
+extern char NewVu1ProGsKickWide[];
+extern char NewVu1AddGsKickWide[];
+extern char NewVu1AddEnvGsKickWide[];
+extern char NewVu1DropGsKickWide[];
+
+/* The wide-screen twin of nmlPacketAddGsFlush: same A+D tag unpack, but
+ * the microprogram is waited on before the unpack and the kick entries
+ * are the Wide variants. */
+void nmlPacketAddGsFlushWide(void)
+{
+    u_int *p;
+
+    s_pPacket = xglPacketGetCurrent();
+    if (g_nGsEntry > 0) {
+        p = g_aGsTag.w;
+        p[1] = 0x10000000;
+        p[2] = 14;
+        p[0] = 0x8000 + g_nGsEntry;
+        p[3] = 0;
+        sceVif1PkCnt(s_pPacket, 0);
+        nmlPacketAddWaitMicrocode();
+        sceVif1PkOpenUpkCode(s_pPacket, 0x2DC, 0x6C, 1, 1);
+        sceVif1PkAddUpkData128N(s_pPacket, p, g_nGsEntry + 1);
+        sceVif1PkCloseUpkCode(s_pPacket);
+        switch (s_nProgType) {
+        case 1:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1GsKickWide >> 3) | 0x14000000);
+            break;
+        case 2:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1TexEnvGsKickWide >> 3) | 0x14000000);
+            break;
+        case 3:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1EnvGsKickWide >> 3) | 0x14000000);
+            break;
+        case 4:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1ProGsKickWide >> 3) | 0x14000000);
+            break;
+        case 5:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1AddGsKickWide >> 3) | 0x14000000);
+            break;
+        case 6:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1AddEnvGsKickWide >> 3) | 0x14000000);
+            break;
+        case 7:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1DropGsKickWide >> 3) | 0x14000000);
+            break;
+        }
+        sceVif1PkAddCode(s_pPacket, 0x17000000);
+        nmlPacketAddWaitMicrocode();
+    }
+    g_nGsEntry = 0;
+}
