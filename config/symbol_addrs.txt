@@ -7763,4 +7763,3 @@ buffer_00A13660 = 0x00A13660; // type:func
 base_tbl = 0x00A13668; // type:func
 tbl_00A138E8 = 0x00A138E8; // type:func
 UmnSaveData = 0x004A1A0C; // type:func
-UmnMailData = 0x004A1AB4; // type:func
