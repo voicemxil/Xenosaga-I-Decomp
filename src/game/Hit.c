@@ -562,3 +562,78 @@ done:
     }
     return 1;
 }
+
+/* Called with the function's own two parameters, untouched in $a0/$a1 --
+   which is why gcc copies them into $t0/$a2 for local use. */
+extern int HitCheckCorner(void *position, void *map_unit);
+
+/* Test a circular probe against one oriented map-unit box, rounding the
+   two end caps: inside the flat part is a plain hit, but a probe that
+   projects past the flat part and lands outside the cap radius is handed
+   to HitCheckCorner for the exact corner test.
+
+   PARKED at 47 of 69 words. The shape is right -- same length, same
+   branches, the same `sltu v0,zero,v0` tail and the same argument-less
+   call site -- and what is left is the FP register numbering (ours runs
+   one lower throughout: $f10/$f9 for the probe's x/z where retail uses
+   $f11/$f10) plus the word order inside the two 16-byte copies. That is
+   the SAME wall as HitCheckBox above: retail emits the quadword copy
+   high-word-first (`ld 24` before `ld 16`) and no source spelling found
+   so far produces that for the position copy.
+
+   Solved and not to be re-swept: `bounds` must be DECLARED first (it owns
+   sp+0) but ASSIGNED after `unit_position` (retail copies the position
+   into sp+16/24 first) -- declaring it first and initialising it there
+   puts the position at sp+0, and declaring it second puts the bounds
+   there. Splitting the initialiser is what gets both. The call must pass
+   `position, map_unit` explicitly: that is what keeps $a0/$a1 live and
+   makes gcc copy them to $t0/$a2, worth 2 words. `past_end` gets $v1
+   where retail has $t1, because retail materialises the return-0 in $v0
+   at the top of the function; a `result` local returned from the early
+   exits instead only adds a `move v0,result` at the tail (70-74 words in
+   three tried shapes). */
+int HitCheckBoxCorner(void *position, void *map_unit)
+{
+    HitProbe *probe = (HitProbe *)position;
+    HitMapUnit *unit = (HitMapUnit *)map_unit;
+    HitAlignedBounds bounds;
+    HitAlignedVector unit_position = unit->position;
+    HitVector *axis = unit->direction;
+    float z_delta = probe->position.z - unit_position.value.z;
+    float expansion = probe->size * 1.5f;
+    float x_delta = probe->position.x - unit_position.value.x;
+    float projection;
+    int past_end;
+    float nearest_x;
+    float nearest_z;
+    float radius;
+    float distance_x;
+    float distance_z;
+    float distance;
+
+    bounds = unit->bounds;
+    projection = x_delta * axis->x + z_delta * axis->z;
+    if (bounds.value.radius + expansion < __builtin_fabsf(projection)) {
+        return 0;
+    }
+    past_end = 0;
+    if (bounds.value.radius < __builtin_fabsf(projection)) {
+        past_end = 1;
+    }
+    nearest_x = projection * axis->x + unit_position.value.x;
+    nearest_z = projection * axis->z + unit_position.value.z;
+    radius = bounds.value.corner_radius + expansion;
+    distance_x = probe->position.x - nearest_x;
+    distance_z = probe->position.z - nearest_z;
+    distance = distance_x * distance_x + distance_z * distance_z;
+    if (distance < radius * radius) {
+        if (bounds.value.corner_radius * bounds.value.corner_radius <
+            distance) {
+            if (past_end == 1) {
+                return HitCheckCorner(position, map_unit) != 0;
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
