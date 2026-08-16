@@ -70,6 +70,54 @@ extern signed char event_end_mail[];
 extern int xglCdReadFile(char *pName, unsigned int nAddr, int nOfs, int nSize);
 extern void UmnProcuratorSet(void);
 
+
+/* --- overlay-local menu objects ------------------------------------ */
+
+/* 12-byte interface-2 overlay: a GS mask word plus two RGBA colours whose
+   alpha bytes are the fade counters driven by UmnInterface2Main. */
+typedef struct {
+    int nMask;                      /* 0x00 */
+    unsigned char nColor0[4];       /* 0x04 */
+    unsigned char nColor1[4];       /* 0x08 */
+} UMN_IF2;
+
+typedef struct UMN_TASK {
+    char pad000[8];
+    struct UMN_TASK *pLast;         /* 0x08 */
+    char pad00C[4];
+    int nState;                     /* 0x10 */
+    void *pFunc;                    /* 0x14 */
+    void *pParam;                   /* 0x18 */
+    int nWork[25];                  /* 0x1C */
+} UMN_TASK;
+
+/* These are plain scalars in the original, but a 4-byte extern lands in
+   .sdata at -G8 and would be reached through $gp; the shipped code uses an
+   absolute lui/addiu pair, so declare them as arrays of unknown size (not
+   small-data eligible) and index element 0.  The self-referential macro is
+   not re-expanded, so the symbol name stays intact. */
+extern UMN_IF2 *UmnInterface2[];
+#define UmnInterface2 (UmnInterface2[0])
+extern UMN_TASK *umn_task[];
+#define umn_task (umn_task[0])
+extern void *UmnWorkEnd[];
+#define UmnWorkEnd (UmnWorkEnd[0])
+extern unsigned int UmnTexAddr[];
+#define UmnTexAddr (UmnTexAddr[0])
+extern unsigned int UmnBgCubeXtx[];
+#define UmnBgCubeXtx (UmnBgCubeXtx[0])
+extern unsigned int UmnBgCubeLex[];
+#define UmnBgCubeLex (UmnBgCubeLex[0])
+
+extern unsigned char kosmos_special_tbl[4][4];
+
+extern UMN_TASK *xglTaskEntryNext(UMN_TASK *pQueue, void (*pFunc)(void), UMN_TASK *pRef);
+extern void xglFontPrintExtFunc(int nOT, void (*pFunc)(void));
+extern void MenuLoadFile(char *pName, void *pDst);
+extern void *UmnTextLoad(void *pRaw, int nMode);
+extern void tskUmnObjectTaskMain(void);
+extern void DrawUmnInterface2(void);
+
 extern MAIL_ATTACH umn_attach_tbl[];
 extern MAIL_HEADER *UmnMailHeaderBuf[];
 extern EVENT_TEXT_BUF *uet_text_buf[];
@@ -447,4 +495,177 @@ int UmnEventEndMailCheck(int nNo)
         }
     }
     return 0;
+}
+
+/* Carve the 12-byte interface-2 object out of the caller's scratch block
+   and prime both of its colours to fully-opaque white. */
+void *UmnInterface2Init(void *pMem)
+{
+    void *pNext;
+
+    pNext = 0;
+    if (pMem != 0) {
+        UmnInterface2 = (UMN_IF2 *)(((unsigned int)pMem + 15) & ~15);
+        pNext = (char *)UmnInterface2 + 12;
+    }
+    {
+        UMN_IF2 *p;
+        p = UmnInterface2;
+        p->nColor0[0] = -128;
+        p->nColor0[3] = -128;
+        p->nColor0[2] = -128;
+        p->nColor0[1] = -128;
+        p->nMask = 0x00FFFFFE;
+    }
+    {
+        UMN_IF2 *p;
+        p = UmnInterface2;
+        p->nColor1[3] = -128;
+        p->nColor1[2] = -128;
+        p->nColor1[1] = -128;
+        p->nColor1[0] = -128;
+    }
+    return pNext;
+}
+
+/* TODO: near-miss (REGISTER, 12 of 30 words, length exact). Every
+   instruction is right; the whole body is shifted one allocation slot:
+   orig $a0 (the &UmnInterface2 pseudo) -> built $a1, orig $a2 (the loaded
+   object pointer) -> built $v1, orig $v1 (the decremented byte) -> built
+   $a0. Swept: unsigned char temp vs direct `-= 8` on the lvalue (14 vs 12
+   diffs), block-scoping the temps per `if` arm (no change), a block-local
+   object pointer for the final two-field test (no change). The reload of
+   the global between the two fade steps IS correct and comes for free from
+   referencing the global directly -- a function-scope local pointer
+   removes it. Permuter territory. */
+/* Fade both interface-2 colours out a step each frame and keep the
+   overlay's draw callback queued while either is still visible. */
+void UmnInterface2Main(void)
+{
+    {
+        unsigned char nAlpha;
+        nAlpha = UmnInterface2->nColor0[3];
+        if (nAlpha != 0) {
+            UmnInterface2->nColor0[3] = nAlpha - 8;
+        }
+    }
+    {
+        unsigned char nAlpha;
+        nAlpha = UmnInterface2->nColor1[3];
+        if (nAlpha != 0) {
+            UmnInterface2->nColor1[3] = nAlpha - 2;
+        }
+    }
+    if (UmnInterface2->nColor0[3] != 0 || UmnInterface2->nColor1[3] != 0) {
+        xglFontPrintExtFunc(0x03FFFFF0, DrawUmnInterface2);
+    }
+}
+
+/* TODO: near-miss (18 of 32 words, length exact). Body and the 25-word
+   work-array clear are right; the prologue schedule differs. The original
+   hoists `lui v0,%hi(umn_task)` ABOVE the stack adjust and loads umn_task
+   at word 2, and splits the tskUmnObjectTaskMain address into an early
+   `lui v1,%hi` (word 3) with the matching `addiu a1,v1,%lo` filling the
+   null-check branch's delay slot; we emit both halves adjacent after the
+   branch and let the queue pointer land straight in $a0 instead of $v0
+   plus a `move a0,v0` in the jal delay slot. Swept: reading umn_task into
+   a local before the null test, block-scoping that local and pRef into
+   their own `{ }` (the register-shift lever) -- neither moved the count. */
+/* Queue one menu-object task behind the overlay's task list */
+void UmnObjectTaskCreate(void *pFunc, void *pParam)
+{
+    UMN_TASK *pTask;
+    int i;
+
+    {
+        UMN_TASK *pQueue;
+        UMN_TASK *pRef;
+
+        pQueue = umn_task;
+        pRef = 0;
+        if (pQueue != 0) {
+            pRef = pQueue->pLast;
+        }
+        pTask = xglTaskEntryNext(pQueue, tskUmnObjectTaskMain, pRef);
+    }
+    pTask->pFunc = pFunc;
+    pTask->pParam = pParam;
+    pTask->nState = 0;
+    for (i = 0; i < 25; i++) {
+        pTask->nWork[i] = 0;
+    }
+}
+
+/* Load the menu text block into a 2K-aligned slice of the caller's scratch
+   block; nMode picks the raw CD read over the packed menu loader. */
+void *UmnTextLoad(void *pRaw, int nMode)
+{
+    char *pAligned;
+    char *pNext;
+
+    pAligned = (char *)(((unsigned int)pRaw + 15) & ~15);
+    pNext = pAligned + 2048;
+    umn_text[0] = pAligned;
+    if (nMode == 0) {
+        xglCdReadFile("data\\endou\\umn\\umntxt.bin", (unsigned int)pAligned, 0, 1);
+    } else {
+        MenuLoadFile("data\\endou\\umn\\umntxt.bin", pAligned);
+    }
+    return pNext;
+}
+
+/* TODO: near-miss (SCHEDULING, 3 of 33 words, length exact). Only the
+   placement of `sw v0,0(s0)` (the UmnWorkEnd write-back) differs: the
+   original sinks it to the last slot before the first xglCdReadFile jal,
+   after the `addiu a0,%lo(name)` and `move a2,zero`; we emit it first in
+   that window. Swept: direct `UmnWorkEnd = UmnTextLoad(UmnWorkEnd, 0)` and
+   a separate local for the result -- identical RTL either way. Would take
+   --rotate + --swap-adjacent to force; not worth two fixer flags. */
+/* One-shot load of everything the menu overlay needs off the disc */
+void UmnFirstLoad(void)
+{
+    void *pEnd;
+
+    pEnd = UmnTextLoad(UmnWorkEnd, 0);
+    UmnWorkEnd = pEnd;
+    xglCdReadFile("data\\endou\\umn\\cube.xtx", UmnBgCubeXtx, 0, 1);
+    xglCdReadFile("data\\endou\\umn\\cube.lex", UmnBgCubeLex, 0, 1);
+    xglCdReadFile("data\\endou\\umn\\umn00.xtx", UmnTexAddr, 0, 1);
+}
+
+/* TODO: PARKED -- cannot match in this translation unit. The original
+   reaches UmnKosmosSpecialBox with `lui/addiu` (absolute), but the
+   main-ELF Umn functions in this same file (UmnkosmosSpecialInit,
+   UmnkosmosSpecialSet, both matched) reach it with `addiu a0,gp,-21304`.
+   One symbol cannot be both gp-relative and absolute in one object, and
+   the array is DEFINED here, so at -G8 it is small-data for every
+   reference in the file. In the original this overlay function lived in a
+   different translation unit, where the symbol was a bare `extern` of
+   unknown size and therefore not small-data eligible. Everything else
+   about the body is confirmed: the outer table walk, the two separate
+   base pseudos for kosmos_special_tbl (`move t1,t0`), the box index `k`
+   that is set to 0 in the entry block and never incremented (gcc cannot
+   constant-fold it across the outer loop, hence the live `sll v0,t2,1`),
+   and the double `lbu` of the same table byte. Unparking needs the ov02
+   Umn functions split into their own source file. */
+/* Queue the KOS-MOS special attacks unlocked by finishing event nNo */
+void UmnKosmosSpecialGetCheck(int nNo)
+{
+    int i;
+    int j;
+    int k;
+
+    k = 0;
+    for (i = 0; i < 4; i++) {
+        if (kosmos_special_tbl[i][0] == nNo) {
+            for (j = 0; j < 3; j++) {
+                if (kosmos_special_tbl[i][j + 1] == 0) {
+                    return;
+                }
+                UmnKosmosSpecialBox[k] = kosmos_special_tbl[i][j + 1];
+                k++;
+            }
+            return;
+        }
+    }
 }
