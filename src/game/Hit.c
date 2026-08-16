@@ -396,7 +396,11 @@ int HitCheckBox(void *position, void *map_unit)
     return 0;
 }
 
-extern int HitCheckBoxUwamono(void *position);
+/* No prototype on purpose: the original calls this with ONE argument
+   though it takes two, leaving $a1 to carry the map unit by luck of the
+   register allocator. A full prototype makes gcc emit `move a1,s0`. */
+extern int HitCheckBoxUwamono();
+extern float D_004D7F48;
 extern float D_004D7F44;
 
 /* Does this probe stand inside the "uwamono" (overlay object) at unit?
@@ -439,5 +443,67 @@ int HitCheckUwamonoAt(void *position, void *unit_)
         return HitCheckBoxUwamono(probe);
     }
 miss:
+    return 0;
+}
+
+/* The oriented-box test used by the uwamono path: project the probe onto
+   the unit's axis, reject outside the half-length, then compare the
+   perpendicular distance against the corner radius. */
+/* The oriented-box test used by the uwamono path: project the probe onto
+   the unit's axis, reject outside the half-length, then compare the
+   perpendicular distance against the corner radius.
+
+   PARKED at 30 diffs, right length (49 words) and right control flow.
+   $a2 must be pinned or the map unit stays in $a1, the `move a2,a1` in the
+   original's first slot disappears and the whole thing runs one word
+   short. The bounds copy must be DECLARED first (it owns sp+0) but READ
+   through `unit->bounds` (the original never reloads the stack copy, only
+   writes it). What is left is the same open question as HitCheckBox in
+   this file: the 16-byte union copies come out low-word-first for the
+   position and the FP temporaries land one register off throughout
+   ($f0/$f1 and $f8/$f10 swapped against the original).
+
+   Swept here: bounds-first vs position-first declaration and copy order,
+   stack-copy vs unit reads for both radii, and all eight orderings of the
+   z/x pairs (deltas, nearest, distances) -- 30 is the floor, and the
+   nearest_x-before-nearest_z order below is what buys the last two. */
+int HitCheckBoxUwamono(void *position, void *map_unit)
+{
+    /* $a2 -- see above. */
+    PIN(HitMapUnit *unit, "$6");
+    HitProbe *probe = (HitProbe *)position;
+    HitAlignedBounds bounds;
+    HitAlignedVector unit_position;
+    HitVector *axis;
+    float z_delta;
+    float x_delta;
+    float projection;
+    float nearest_x;
+    float nearest_z;
+    float radius;
+    float distance_x;
+    float distance_z;
+    float distance;
+
+    unit = (HitMapUnit *)map_unit;
+    bounds = unit->bounds;
+    unit_position = unit->position;
+    axis = unit->direction;
+    z_delta = probe->position.z - unit_position.value.z;
+    x_delta = probe->position.x - unit_position.value.x;
+    projection = x_delta * axis->x + z_delta * axis->z;
+
+    if (unit->bounds.value.radius + D_004D7F48 < __builtin_fabsf(projection)) {
+        return 0;
+    }
+    nearest_x = projection * axis->x + unit_position.value.x;
+    nearest_z = projection * axis->z + unit_position.value.z;
+    radius = unit->bounds.value.corner_radius + D_004D7F48;
+    distance_z = probe->position.z - nearest_z;
+    distance_x = probe->position.x - nearest_x;
+    distance = distance_x * distance_x + distance_z * distance_z;
+    if (distance < radius * radius) {
+        return 1;
+    }
     return 0;
 }
