@@ -808,7 +808,7 @@ int sceCdReadClock(void *clock)
  * duplicate the spin, so the goto form is right); `_Xcmd_bind < 0` as
  * the branch polarity (identical output); PollSema compared in both
  * operand orders (the `_Xcmd_semid != PollSema(...)` order shown here
- * is what gives the original's `beq v1,v0`). */
+ * is what gives the original's `beq v1,v0`).
  * ------------------------------------------------------------------ */
 
 extern int PollSema(int sid);
