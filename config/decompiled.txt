@@ -2714,3 +2714,4 @@ UnduCheckSubCheckAll = 0x003227B0, 0x90; // Undu.c
 sceRename = 0x00206618, 0x1F0; // sceFs.c
 GameCFSoundMenuReload = 0x002428E0, 0xDC; // Game.c
 GameCFSoundMenuPurge = 0x002427F0, 0xF0; // Game.c
+sceMount = 0x002069C0, 0x26C; // sceFs.c

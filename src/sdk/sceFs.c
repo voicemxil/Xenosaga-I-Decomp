@@ -1005,3 +1005,79 @@ int sceRename(char *oldpath, char *newpath)
     DeleteSema(semid);
     return result;
 }
+
+/* The mount request layout: two names, then an opaque argument block,
+ * the flag word and the argument length -- 3092 bytes on the wire. */
+typedef struct t_fs_send_mount {
+    int   semid;
+    void *dst;
+    int   size;
+    char  path1[1024];          /* +12   fs name */
+    char  path2[1024];          /* +1036 device name */
+    char  data[1024];           /* +2060 driver argument */
+    int   flag;                 /* +3084 */
+    int   arglen;               /* +3088 */
+} fs_send_mount_t;              /* 3092 bytes */
+
+/* sceMount: the argument-length bound check is loop-invariant, so gcc
+ * hoists its `slti` all the way up into the first copy loop's preheader
+ * and only branches on it after both names are in the block. */
+int sceMount(char *fsname, char *devname, int flag, char *arg, int arglen)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_mount_t *sd;
+    int done;
+    int i;
+
+    sd = (fs_send_mount_t *)&_send_data;
+    _sceFsWaitS(20);
+    if (_fs_init == 0)
+        sceFsInit();
+    for (i = 0; i < 1024; i++) {
+        sd->path1[i] = fsname[i];
+        if (sd->path1[i] == 0)
+            break;
+    }
+    if (i == 1024)
+        sd->path1[1023] = 0;
+    for (i = 0; i < 1024; i++) {
+        sd->path2[i] = devname[i];
+        if (sd->path2[i] == 0)
+            break;
+    }
+    if (i == 1024)
+        sd->path2[1023] = 0;
+    if (arglen > 1024) {
+        _sceFsSigSema();
+        return -7;
+    }
+    for (i = 0; i < arglen; i++)
+        sd->data[i] = arg[i];
+    sd->arglen = arglen;
+    sd->flag = flag;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->size = 4;
+    sd->dst = &result;
+    sd->semid = semid;
+    sceSifWriteBackDCache(&_send_data, 3092);
+    if (sceSifCallRpc(&_cd, 20, 0, &_send_data, 3092, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}
