@@ -735,16 +735,16 @@ void TMENU_updateDefault(TMENU *t)
         case 14:
             if (PadData[0].nTrig & 0x40) {
                 xglSoundEffectNormalID(2, 0);
-                t->b55 = -1;
                 t->nFlags &= ~2;
                 t->h14 = 15;
+                t->b55 = -1;
                 return;
             }
             cur = t->b54;
             if (PadData[0].nTrig & 0x20) {
                 xglSoundEffectNormalID(1, 0);
-                t->h14 = 15;
                 t->nFlags &= ~2;
+                t->h14 = 15;
                 return;
             }
             t->h30 = (t->h30 + 1) & 0xFF;
@@ -799,13 +799,14 @@ void TMENU_updateDefault(TMENU *t)
             t->h30 = t->h30 + 1;
             TW_setPos(t);
             if (t->h30 >= 11) {
-                t->nFlags |= 1;
-                /* The retail object keeps both nFlags stores because an
-                 * unelidable read of pText148 sits between them; without
-                 * it gcc folds (x | 1) & ~2 into a single store. */
+                /* Retail performs BOTH nFlags stores and keeps a dead
+                 * read of pText148 in the block; without the volatile
+                 * read the (x | 1) & ~2 pair folds into a single store. */
                 *(unsigned char *volatile *)&t->pText148;
+                nFlags = t->nFlags | 1;
+                *(volatile int *)&t->nFlags = nFlags;
                 t->h14 = 16;
-                t->nFlags &= ~2;
+                t->nFlags = nFlags & ~2;
             }
             nFlags = t->nFlags;
             if (nFlags & 0x200) {
@@ -825,11 +826,11 @@ void TMENU_updateDefault(TMENU *t)
             } else {
                 nB = 1;
             }
-            c = t->h30 + 1;
+            t->h30 = t->h30 + 1;
+            c = t->h30;
             p = t->pComp[1];
             p->u14.n = (nB << 16) | (nA << 8);
-            t->h30 = c;
-            if (t->h30 >= 8) {
+            if (c >= 8) {
                 t->pComp[2]->n18 = 128;
                 t->pComp[3]->n18 = 128;
             }
