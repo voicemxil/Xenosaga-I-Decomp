@@ -609,6 +609,7 @@ float UnduCheckSub(UNDU_CHECK *chk, void *entry_)
             float hi = a->y;
             float lo = hi;
             float range;
+            float qy;
 
             if (b->y < lo) {
                 lo = b->y;
@@ -625,11 +626,12 @@ float UnduCheckSub(UNDU_CHECK *chk, void *entry_)
             }
             lo += range;
             hi -= range;
+            qy = q->y;
             if (flags & 0x10) {
                 if (hi < q->y) {
                     if (flags & 0x800) {
                         ok = 1;
-                    } else if (q->y < lo) {
+                    } else if (qy < lo) {
                         ok = 1;
                     }
                 }
