@@ -63,7 +63,8 @@ typedef struct {
     int nMode;                      /* 0x00 */
     int nCount;                     /* 0x04 */
     u8 pad08[0x8];                  /* 0x08 */
-    int nFrame[4];                  /* 0x10 */
+    int nFrame[3];                  /* 0x10 */
+    int nAim;                       /* 0x1C */
     float fFrom[4];                 /* 0x20 */
     float fTo[4];                   /* 0x30 */
     float fDelta[4];                /* 0x40 */
@@ -750,6 +751,132 @@ void SEQ_moveNPC_XZ(ACTOR *a)
     pPos[0] = pPos[0] + xglSin(fDir) * pSpeed[0];
     pPos[2] = pPos[2] + xglCos(fDir) * pSpeed[0];
     p->nCount++;
+}
+
+
+/* Step the actor's linear rotation channel: each axis eases toward its
+   target angle, optionally re-aiming at the channel's target actor first,
+   and clears itself when it arrives. */
+void SEQ_rotate(ACTOR *a)
+{
+    SEQUENCE *p = &actSequence[a->nSerial];
+    SEQ_LIN *m = &p->rot.lin;
+    float *pRot = a->fRot;
+    float *pPos = a->fPos;
+    float *pFrom = m->fFrom;
+    float *pTo = m->fTo;
+    float *pDelta = m->fDelta;
+    ACTOR *pT = (ACTOR *)m->nMode;
+    float d[3];
+
+    if ((p->nState & 0x2) == 0) {
+        if ((p->nFlags & 0x2) != 0) {
+            int n;
+
+            pFrom[0] = pRot[0];
+            if ((m->nAim & 0x1) != 0) {
+                pTo[1] = xglAtan2(pT->fPos[1] - pPos[1], pT->fPos[2] - pPos[2]);
+            }
+            n = m->nFrame[0];
+            if (n > 0) {
+                float k = 1.0f / (float)n;
+
+                pDelta[0] = nearDir(pFrom[0], pTo[0]) * k;
+            }
+            p->nCount = 0;
+            p->nState |= 0x2;
+        } else {
+            pDelta[0] = 0.0f;
+            p->nState |= 0x2;
+        }
+    }
+    if ((p->nState & 0x4) == 0) {
+        if ((p->nFlags & 0x4) != 0) {
+            int n;
+
+            pFrom[1] = pRot[1];
+            if ((m->nAim & 0x2) != 0) {
+                pTo[1] = xglAtan2(pT->fPos[0] - pPos[0], pT->fPos[2] - pPos[2]);
+            }
+            n = m->nFrame[1];
+            if (n > 0) {
+                float k = 1.0f / (float)n;
+
+                pDelta[1] = nearDir(pFrom[1], pTo[1]) * k;
+            }
+            p->nCount = 0;
+            p->nState |= 0x4;
+        } else {
+            pDelta[1] = 0.0f;
+            p->nState |= 0x4;
+        }
+    }
+    if ((p->nState & 0x8) == 0) {
+        if ((p->nFlags & 0x8) != 0) {
+            int n;
+
+            pFrom[2] = pRot[2];
+            if ((m->nAim & 0x4) != 0) {
+                pTo[1] = xglAtan2(pT->fPos[0] - pPos[0], pT->fPos[1] - pPos[1]);
+            }
+            n = m->nFrame[2];
+            if (n > 0) {
+                float k = 1.0f / (float)n;
+
+                pDelta[2] = nearDir(pFrom[2], pTo[2]) * k;
+            }
+            p->nCount = 0;
+            p->nState |= 0x8;
+        } else {
+            pDelta[2] = 0.0f;
+            p->nState |= 0x8;
+        }
+    }
+    if ((p->nFlags & 0x2) != 0) {
+        if ((m->nAim & 0x1) != 0) {
+            pTo[1] = xglAtan2(pT->fPos[1] - pPos[1], pT->fPos[2] - pPos[2]);
+        }
+        d[0] = __builtin_fabsf(nearDir(pTo[0], pRot[0]));
+        if (d[0] <= __builtin_fabsf(pDelta[0])) {
+            pRot[0] = pTo[0];
+            p->nFlags &= ~0x2;
+            if ((p->nFlags & ~0x10) == 0) {
+                p->nFlags = 0;
+            }
+        } else {
+            pRot[0] = pRot[0] + pDelta[0];
+        }
+    }
+    if ((p->nFlags & 0x4) != 0) {
+        if ((m->nAim & 0x2) != 0) {
+            pTo[1] = xglAtan2(pT->fPos[0] - pPos[0], pT->fPos[2] - pPos[2]);
+        }
+        d[1] = __builtin_fabsf(nearDir(pTo[1], pRot[1]));
+        if (d[1] <= __builtin_fabsf(pDelta[1])) {
+            pRot[1] = pTo[1];
+            p->nFlags &= ~0x4;
+            if ((p->nFlags & ~0x10) == 0) {
+                p->nFlags = 0;
+            }
+        } else {
+            pRot[1] = pRot[1] + pDelta[1];
+        }
+    }
+    if ((p->nFlags & 0x8) != 0) {
+        if ((m->nAim & 0x4) != 0) {
+            pTo[1] = xglAtan2(pT->fPos[0] - pPos[0], pT->fPos[1] - pPos[1]);
+        }
+        d[2] = __builtin_fabsf(nearDir(pTo[2], pRot[2]));
+        if (d[2] <= __builtin_fabsf(pDelta[2])) {
+            pRot[2] = pTo[2];
+            p->nFlags &= ~0x8;
+            if ((p->nFlags & ~0x10) == 0) {
+                p->nFlags = 0;
+            }
+        } else {
+            pRot[2] = pRot[2] + pDelta[2];
+        }
+    }
 }
 
 /* Advance a unit's spline-driven rotation channel (degrees to radians) */
