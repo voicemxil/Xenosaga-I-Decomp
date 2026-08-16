@@ -377,7 +377,27 @@ void xglRenderClearEnvInit(void)
     ClearEnv.aUnk30[4] = nScissorAddr;
     /* Fence the epilogue: without it sched2 pulls the `ld $ra` down past
      * the scissor store and hoists the store itself above the four
-     * window words. */
+     * window words.
+     *
+     * TODO: near-miss (40/49 words, 9 differing).  Every store is in
+     * retail's order (sd 88, sw 48/52/64/68, sd 80) and the whole
+     * arithmetic body matches.  RESIDUE, three sites:
+     *   - the `lui $a0,0x8000` argument of xglRenderClearColor: retail
+     *     puts it BEFORE the jal and fills the slot with the sd 24
+     *     store, gcc does the opposite (expressible as
+     *     --swap-into-slot, if the other two ever fall);
+     *   - two adjacent swaps at the lhu/li/lui cluster, plus the
+     *     scissor constant naming $a3 rather than $a1;
+     *   - retail's sched2 hoists `ld $ra,16($sp)` into the middle of
+     *     the window arithmetic and leaves the sd 80 last, while gcc
+     *     does the reverse -- a long-distance exchange no fixer flag
+     *     expresses.
+     * Swept with no change: dropping the barrier (10); moving it before
+     * the window words / before or after the scissor store / after the
+     * aUnk30[5] store (35-36 each); inlining 0x50000 at the store site;
+     * assigning nScissorAddr immediately before its store; writing the
+     * scissor through p[20] instead of the named member; LAUNDER and
+     * LAUNDER_V on nScissorAddr (both +8 bytes). */
     __asm__ __volatile__("" : : : "memory");
 }
 
