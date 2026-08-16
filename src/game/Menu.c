@@ -3484,11 +3484,17 @@ void MenuEtherListMake00(void)
     }
 }
 
-/* TODO: near-miss (SCHEDULING, 4) - nOn/n pins fixed the old 16-rename swap
-   and the >= arm-swap fixed the branch-likely polarity; what remains is the
-   f4-store/arg-load/increment order around the MenuEtherWhoCheck jal (ours
-   hoists the arg lh above the sw and the filler steals the sw). Barriers
-   regress it; parked. */
+/* TODO: near-miss (SCHEDULING, 2; was 4) - nOn/n pins fixed the old
+   16-rename swap and the >= arm-swap fixed the branch-likely polarity.
+   --rotate-seq MenuEtherListMake02:35:-3 now puts the f4 store back ahead
+   of the second call's argument load. The last pair is the MenuEtherWhoCheck
+   delay slot: gcc fills it with the f4 store where the retail build fills it
+   with the pointer increment, and the two are not adjacent, so neither
+   --swap-into-slot (which only reaches the instruction immediately before
+   the jal) nor a rotate window (which cannot cross the jal without moving
+   it) can express the exchange. --unfill-gcc-slots is far worse (86 vs 72
+   instructions). Wants a "swap the delay slot with the Nth instruction
+   before the branch" pass. */
 /* Build one ether sub-list: points per entry, enable by owner/ep checks */
 void MenuEtherListMake02(int nIdx)
 {

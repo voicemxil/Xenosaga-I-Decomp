@@ -4,6 +4,10 @@
     python3 tools/menu_sweep.py src/game/Menu.c FUNC --branch-likely 0 40
     python3 tools/menu_sweep.py src/game/Menu.c FUNC --rotate 0 40 '{f}:{n}:5'
 
+The site template may use {n1}/{n2}/{n3} for n+1/n+2/n+3, which is what
+--rotate-seq needs when a second, overlapping window has to fire after the
+first one has shifted the indices.
+
 The candidate site is passed to checkfile through $XENO_EXTRA_FIX_FLAGS,
 which ccpipe merges into the file's configure.py flags IN MEMORY. This tool
 never writes configure.py: an earlier version snapshotted it and restored
@@ -30,7 +34,7 @@ def main():
     base = os.path.basename(src)
 
     for n in range(lo, hi + 1):
-        site = tpl.format(f=func, n=n)
+        site = tpl.format(f=func, n=n, n1=n + 1, n2=n + 2, n3=n + 3)
         env = dict(os.environ)
         env["XENO_EXTRA_FIX_FLAGS"] = "%s=%s %s" % (base, flag, site)
         out = subprocess.run(
