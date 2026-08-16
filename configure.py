@@ -318,7 +318,7 @@ FILE_FIX_FLAGS = {
     # tskUmnSimulationInfo wants an argument-setup addu hoisted above
     # the lui/mtc1 pair for a float constant -- a 3-element rotation,
     # which --swap-adjacent structurally cannot express.
-    "tskUmn.c": "--rotate tskUmnSimulationInfo:100 --fp-pair-hazard UmnDataBaseModel",
+    "tskUmn.c": "--rotate tskUmnSimulationInfo:100 --swap-adjacent tskUmnDataBaseName:353,tskUmnDataBaseName:358 --fp-pair-hazard UmnDataBaseModel --short-loop-pad tskUmnDataBaseName:0:3,tskUmnDataBaseName:1:0 --swap-regs tskUmnDataBaseName:18-21:230-299",
     # JNT root accessors: TI-mode quadword copies whose allocator
     # tie-break lands the pair backwards (JVM subagent, verified).
     "JNT.c": ("--hoist-return-store JNT_getRootTrans,JNT_getRootRotate,JNT_getRootScale --swap-regs JNT_getRootTrans:2-3 --swap-regs JNT_getRootRotate:2-3 --swap-regs JNT_getRootScale:2-3 --branch-unlikely JNT_setModel:1"),
@@ -612,7 +612,8 @@ def generate_ninja(asm_files, src_files, asset_files):
         f.write("  command = python3 configure.py --no-split\n")
         f.write("  description = CONFIGURE\n")
         f.write("  generator = 1\n\n")
-        f.write("build build.ninja: configure | configure.py\n")
+        f.write("build build.ninja: configure | configure.py "
+                f"{CONFIG_DIR / 'symbol_addrs.txt'}\n")
 
     print(f"Generated {ninja_path}")
     print(f"  Assembly files: {len(asm_files)}")

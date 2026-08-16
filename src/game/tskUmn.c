@@ -34,7 +34,11 @@ typedef struct {
     signed char nWait;                  /* 0x10: scene fade/hold counter */
     signed char nUiLock;                /* 0x11: cleared while the
                                          * database menu owns the cursor */
-    char pad12[0x46 - 0x12];
+    char pad12[0x40 - 0x12];
+    signed char nNameX;                 /* 0x40: name-grid column */
+    char pad41[1];
+    signed char nNameY;                 /* 0x42: name-grid top row */
+    char pad43[0x46 - 0x43];
     signed char nDataBaseSel;           /* 0x46 */
     signed char nMailMenuSel;           /* 0x47 */
     char pad48[0x50 - 0x48];
@@ -52,6 +56,10 @@ typedef struct {
             signed char nLo;            /* 0x50 */
             signed char nHi;            /* 0x51 */
         } ex;
+        struct {
+            char pad[1];
+            unsigned char nNum;         /* 0x51: rows the name grid shows */
+        } name;
         struct {
             char pad[3];
             signed char nSel;           /* 0x53: mail cursor row */
@@ -88,7 +96,7 @@ typedef struct {
     int nColor;                         /* 0x04 */
     short nW;                           /* 0x08 */
     short nH;                           /* 0x0A */
-    char pad0C[4];
+    char *pTitle;                       /* 0x0C */
     char nState;                        /* 0x10 */
     char pad11[3];
     void (*pFunc)(void);                /* 0x14: draw callback */
@@ -1800,6 +1808,254 @@ extern void eMessageCpy(void *pMsg, char *pText);
 extern void eMessageCat(char *pText);
 extern char *MenuNumberTextGet(int nValue, int nDigits, int nMode);
 extern void *memset(void *pDst, int nVal, unsigned int nSize);
+
+/* --- Database screen: the two-column grid of monster NAME buttons --- */
+
+extern unsigned short monster_folder[];
+/* Same entry point as UmnGunoDataBaseGet; the name grid only wants the
+   record's leading text. */
+extern char *UmnGunoDataBaseName(int nNo) __asm__("UmnGunoDataBaseGet");
+
+typedef struct {
+    unsigned short nId;                 /* 0x000: monster_folder entry */
+    char pad002[2];
+    WINDOWDX win;                       /* 0x004 */
+    EMSG msg;                           /* 0x198 */
+    EXNUMBER num;                       /* 0x1DC */
+    char pad260[0x26C - 0x260];
+} UMN_NAMEROW;
+
+typedef struct {
+    unsigned char nState;               /* 0x0000 */
+    unsigned char bReady;               /* 0x0001 */
+    char pad0002[1];
+    unsigned char nNum;                 /* 0x0003: visible rows */
+    int nColor;                         /* 0x0004 */
+    UMN_NAMEROW row[14];                /* 0x0008 */
+    ECURSOL cur;                        /* 0x21F0 */
+} UMN_NAME;
+
+/* Database screen: the grid of analysed-monster name buttons, two per
+ * row.  State 10/11 slides every button in from its off-screen parking
+ * position (the selected one last, and only once the rest have landed),
+ * 12 waits for the page to move, 20/30 slide the grid back out, 22 parks
+ * it.  The trailer rebuilds the row ids from monster_folder[] every
+ * frame and draws the rows in an order that puts the highlighted one on
+ * top. */
+void tskUmnDataBaseName(TSK_TASK *pTask, UMN_NAME *w)
+{
+    int i;
+
+    if (UmnWork.nScene != 2) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0: {
+        int nStep = 766;
+
+        w->nColor = 0x00FFFF00;
+        for (i = 0; i < 14; i++) {
+            WindowDXSet(&w->row[i].win);
+            w->row[i].win.nW = 222;
+            w->row[i].win.nColor = w->nColor;
+            w->row[i].win.nY = (i / 2) * 48 + 80;
+            w->row[i].win.pTitle = "No.";
+            w->row[i].win.nH = 30;
+            w->row[i].win.nX = (i % 2) * nStep - 238;
+            w->row[i].win.nState = 1;
+            WindowDXMain(&w->row[i].win);
+            w->row[i].win.nState = 3;
+            eNumberSet(&w->row[i].num, 0);
+            w->row[i].num.nAlign = 3;
+            w->row[i].num.nDigits = 1;
+        }
+        eCursolSet(&w->cur, 0);
+        w->nNum = UmnWork.u.name.nNum;
+        if (w->nNum > 12) {
+            w->nNum = 12;
+        }
+        w->nState = 0;
+        w->bReady = 0;
+        break;
+    }
+    case 2:
+        switch (w->nState) {
+        case 0:
+        case 1:
+            if (UmnWork.nPage == 33) {
+                w->nState = 10;
+                w->bReady = 1;
+                eCursolModeChange(&w->cur, 32);
+            }
+            break;
+        case 10: {
+            int nSel = UmnWork.nNameX + UmnWork.nNameY * 2;
+
+            for (i = 0; i < w->nNum; i++) {
+                if (nSel != i) {
+                    w->row[i].win.nY = (i / 2) * 48 + 80;
+                    w->row[i].win.nX = (w->row[i].win.nW + 544) * (i % 2)
+                                     - w->row[i].win.nW - 16;
+                }
+            }
+            w->nState = 11;
+            /* fallthrough: state 11 runs on the same frame */
+        }
+        case 11: {
+            int nSel = UmnWork.nNameX + UmnWork.nNameY * 2;
+            int nDone = 0;
+
+            for (i = 0; i < w->nNum; i++) {
+                if (nSel == i) {
+                    short nTargetY = (i / 2) * 48 + 80;
+
+                    MoveSlide(&w->row[i].win.nY, &nTargetY, 3.0f);
+                    if (w->row[i].win.nY != nTargetY) {
+                        continue;
+                    }
+                    nSel = -1;
+                }
+                {
+                    short nTargetX = (w->row[0].win.nW + 16) * (i % 2) + 32;
+
+                    MoveSlide(&w->row[i].win.nX, &nTargetX, 3.0f);
+                    if (w->row[i].win.nX == nTargetX) {
+                        nDone++;
+                    }
+                }
+            }
+            if (nDone == w->nNum) {
+                w->nState = 12;
+                UmnWork.nUiLock = 0;
+            }
+            break;
+        }
+        case 12:
+            if (UmnWork.nPage != 17) {
+                if (UmnWork.nPage == 49) {
+                    w->nState = 20;
+                }
+            } else {
+                w->nState = 30;
+            }
+            break;
+        case 20:
+        case 30: {
+            int nDone = 0;
+            int nSel = UmnWork.nNameX + UmnWork.nNameY * 2;
+
+            for (i = 0; i < w->nNum; i++) {
+                short nTargetX = (w->row[i].win.nW + 544) * (i % 2)
+                               - w->row[i].win.nW - 16;
+
+                if (w->nState == 20 && nSel == i) {
+                    nTargetX = 272;
+                }
+                MoveSlide(&w->row[i].win.nX, &nTargetX, 3.0f);
+                if (w->row[i].win.nX == nTargetX) {
+                    if (w->nState == 20 && nSel == i) {
+                        short nTargetY = 32;
+
+                        MoveSlide(&w->row[i].win.nY, &nTargetY, 3.0f);
+                        if (w->row[i].win.nY != nTargetY) {
+                            continue;
+                        }
+                    }
+                    nDone++;
+                }
+            }
+            if (nDone == w->nNum) {
+                if (w->nState == 20) {
+                    w->nState = 22;
+                } else {
+                    w->nState = 0;
+                }
+                UmnWork.nUiLock = 0;
+            }
+            break;
+        }
+        case 22:
+            if (UmnWork.nPage == 33) {
+                w->nState = 10;
+            } else {
+                int nSel = UmnWork.nNameX + UmnWork.nNameY * 2;
+
+                for (i = 0; i < w->nNum; i++) {
+                    if (nSel == i) {
+                        w->row[i].win.nX = 272;
+                    } else {
+                        w->row[i].win.nX = 528;
+                    }
+                    w->row[i].win.nY = 32;
+                }
+            }
+            break;
+        }
+        break;
+    }
+    if (w->bReady) {
+        int aOrder[12];
+        int *q;
+        int nSel = UmnWork.nNameX + UmnWork.nNameY * 2;
+
+        for (i = 0; i < w->nNum; i++) {
+            /* Three separations gcc will not make on its own: the
+               subtraction chain, the row index and the element address
+               all coalesce into one register here, while the original
+               keeps $2 / $4 / $2.  None of these emit an instruction. */
+            PIN(int n, "$2");
+            PIN(int m, "$4");
+            PIN(unsigned short *pa, "$2");
+
+            n = UmnWork.u.ex.nLo - UmnWork.nNameY * 2 - UmnWork.nNameX;
+            LAUNDER_V(n);
+            PASSTHRU(m, n + i);
+            PASSTHRU(pa, monster_folder + m);
+            w->row[i].nId = *pa;
+        }
+        q = aOrder;
+        for (i = 0; i < w->nNum; i++) {
+            if (nSel != i) {
+                *q = i;
+                q++;
+            }
+        }
+        *q = nSel;
+        for (i = 0; i < w->nNum; i++) {
+            int n = aOrder[i];
+
+            if (w->row[n].nId) {
+                int nColor = w->nColor;
+
+                w->row[n].win.nColor = nColor;
+                if (nSel == n) {
+                    w->row[n].win.nColor = nColor + 16;
+                }
+                WindowDXMain(&w->row[n].win);
+                eMessageSet(&w->row[n].msg,
+                            UmnGunoDataBaseName(w->row[n].nId));
+                w->row[n].msg.nFont = 32;
+                w->row[n].msg.nColor = w->row[n].win.nColor + 2;
+                w->row[n].msg.nX = w->row[n].win.nX + 19;
+                w->row[n].msg.nY = w->row[n].win.nY + 3;
+                eMessageMain(&w->row[n].msg);
+                w->row[n].num.nX = w->row[n].win.nX + 32;
+                w->row[n].num.nColor = w->row[n].win.nColor + 2;
+                w->row[n].num.nY = w->row[n].win.nY - 12;
+                w->row[n].num.nValue = UmnWork.u.ex.nLo
+                                     - UmnWork.nNameY * 2
+                                     - UmnWork.nNameX + aOrder[i] + 1;
+                eNumberMain(&w->row[n].num);
+            }
+        }
+        w->cur.nX = w->row[nSel].win.nX + 3;
+        w->cur.nColor = w->row[nSel].win.nColor + 2;
+        w->cur.nY = w->row[nSel].win.nY + 7;
+        eCursolMain(&w->cur);
+    }
+    xglFontDebugPrintf(16, 96, "name_w %2d", w->nState);
+}
 
 /* Mail screen: the three-choice reply window.
  *
