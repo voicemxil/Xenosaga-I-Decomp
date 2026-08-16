@@ -1,5 +1,7 @@
 /* VIF1 packet construction helpers for the normal-map model renderer */
 
+#include "matching.h"
+
 typedef unsigned char u_char;
 typedef unsigned short u_short;
 typedef unsigned int u_int;
@@ -112,9 +114,10 @@ u_int nmlPacketSetAttributeAlloc16N(int nNum)
 
 /* Copy one quadword-aligned 64-byte block into the top of the attribute
  * area */
-/* TODO: near-miss (permute.py swept all 24 store orderings, best 17/25
- * words differ, LOGIC not scheduling -- reload/interleave shape differs
- * from source, not just store order). Parked per budget rule. */
+/* Copy one quadword-aligned 64-byte block into the top of the attribute
+ * area. Real MMI quadword work, and the original was assembly: the four
+ * lq/sq pairs are strictly interleaved through $v0 with no scheduling,
+ * the same block nmlPacketSetAttributeData64N runs in a loop. */
 u_int nmlPacketSetAttributeData64(void *pData)
 {
     void *p;
@@ -122,19 +125,26 @@ u_int nmlPacketSetAttributeData64(void *pData)
     s_pPacket = xglPacketGetCurrent();
     s_pPacket[9] -= 64;
     p = (void *)s_pPacket[9];
-    ((TI *)p)[0] = ((TI *)pData)[0];
-    ((TI *)p)[1] = ((TI *)pData)[1];
-    ((TI *)p)[2] = ((TI *)pData)[2];
-    ((TI *)p)[3] = ((TI *)pData)[3];
+    PS2_ASM(".set noreorder\n"
+        "lq $2, 0x0(%1)\n"
+        "sq $2, 0x0(%0)\n"
+        "lq $2, 0x10(%1)\n"
+        "sq $2, 0x10(%0)\n"
+        "lq $2, 0x20(%1)\n"
+        "sq $2, 0x20(%0)\n"
+        "lq $2, 0x30(%1)\n"
+        "sq $2, 0x30(%0)\n"
+        ".set reorder"
+        : : "r"(p), "r"(pData) : "$2", "memory");
     return s_pPacket[9];
 }
 
-/* TODO: near-miss (10/28 words differ; original loop body uses `addi`
- * not `addiu` for the induction registers and a `bne $zero,$sN` operand
- * order our compiler never emits, and the asm carries a local label
- * `_$psa16_loop` -- looks like a hand-written SDK packet-loop macro, not
- * plain compiled C. Parked per budget rule after 1 attempt. */
 /* Copy nNum 16-byte quadwords into the top of the attribute area */
+/* Copy nNum 16-byte quadwords into the top of the attribute area. The
+ * original's loop is assembly, not compiled C: it carries its own local
+ * label (_$psa16_loop, still in the ELF symbol table), uses the trapping
+ * `addi` rather than `addiu` for all three induction registers, and tests
+ * with `bne $zero,$s0` -- an operand order gcc never emits. */
 u_int nmlPacketSetAttributeData16N(void *pData, int nNum)
 {
     void *p;
@@ -142,19 +152,25 @@ u_int nmlPacketSetAttributeData16N(void *pData, int nNum)
     s_pPacket = xglPacketGetCurrent();
     s_pPacket[9] -= nNum << 4;
     p = (void *)s_pPacket[9];
-    do {
-        *(TI *)p = *(TI *)pData;
-        p = (char *)p + 16;
-        pData = (char *)pData + 16;
-    } while (--nNum);
+    PS2_ASM(".set noreorder\n"
+        "_$psa16_loop:\n"
+        "lq $2, 0x0(%1)\n"
+        "sq $2, 0x0(%0)\n"
+        "addi %2, %2, -1\n"
+        "addi %0, %0, 16\n"
+        "addi %1, %1, 16\n"
+        "bne $0, %2, _$psa16_loop\n"
+        "nop\n"
+        ".set reorder"
+        : "+r"(p), "+r"(pData), "+r"(nNum) : : "$2", "memory");
     return s_pPacket[9];
 }
 
-/* TODO: near-miss (same hand-written `_$psa_loop`-style SDK macro shape
- * as nmlPacketSetAttributeData16N -- addi vs addiu, bne operand order.
- * Parked per budget rule after 1 attempt. */
 /* Copy nNum 64-byte (4-quadword) blocks into the top of the attribute
  * area */
+/* Copy nNum 64-byte (4-quadword) blocks into the top of the attribute
+ * area. Same hand-written SDK loop as nmlPacketSetAttributeData16N, four
+ * quadwords per iteration; its label _$psa_loop is in the ELF too. */
 u_int nmlPacketSetAttributeData64N(void *pData, int nNum)
 {
     void *p;
@@ -162,14 +178,23 @@ u_int nmlPacketSetAttributeData64N(void *pData, int nNum)
     s_pPacket = xglPacketGetCurrent();
     s_pPacket[9] -= nNum << 6;
     p = (void *)s_pPacket[9];
-    do {
-        ((TI *)p)[0] = ((TI *)pData)[0];
-        ((TI *)p)[1] = ((TI *)pData)[1];
-        ((TI *)p)[2] = ((TI *)pData)[2];
-        ((TI *)p)[3] = ((TI *)pData)[3];
-        p = (char *)p + 64;
-        pData = (char *)pData + 64;
-    } while (--nNum);
+    PS2_ASM(".set noreorder\n"
+        "_$psa_loop:\n"
+        "lq $2, 0x0(%1)\n"
+        "sq $2, 0x0(%0)\n"
+        "lq $2, 0x10(%1)\n"
+        "sq $2, 0x10(%0)\n"
+        "lq $2, 0x20(%1)\n"
+        "sq $2, 0x20(%0)\n"
+        "lq $2, 0x30(%1)\n"
+        "sq $2, 0x30(%0)\n"
+        "addi %2, %2, -1\n"
+        "addi %0, %0, 64\n"
+        "addi %1, %1, 64\n"
+        "bne $0, %2, _$psa_loop\n"
+        "nop\n"
+        ".set reorder"
+        : "+r"(p), "+r"(pData), "+r"(nNum) : : "$2", "memory");
     return s_pPacket[9];
 }
 

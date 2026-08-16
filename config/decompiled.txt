@@ -2399,3 +2399,7 @@ InitMapKoware = 0x002BEBA8, 0x17C; // INIT.c
 Get_Attr = 0x002D8908, 0xB0; // Get.c
 xglMovieMakeXtxHeader = 0x00221AA8, 0x9C; // xglMovie.c
 Get_Attr_NU = 0x002D89B8, 0xB0; // Get.c
+DrillZStopFunc = 0x002CA158, 0x108; // Drill.c
+nmlPacketSetAttributeData64 = 0x00238E60, 0x64; // nmlPacket.c
+nmlPacketSetAttributeData16N = 0x00238F50, 0x70; // nmlPacket.c
+nmlPacketSetAttributeData64N = 0x00238EC8, 0x88; // nmlPacket.c
