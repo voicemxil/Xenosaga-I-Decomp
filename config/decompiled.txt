@@ -2424,3 +2424,7 @@ MAP_initUnit = 0x0031EE88, 0x12C; // MAP.c
 xglDmaMFIFOSetup = 0x0021B8C8, 0x78; // xglDma.c
 xglDmaMFIFOKick = 0x0021B940, 0x9C; // xglDma.c
 xglCdReadCancel = 0x0021E330, 0xD0; // xglCd.c
+end_fde_sort = 0x0032C778, 0x578; // gcc_frame
+find_fde = 0x0032D190, 0x1A8; // gcc_frame
+nmlPacketAddReflRot = 0x00239A28, 0xD8; // nmlPacket.c
+nmlPacketAddScreen = 0x00236F78, 0xB8; // nmlPacket.c

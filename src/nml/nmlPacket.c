@@ -373,12 +373,20 @@ void nmlPacketAddGsPAbe(u_long nPabe)
     g_nGsEntry++;
 }
 
-/* TODO: near-miss (17/18 words, missing one xori-0 boolean-normalize
- * instruction vs orig's movn-based ternary; logic/values verified correct).
- * Re-probed this session: ternary (!=0 / ==0 with movn/movz) and
- * long-typed selects all fold the xori away; the orig's `xori v1,v1,0`
- * after andi looks like an unfolded compare-against-0 the 2.96 movn
- * path normally deletes. Parked again. */
+/* TODO: near-miss, 17/18 words. ROOT CAUSE of the missing word found:
+ * the original's `xori v1,v1,0` is an unfolded compare-against-zero from
+ * the conditional-move expander. MIPS gen_conditional_move rewrites
+ * `a != b` into `(a ^ b) != 0` before selecting movn; gcc 2.96 guards that
+ * XOR on `op1 != const0_rtx`, so comparing against 0 skips it, while the
+ * compiler that built the original emitted it unconditionally. No C shape
+ * can produce a 16-bit-immediate xor by zero out of our compiler: swept
+ * !=0 / ==0 / ternary / bare-truth-value / int / unsigned / u_long forms
+ * and a LAUNDER on the flag, all 17 words.
+ * Forcing it with `__asm__("xori %0,%0,0" : "+r"(flag))` does restore the
+ * 18th word and the instruction multiset, but leaves 16 words differing on
+ * a register permutation (the original holds 88 in $a0 and 72 in $a2,
+ * gcc uses $a1/$a0) plus a header reschedule, so the steering buys
+ * nothing and is not shipped. */
 /* Queue a PRMODE register write; the value is 88 or 72 depending on bit 0
  * of the model's flags word at +0xC0 */
 void nmlPacketAddGsPrmode(void *pModel)
@@ -451,16 +459,12 @@ int s_nReflRotType;
 float s_inReflRotY;
 float s_inReflRotX;
 
-/* TODO: near-miss (18/54 words, LOGIC/register). Logic, field offsets,
- * and call sequence verified against asm. Original's `li s0,1; li s1,2;
- * movn s0,s1,cond` keeps s0=1 as the kept/default value and s1=2 as the
- * override, with the SECOND textual branch (nType==1) jumping forward
- * to a block placed AFTER the nType==2 code -- i.e. the else-if order is
- * inverted from what a plain top-down `if/else if` naturally lays out.
- * Writing the source with nType==2 checked first reproduces that branch
- * layout but flips which of s0/s1 gets the default vs override value;
- * every natural pairing of (check order) x (default-value order) tried
- * fixes one half and breaks the other. */
+/* Queue the reflection rotation matrix. A switch, not an if/else-if
+ * chain: gcc sorts the case tests (1 then 2) while emitting the bodies in
+ * source order, which is how the nType==2 body ends up inline and the
+ * nType==1 body out of line the way the original lays them out. The
+ * default arm returns rather than falling into the packet tail -- the
+ * original's `bnel` on the second test goes straight to the epilogue. */
 void nmlPacketAddReflRot(void *pModel)
 {
     u_int aMtx[16];
@@ -471,7 +475,8 @@ void nmlPacketAddReflRot(void *pModel)
         nType = 2;
     }
     s_pPacket = xglPacketGetCurrent();
-    if (nType == 2) {
+    switch (nType) {
+    case 2:
         if (s_nReflRotType == nType) {
             return;
         }
@@ -479,11 +484,15 @@ void nmlPacketAddReflRot(void *pModel)
         xglMatrixStackRotY(s_inReflRotY);
         xglMatrixStackRotX(s_inReflRotX);
         xglMatrixStackSave(aMtx);
-    } else if (nType == 1) {
+        break;
+    case 1:
         if (s_nReflRotType == nType) {
             return;
         }
         xglMatrixUnit(aMtx);
+        break;
+    default:
+        return;
     }
     sceVif1PkCnt(s_pPacket, 0);
     sceVif1PkOpenUpkCode(s_pPacket, 0x3EC, 0x6C, 1, 1);
@@ -509,14 +518,7 @@ void nmlPacketAddGifTagStandard(int nA, int nB)
     sceVif1PkCloseUpkCode(s_pPacket);
 }
 
-extern unsigned short D_004A90FA;
 
-/* TODO: near-miss (33/46 words, LENGTH). Logic, field offsets and the
- * pi-override condition are verified against asm. Original schedules
- * the independent D_004A90FA load+shift LATE (right before its compare,
- * after the pModel+0x70 quadword copy); gcc here always hoists that
- * independent load earlier regardless of C statement order or pointer
- * staging -- looks like a pure scheduler tie-break. */
 void nmlPacketAddScreen(void *pModel)
 {
     u_int aBuf[4];
@@ -525,8 +527,15 @@ void nmlPacketAddScreen(void *pModel)
     s_pPacket = xglPacketGetCurrent();
     sceVif1PkCnt(s_pPacket, 0);
     pSrc = (char *)pModel + 0x70;
-    *(TI *)aBuf = *(TI *)pSrc;
-    if ((D_004A90FA << 5) != 0x3800) {
+    /* Real MMI quadword copy, same hand-written idiom as the attribute
+     * builders above: the source address is materialised in its own
+     * register at offset 0 rather than folded into the lq. */
+    PS2_ASM("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
+        : : "r"(aBuf), "r"(pSrc) : "$2", "memory");
+    /* Unconditional -- it sits in the delay slot of the nTexBase compare,
+     * so it runs on both arms. */
+    aBuf[3] = 0;
+    if ((sRender.nTexBase << 5) != 0x3800) {
         ((float *)aBuf)[3] = 3.141592741f;
     }
     sceVif1PkOpenUpkCode(s_pPacket, 0x3C7, 0x6C, 1, 1);
