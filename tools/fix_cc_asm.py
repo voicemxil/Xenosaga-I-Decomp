@@ -726,6 +726,24 @@ def rotate_insns(flat, sites):
                 window, skipped, j = [], [], i
                 while j < len(flat) and len(window) < abs(span):
                     w = flat[j]
+                    if w.strip() == ".set push":
+                        # A `.set push ... .set pop` block is ONE unit:
+                        # fix_cc_asm wraps macro expansions (li.s, la, a
+                        # float store to a far offset) in one to control
+                        # how gas expands them, and the wrapper is part of
+                        # the instruction's meaning -- rotating the
+                        # instruction out of its wrapper would change the
+                        # encoding. Before this, any window touching such
+                        # a block was silently declined and the flag
+                        # looked like it did nothing.
+                        k = j
+                        while k < len(flat) and flat[k].strip() != ".set pop":
+                            k += 1
+                        if k >= len(flat):
+                            break
+                        window.append("\n".join(flat[j:k + 1]))
+                        j = k + 1
+                        continue
                     if RE_INSN.match(w):
                         window.append(w)
                     elif _is_empty_asm_marker(w):
@@ -740,11 +758,11 @@ def rotate_insns(flat, sites):
                     j += 1
                 if len(window) == abs(span):
                     if span < 0:
-                        res.extend(window[1:])
-                        res.append(window[0])
+                        order = window[1:] + [window[0]]
                     else:
-                        res.append(window[-1])
-                        res.extend(window[:-1])
+                        order = [window[-1]] + window[:-1]
+                    for unit in order:
+                        res.extend(unit.split("\n"))
                     res.extend(skipped)
                     idx += abs(span)
                     i = j

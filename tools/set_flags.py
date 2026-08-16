@@ -123,6 +123,17 @@ def main():
             ap.error("nothing to do -- pass --cflags/--fix/--unset-*/--show")
 
         for kind, key, value in ops:
+            if value is not None and not value.strip():
+                # An empty --cflags SETS the empty string, so the file
+                # compiles with no -O2 at all and every function in it
+                # goes LENGTH-mismatch. That has bitten once already.
+                ap.error("empty value for --%s %s: this would SET an empty "
+                         "flag string, not clear the entry (the file would "
+                         "then build with no -O2 and every function in it "
+                         "would mismatch). Use --unset-%s %s to clear it."
+                         % (kind, key, kind, key))
+
+        for kind, key, value in ops:
             dname = DICTS[kind]
             before = literals(text, dname)
             node = find_dict(ast.parse(text), dname)
