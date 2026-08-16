@@ -216,6 +216,20 @@ FILE_FIX_FLAGS = {
                     "sceVif1PkAddUpkData128:10,sceVif1PkAddUpkData128:15!"),
     # an lwc1 in a jal delay slot followed by mov.s trips a bogus hazard nop
     "MAP.c": "--omit-hazard mov.s",
+    # ACT_setArms: gcc annuls the arm-slot compare's branch because it
+    # filled the delay slot with a copy of the merge point's instruction;
+    # the original executes that copy unconditionally and re-does it at the
+    # merge. Ten source-level shapes were tried against this and none moved
+    # it -- it is not reachable from C.
+    "ACT.c": "--branch-unlikely ACT_setArms:2",
+    # EtherTreeRightDraw / EtherTreeLine2SelectChange: gcc annuls a branch
+    # whose delay slot it filled by copying the merge point's instruction
+    # (the loop test, and the epilogue's `ld ra`). Both are safe to execute
+    # on the fall-through path -- the original executes them unconditionally
+    # and re-does them at the merge -- so 2.96 emits the plain form and we
+    # emit the branch-likely one. Same annulment class as ACT_setArms.
+    "Ether.c": ("--branch-unlikely EtherTreeRightDraw:2,"
+                "EtherTreeLine2SelectChange:1"),
     # many util natives do lwc1->cvt.s.w with no hazard nop in the original
     "Java_util.c": ("--omit-hazard cvt.s.w --mtc1-nop Java_xeno_util_Spline_getValue__I:0 --swap-adjacent Java_xeno_util_Runtime_jumpCF__II:7 --rotate Java_xeno_util_Runtime_setLocation__III:15:2,Java_xeno_util_Runtime_setLocation__III:17:3"),
     "xglVector.c": ("--omit-hazard mul.s --omit-hazard sub.s "

@@ -312,17 +312,20 @@ void EtherTreeTargetChange(unsigned int id, int setBase)
     }
 }
 
-/* TODO: near-match (LOGIC) - one opcode differs: gcc emits beqzl for the
- * mode test while the original uses beqz. Root cause matches the
- * ACT_setArms wall: the mode-check's delay slot (the loop's "i < 2" test)
- * is dead on the not-taken/fallthrough path (subRightDraw's call site
- * recomputes it right after returning), so 2.96 uses the annulling branch
- * to skip it there; the original just re-executes it redundantly. The
- * flags-check branch just above stays plain beqz because ITS delay slot is
- * the i++ increment, which is never dead. Tried: continue-style early-exit
- * (identical codegen to &&), an asm barrier on `i` before the call (made it
- * worse, 4 diffs). Same class of unreachable-from-C annulment heuristic as
- * ACT_setArms; do not re-attempt without a new idiom for that wall. */
+/* MATCHED via a fixer pass, not from C. gcc emits beqzl for the mode test
+ * where the original uses beqz: the delay slot holds a copy of the merge
+ * point's "i < 2" test, which is dead on the fall-through path (the call
+ * site recomputes it on return), so 2.96 annuls it and the original just
+ * re-executes it redundantly. The flags-check branch just above stays a
+ * plain beqz because ITS delay slot is the i++ increment, never dead.
+ * Nothing at the C level reaches this -- continue-style early exit is
+ * identical codegen to &&, and an asm barrier on `i` made it worse. It is
+ * fixed by `--branch-unlikely EtherTreeRightDraw:2` in configure.py.
+ * EtherTreeLine2SelectChange (site 1) is the same wall; that one is still
+ * 2 diffs, because flipping the annul does not also change which
+ * instruction gcc hoisted into a LATER beql's delay slot (we copy the
+ * epilogue's `ld ra`, the original copies the `li a0,1` after it).
+ * --swap-slot-target does not reach it: sites 0-2 all leave it at 2. */
 /* Draw each active ether-tree right-panel slot */
 void EtherTreeRightDraw(void)
 {

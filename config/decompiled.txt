@@ -2332,3 +2332,5 @@ JS_loadClass = 0x0026B1A0, 0x6C; // JS.c
 JS_classLight_setDirection2 = 0x0026BF18, 0x68; // JS.c
 Java_xeno_Chr_setPointLightReset__ = 0x003006E0, 0x84; // Java_Chr.c
 Java_xeno_Chr_setPeer__Ljava_lang_Object_ = 0x003008F0, 0xC8; // Java_Chr.c
+EtherTreeRightDraw = 0x002BAF08, 0x74; // Ether.c
+ACT_setArms = 0x00306B28, 0xB4; // ACT.c
