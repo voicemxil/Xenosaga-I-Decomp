@@ -1,5 +1,7 @@
 /* Collision-query helpers used by map-unit and actor game logic. */
 
+#include "matching.h"
+
 extern int HitCheckMapUnitPosSize(void *unit, void *position, float size);
 extern int HitCheckMapUnitAt(void *position, void *unit);
 extern int HitCheckMapUnitPosAt(void *position, void *unit);
@@ -391,5 +393,51 @@ int HitCheckBox(void *position, void *map_unit)
     if (distance < radius * radius) {
         return 1;
     }
+    return 0;
+}
+
+extern int HitCheckBoxUwamono(void *position);
+extern float D_004D7F44;
+
+/* Does this probe stand inside the "uwamono" (overlay object) at unit?
+   Height band first, then the shape's own container kind picks a circle or
+   a box test. Case 2 tail-calls with the untouched $a0, so the probe needs
+   a second copy; gcc puts that copy in $a1 because `unit_` has already
+   been moved to $s0 by then, while the original still had $a1 busy and
+   used $a2. Neither declaration order nor statement order moves it --
+   swept probe-first, unit-first, probe-declared-last and hoisting the
+   first field read above the second local. */
+int HitCheckUwamonoAt(void *position, void *unit_)
+{
+    /* $a2: the second copy of the probe pointer -- see above. */
+    PIN(HitProbe *probe, "$6");
+    HitMapUnit *unit;
+    HitMapUnitShape *shape;
+    float probe_y;
+    float unit_y;
+
+    probe = (HitProbe *)position;
+    unit = (HitMapUnit *)unit_;
+    shape = &unit->shape;
+    probe_y = probe->position.y;
+    unit_y = unit->position.value.y;
+
+    if (probe_y < unit_y) {
+        goto miss;
+    }
+    if (unit_y + unit->bounds.value.height < probe_y) {
+        goto miss;
+    }
+    switch (shape->active) {
+    case 1:
+        if (CheckDist2D(&probe->position, &unit->position) <
+            unit->bounds.value.radius + D_004D7F44) {
+            return 1;
+        }
+        return 0;
+    case 2:
+        return HitCheckBoxUwamono(probe);
+    }
+miss:
     return 0;
 }
