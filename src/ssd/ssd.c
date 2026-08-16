@@ -1839,3 +1839,36 @@ void SsdGetTimeCode(unsigned int nTicks, SSD_TIMECODE *pCode)
     pCode->nFrame = nRemain * 30 / RssdWork.nResolution;
     pCode->pad07 = 0;
 }
+
+/* PARKED at 4 diffs, register naming only: retail materialises the
+ * RssdWork %hi through $v1 and the ~0x20 mask into $t0, while gcc uses
+ * $v0 for the %hi and $v1 for the mask (a three-cycle, so --swap-regs
+ * does not apply). Swept: a named local for the loaded flags, a
+ * `RSSD_WORK *pWork` local for the whole block, and a named local for
+ * the mask (6 diffs, it stops being rematerialised). Everything else --
+ * statement order, the unconditional trailing printf, the packet
+ * layout -- is byte-exact.
+ *
+ * Debug helper: read SPU local memory straight back to EE memory.
+ * The trailing printf is unconditional -- it reports the transfer
+ * whether or not the request was accepted. */
+extern char D_004D4AC0[];
+extern char D_004D4AE0[];
+
+void SsdSpuDirectRead(void *pAddr, int nSpuAddr, int nSize)
+{
+    RSSD_PACKET pkt;
+
+    SsdSpuDmaCompleted(1);
+    RssdWork.pDmaAddr = pAddr;
+    RssdWork.nDmaSize = nSize;
+    RssdWork.nFlags = (RssdWork.nFlags | 4) & ~0x20;
+    RssdWork.nDmaFlag = 0;
+    pkt.nArg[0] = nSpuAddr;
+    pkt.nArg[1] = nSize;
+    if (RssdCallFunc(0x1B, &pkt, 0, 0) < 0) {
+        RssdWork.nFlags &= ~4;
+        printf(D_004D4AC0);
+    }
+    printf(D_004D4AE0, nSpuAddr, nSize);
+}
