@@ -741,3 +741,69 @@ int scRRNDScript(SCOBJ *o)
     scSetReg(reg, v + x);
     return 1;
 }
+
+extern int scGetAdrIdx(SCOBJ *o, int idx);
+
+/* ONGOSUB: a computed branch. The operand count is read first, then the
+ * jump-table base; a count in range selects a table entry, otherwise the
+ * fall-through address (cursor + base) is taken. Either way the cursor
+ * advances past the table. field54 is read signed for the fetch and
+ * re-read through (unsigned short) for the store -- the call in between
+ * means the original really does load it twice. */
+int scONGOSUB(SCOBJ *o)
+{
+    int *cmd = &o->cmdBuf[0];
+    int cnt = scGetNumScript(o);
+    int base = scGetCmdScript(o);
+    int next = cmd[o->field54] + base;
+    int ret = next;
+    if (cnt >= 0 && cnt < base) {
+        ret = scGetAdrIdx(o, cnt);
+    }
+    cmd[(short)(unsigned short)o->field54] = next;
+    return ret;
+}
+
+extern int strlen(const char *s);
+
+/* PRINT: the operand is an inline NUL-terminated string in the script
+ * table; the cursor steps over it rounded up to a whole number of
+ * half-words, plus the terminator. */
+int scPRINTScript(SCOBJ *o)
+{
+    int *cmd = &o->cmdBuf[0];
+    char *s = 0;
+    int adr = cmd[o->field54];
+    int len;
+    int step;
+    if (adr != 0) {
+        s = (char *)D_0041E7D0[_nowScript].pTable + adr * 2;
+    }
+    len = strlen(s);
+    step = (len & 1) ? len + 1 : len + 2;
+    step = step / 2;
+    cmd[o->field54] = cmd[o->field54] + step;
+    return 1;
+}
+
+extern int sefCreateScheduler(void *adr, void *a, void *b, void *tbl, int e);
+extern void sefCreateBattleActorTbl(short no);
+extern void scFreezeCamera(short no);
+
+/* EFFECT: hand the resolved script address to the effect scheduler; a
+ * successful schedule freezes the camera on the effect's own actor. */
+int scEFFECTScript(SCOBJ *o)
+{
+    void *adr = scGetAdrImmScript(o);
+    if (adr != 0) {
+        int sch = sefCreateScheduler(adr, (char *)o + 0x30, (char *)o + 0x20,
+                                     D_0041E7D0[_nowScript].pTable, -1);
+        o->field56 = sch;
+        sefCreateBattleActorTbl(((SCTASK *)o)->eftNo);
+        if (sch >= 0) {
+            scSetAmbient((SC_AMB_OBJ *)o);
+            scFreezeCamera(((SCTASK *)o)->eftNo);
+        }
+    }
+    return 1;
+}
