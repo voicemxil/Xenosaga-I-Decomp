@@ -467,9 +467,10 @@ void *UnduDataGetHeader(unsigned int key, unsigned int id)
 
    Solved and not to be re-swept: the tail must be ONE return of a
    `result` local (retail's `move v0,v1` in the jr delay slot), and the
-   two stores go pBest-first with `result = 2` between them -- writing
-   `chk->pBest` before `chk->fBest` puts the float store in the beql delay
-   slot, which is retail's order reversed.
+   two stores are written fBest-FIRST with `result = 2` between them, which
+   is what makes gcc emit them in retail's opposite order (`sw` for pBest
+   in the beql delay slot, `swc1` for fBest after the `li`); writing them
+   in retail's order puts the float store in the delay slot instead.
 
    Score one list entry's height against the best hit so far: 0 rejects it,
    1 accepts it without replacing the best, 2 makes it the new best. The
