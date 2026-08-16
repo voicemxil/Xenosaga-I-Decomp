@@ -53,7 +53,12 @@ extern void DoorCommonFunc(DOOR *a);
 extern void DoorOpenStanbyFunc(DOOR *a);
 extern void xglSoundEffectPosID(int, VECTOR8 *, int, int);
 extern void xglSoundEffectStopID(int, int);
-extern int xglSoundEffectCheckID(int);
+/* The original calls this with TWO arguments -- the sound code and the
+   door's channel (nUnkA0 + 1) -- and the implementation in xglSound.c
+   reads only the first. The dead second argument is really in the
+   original's code at both call sites below, so the declaration has to
+   carry it or those two instructions cannot appear. */
+extern int xglSoundEffectCheckID(int nCode, int nCh);
 
 void EventDoorStanbyFunc(DOOR *a);
 void EventDoorOpenOpeFunc(DOOR *a);
@@ -86,12 +91,12 @@ void EventDoorFunc(DOOR *a)
 
 /* Waiting state: track the target position and, once triggered, print a
    debug message, kick the open sound and transition state */
-/* TODO: near-miss (33/50 words) - the bnel-likely skip path restores $s0
-   from the stack in its delay slot and the nState store lives only once at
-   the join; every C shape tried (single if-block, early-return duplicate
-   store) makes gcc instead hoist the nState store itself into the delay
-   slot and keep a second copy at the join - looks like the same class of
-   scheduler-only near-miss as the sibling-call blocker. */
+/* Mirror the door's position into its target slot; when the sub-state
+   reports "open requested", announce it, retire the old sound and place
+   the new one -- and only then adopt the sub-state as the door state.
+   The nState store is INSIDE the if: the skip path branches straight into
+   the middle of the epilogue with `ld s0` in its delay slot, so it never
+   runs the store. */
 void EventDoorStanbyFunc(DOOR *a)
 {
     DOORSUB *sub = &a->sub;
@@ -107,13 +112,13 @@ void EventDoorStanbyFunc(DOOR *a)
         if (printflg) {
             printf(D_004CA3B8, a->nId);
         }
-        if (xglSoundEffectCheckID(sub->nCode1)) {
+        if (xglSoundEffectCheckID(sub->nCode1, a->nUnkA0 + 1)) {
             xglSoundEffectStopID(sub->nCode1, a->nUnkA0 + 1);
         }
         CheckDoorPos(a, &buf);
         xglSoundEffectPosID(sub->nCode1, &buf, 1, a->nUnkA0 + 1);
+        a->nState = nSubState;
     }
-    a->nState = nSubState;
 }
 
 /* Opening: advance the counter, move the door and check whether it has
@@ -155,7 +160,7 @@ void EventDoorOpenNowFunc(DOOR *a)
         }
         a->nState = 3;
         a->nCounter = sub->nSubCounter;
-        if (xglSoundEffectCheckID(sub->nCode1)) {
+        if (xglSoundEffectCheckID(sub->nCode1, a->nUnkA0 + 1)) {
             xglSoundEffectStopID(sub->nCode1, a->nUnkA0 + 1);
         }
         CheckDoorPos(a, &buf);
