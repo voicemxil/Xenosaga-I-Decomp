@@ -396,3 +396,62 @@ int srsGetEffect2Idx(int nEftNo)
 done:
     return nIdx;
 }
+
+/* PARKED at 12 diffs. Everything except the CD arm's two returns is
+ * byte-exact: retail branches (`bgtzl s1` + `move v0,s1`, then `b` +
+ * `li v0,-1`) where gcc if-converts the pair into `slt`/`movn` and, to
+ * do it, keeps srsLoadMode alive in $s0 as a known zero -- which then
+ * pushes `fd` off $s0 and reshuffles the host arm's schedule. The two
+ * properties trade off and no source shape got both:
+ *   - explicit `return -1;` after the `if` -> nLen correctly lands in
+ *     the callee-saved $s1 (shared with the host arm) but gcc
+ *     if-converts (12 diffs, this shape);
+ *   - falling through to the shared final `return -1`, or `goto fail`,
+ *     or `goto ret_len` -> no if-conversion and srsLoadMode correctly
+ *     stays in $v1, but copy propagation coalesces the CD arm's nLen
+ *     into $v0 and it becomes `blezl v0` (15 / 20 diffs).
+ * Also swept: `if (nLen <= 0) return -1; return nLen;`, an explicit
+ * `else { return -1; }`, declaration order of fd/nLen (this order is
+ * right: fd->$s0, nLen->$s1), reading srsLoadMode directly instead of
+ * through nMode, LAUNDER(nLen) before the test (no effect) and
+ * LAUNDER_V inside the then-arm (50 words). Blocking the
+ * if-conversion is the whole remaining job.
+ *
+ * Length of a sound-resource file, by whichever route srsLoadMode
+ * selects: 0 = the CD image (path separators converted first),
+ * 1 = the host filesystem (seek to end, seek back, close).
+ * Any other mode -- and any failure -- reports -1. */
+extern int srsMakeFileName(char *pName, int nFileNo);
+extern int xglCdGetFileSize(char *pName);
+extern int sceOpen(char *pName, int nFlags);
+extern int sceLseek(int fd, int nOfs, int nWhence);
+extern int sceClose(int fd);
+
+int srsGetFileLen(int nFileNo)
+{
+    char szName[256];
+    int nMode;
+    int fd;
+    int nLen;
+
+    if (srsMakeFileName(szName, nFileNo) != 0) {
+        nMode = srsLoadMode;
+        if (nMode == 0) {
+            srsChangeSeparator(szName);
+            nLen = xglCdGetFileSize(szName);
+            if (nLen > 0) {
+                return nLen;
+            }
+            return -1;
+        } else if (nMode == 1) {
+            fd = sceOpen(szName, 1);
+            if (fd >= 0) {
+                nLen = sceLseek(fd, 0, 2);
+                sceLseek(fd, 0, 0);
+                sceClose(fd);
+                return nLen;
+            }
+        }
+    }
+    return -1;
+}

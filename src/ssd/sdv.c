@@ -244,3 +244,43 @@ int sdvAllocSpecialWork(int nType)
     }
     return -1;
 }
+
+/* Ambient-state latch. The effect number is decoded once into two
+ * function statics; only category-14 effects (or the one special ID
+ * 0xB25) may change the state, and only when the effect number falls
+ * outside the 0x8FC..0x9B1 window.
+ *
+ * PARKED at 6 diffs -- identical instruction multiset, a pure
+ * cross-block placement tie-break: retail keeps the `sltiu` in the
+ * eftCate block and materialises `li 2853` in the second block; every
+ * shape below puts one or the other on the wrong side of the `beq`.
+ * Swept: inline ternary in the if (8, sltiu gets its own pseudo);
+ * `nDelta` local before the if (7) and inside the if (8); boolean
+ * `bOutside = ... >= 0xB6` before the if (32 words -- the truth value
+ * picks up an xori to invert for movn); `bInside ? _sdvAmbState :
+ * nState` (28 words, gcc folds the self-assign); `(bInside == 0) ?`
+ * before the if (6, this one -- correct movz and correct register
+ * reuse, only the placement wrong); early-return spelling of the
+ * guard (6); a separate `nCate = eftCate` local (6). Permuter
+ * territory.
+ */
+extern void srsAnalyzeEftNo(int nEffect, int *pCharID, int *pCate);
+
+void sdvSetAmbStateSub(int nState, int nEffect, int bForce)
+{
+    static int charID;
+    static int eftCate;
+    unsigned int nDelta;
+    int bInside;
+
+    if (bForce != 0) {
+        _sdvAmbState = nState;
+        return;
+    }
+    srsAnalyzeEftNo(nEffect, &charID, &eftCate);
+    nDelta = (unsigned int)(nEffect - 0x8FC);
+    bInside = nDelta < 0xB6U;
+    if (eftCate == 14 || nEffect == 0xB25) {
+        _sdvAmbState = (bInside == 0) ? nState : _sdvAmbState;
+    }
+}
