@@ -154,7 +154,8 @@ typedef struct
 {
     short nWeaponID;   /* 0x00 */
     short nEffectID;   /* 0x02 */
-    short pad[2];      /* 0x04 */
+    short nAltID1;     /* 0x04 */
+    short nAltID2;     /* 0x06 */
 } WEAPON_ENT;
 
 extern WEAPON_ENT _weaponTbl[];
@@ -261,4 +262,82 @@ int srsGetBossWaitEftNo(int nID)
         }
     }
     return 0;
+}
+
+/* --- effect id classification and name lookup --- */
+
+/* Which of the eight effect-number bands an effect belongs to. Written
+ * as one accumulator plus early `goto done` rather than eight returns:
+ * every assignment to nType lands in the delay slot of the branch that
+ * precedes it, which is only possible while there is a single exit. */
+int srsGetEffectType(int nEftNo)
+{
+    int nType;
+
+    nType = 0;
+    if ((unsigned int)(nEftNo - 2600) < 62) goto done;
+    nType = 2;
+    if ((unsigned int)(nEftNo - 2500) < 100) goto done;
+    if (nEftNo < 100) goto done;
+    nType = 14;
+    if ((unsigned int)(nEftNo - 2000) < 219) goto done;
+    nType = 11;
+    if ((unsigned int)(nEftNo - 240) < 157) goto done;
+    nType = 14;
+    if ((unsigned int)(nEftNo - 2300) < 182) goto done;
+    nType = 2;
+    if ((unsigned int)(nEftNo - 2800) < 200) goto done;
+    nType = ((unsigned int)(nEftNo - 600) < 400) ? 15 : 14;
+done:
+    return nType;
+}
+
+/* Weapon cross-reference search. The three compared ids sit at +2, +4
+ * and +6 of each 8-byte record -- the record's leading nWeaponID is not
+ * examined, which is why the induction variable anchors at
+ * _weaponTbl+2 and gcc hoists three separate base pointers. */
+int srsGetWeaponEffectIdx(int nEftNo)
+{
+    int nKey;
+    int i;
+
+    nKey = nEftNo;
+    if ((unsigned int)(nEftNo - 2900) < 99) {
+        nKey = nEftNo - 100;
+    }
+    if (nKey > 0) {
+        for (i = 0; i < 45; i++) {
+            if (nKey == _weaponTbl[i].nEffectID) return i;
+            if (nKey == _weaponTbl[i].nAltID1) return i;
+            if (nKey == _weaponTbl[i].nAltID2) return i;
+        }
+    }
+    return -1;
+}
+
+int strcmp(const char *a, const char *b);
+
+/* Reverse of srsGetEffectName: linear scan of the whole effect table
+ * for a matching name. Effect 0 is skipped. */
+int srsEffectNameToID(char *pName)
+{
+    int nRet;
+    int i;
+
+    if (pName == 0) {
+        nRet = 0;
+        goto done;
+    }
+    for (i = 1; i < 3072; i++) {
+        char *p = (char *)srsGetEffectData(i);
+        if (p != 0) {
+            if (strcmp(pName, p) == 0) {
+                nRet = i;
+                goto done;
+            }
+        }
+    }
+    nRet = 0;
+done:
+    return nRet;
 }

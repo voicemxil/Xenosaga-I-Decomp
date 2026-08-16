@@ -2643,3 +2643,5 @@ _sceCdSetTimeout = 0x0020E1C8, 0xD4; // sceCd.c
 sceCdReadClock = 0x0020E410, 0xF8; // sceCd.c
 subLine2_OpenType_0 = 0x002BB5E0, 0xA8; // sub.c
 scEFFECTScript = 0x002EB4D0, 0x98; // sc.c
+srsGetEffectType = 0x002E8B80, 0x88; // srsGet.c
+srsEffectNameToID = 0x002E9AB8, 0x70; // srsGet.c
