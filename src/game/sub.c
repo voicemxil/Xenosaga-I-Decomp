@@ -70,25 +70,19 @@ void sub2JoutoYGet(void *data, float *result)
     }
 }
 
-/* TODO: near-match (5 of 20 words, was 8). Pinning the loop bound to $a2 is
- * what fixes the i/count role swap (gcc otherwise puts the counter in $a2
- * and the bound in $a1, the mirror of the original). Do NOT also pin the
- * counter to $a1: that regresses to 15.
- * What is left: the original loads the byte into $a0, tests THAT for the
- * loop guard, and only then copies it into $a2 (`move a2,a0`); we load
- * straight into $a2, which frees a slot and lets the first `lw` float one
- * instruction earlier. Tried: a separate n temp pinned to $a0 and copied
- * into count (5, no change), LAUNDER or PASSTHRU between them (both grow
- * the function to 22 words / 19 diffs), an explicit `if (n == 0) return 0;`
- * guard ahead of the loop (25 words, 17 diffs) and the same with `<= 0`,
- * and a while-loop shape (5, no change). */
+/* Any unspent skill slot blocks the "seisan" (settlement) confirm.
+
+   The loop bound is the expression, not a local computed above the loop:
+   that is what makes gcc load the count into its own register for the
+   zero guard and copy it into the bound register (`move a2,a0`), freeing
+   the first register for the walking pointer. Hoisting it into a local --
+   with or without pinning the local to $a2 -- loads straight into the
+   bound register, loses the copy and floats the first lw a slot earlier. */
 int subSeisanHissatuCheck00(void)
 {
-    PIN(int count, "$6");
     int i;
 
-    count = (unsigned char)SeisanWork[6];
-    for (i = 0; i < count; i++) {
+    for (i = 0; i < (unsigned char)SeisanWork[6]; i++) {
         if (*(int *)(SeisanResult + 0x38 + i * 0x3C) != 0) {
             return 0x50;
         }
@@ -96,25 +90,13 @@ int subSeisanHissatuCheck00(void)
     return 0;
 }
 
-/* TODO: near-match (5 of 20 words, was 8). Pinning the loop bound to $a2 is
- * what fixes the i/count role swap (gcc otherwise puts the counter in $a2
- * and the bound in $a1, the mirror of the original). Do NOT also pin the
- * counter to $a1: that regresses to 15.
- * What is left: the original loads the byte into $a0, tests THAT for the
- * loop guard, and only then copies it into $a2 (`move a2,a0`); we load
- * straight into $a2, which frees a slot and lets the first `lw` float one
- * instruction earlier. Tried: a separate n temp pinned to $a0 and copied
- * into count (5, no change), LAUNDER or PASSTHRU between them (both grow
- * the function to 22 words / 19 diffs), an explicit `if (n == 0) return 0;`
- * guard ahead of the loop (25 words, 17 diffs) and the same with `<= 0`,
- * and a while-loop shape (5, no change). */
+/* Same scan, rejecting slots whose value has reached 5 (see above for why
+   the bound is spelled as the expression). */
 int subSeisanHissatuCheck01(void)
 {
-    PIN(int count, "$6");
     int i;
 
-    count = (unsigned char)SeisanWork[6];
-    for (i = 0; i < count; i++) {
+    for (i = 0; i < (unsigned char)SeisanWork[6]; i++) {
         if (*(int *)(SeisanResult + 0x38 + i * 0x3C) >= 5) {
             return 0x58;
         }
