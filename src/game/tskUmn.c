@@ -1904,31 +1904,23 @@ typedef struct {
 extern void eSpriteSet(DBEXSPR *pSpr, int nId);
 extern void eSpriteMain(DBEXSPR *pSpr);
 
-/* TODO: PARKED at 17 differing words of 249.  Length, frame layout and
- * every branch offset are right.  Two clusters remain:
+/* Gnosis-database "extra window": the five caption rows and the two
+ * shoulder-button sprites that slide in over the model view.
  *
- *  - the sprite loop hoists its invariants in the order -45, &spr,
- *    214, &nSlide; retail emits -45 LAST, after the other three.
- *  - the page-49 arm loads PadData's trigger halfword three times
- *    where retail loads it twice and widens each with `andi 0xffff'.
- *    The andi is a zero-extend that survives only when the loaded
- *    HImode value has more than one user, i.e. retail holds the
- *    widened value in one register across both equality tests while
- *    gcc reloads before the second.
- *
- * Fixed since: the row loop's -196 and the sprite loop's -45 shared one
- * `nX' local.  One C local is one pseudo, so the shared register made
- * gcc materialise 288 before -196; separate locals, with the row x
- * assigned first, put `li -196' ahead of `li 288' as retail has it
- * (19 -> 17).
- *
- * Swept: all six orders of the three sprite-header stores crossed with
- * both orders of the caption x/y stores (twelve builds); the trigger
- * halfword as `unsigned short' + `int', as one `int', read once before
- * the test, once after the bShow xor, re-read inside the xor arm, and
- * at every use (every cached form costs six words); `nSprX = -45'
- * before the nId block, inside it, in the for-init, and block-scoped
- * with the array (no effect on the hoist order). */
+ * Three things in here are compiler-visible and easy to undo:
+ *  - the row loop's -196 and the sprite loop's -45 need SEPARATE locals;
+ *    one shared local is one pseudo, and the shared register decides
+ *    which constant is materialised first.
+ *  - the sprite x is written as the affine `i * 573 - 45' rather than as
+ *    an accumulator, so loop strength reduction builds the giv itself
+ *    and emits its -45 init after the other three loop invariants.
+ *  - the trigger halfword is read into an int and compared through a
+ *    `(unsigned short)' cast.  The cast is real: it is retail's
+ *    `andi 0xffff', it keeps the widened value in one register across
+ *    the w->nSlide store, and without it gcc reloads the halfword for
+ *    the second test.  The re-read inside the bShow arm is real too --
+ *    the store there may alias PadData, which is why retail loads it
+ *    twice and not once. */
 void tskUmnDataBaseExWin(TSK_TASK *pTask, UMN_DBEX *w)
 {
     static char *text[] = {
@@ -1964,11 +1956,9 @@ void tskUmnDataBaseExWin(TSK_TASK *pTask, UMN_DBEX *w)
         {
             short nId[2] = { 274, 272 };
 
-            nSprX = -45;
             for (i = 0; i < 2; i++) {
                 eSpriteSet(&w->spr[i], nId[i]);
-                w->spr[i].nX = nSprX;
-                nSprX += 573;
+                w->spr[i].nX = i * 573 - 45;
                 w->spr[i].nColor = w->row[0].nColor;
                 w->spr[i].nY = 214;
                 w->nSlide[i] = 0;
@@ -1986,6 +1976,7 @@ void tskUmnDataBaseExWin(TSK_TASK *pTask, UMN_DBEX *w)
            array's freed four-byte temp slot in the init arm. */
         short nSprTarget[5];
         DBEXPOS *e;
+        int nTrig;
 
         for (i = 0; i < 5; i++) {
             nTarget[i] = -196;
@@ -2001,15 +1992,17 @@ void tskUmnDataBaseExWin(TSK_TASK *pTask, UMN_DBEX *w)
                two equality tests still need it widened to int, which is
                the `andi 0xffff' pair retail emits.  The store to bShow
                may alias, so the second half reloads. */
+            nTrig = PadData.trig.b.h;
             if (PadData.trig.b.h & 0x80) {
                 w->row[0].bShow ^= 1;
+                nTrig = PadData.trig.b.h;
             }
             nSprTarget[0] = 8;
             nSprTarget[1] = 475;
-            if (PadData.trig.b.h == 4) {
+            if ((unsigned short)nTrig == 4) {
                 w->nSlide[0] = -6;
             }
-            if (PadData.trig.b.h == 8) {
+            if ((unsigned short)nTrig == 8) {
                 w->nSlide[1] = 6;
             }
         } else {

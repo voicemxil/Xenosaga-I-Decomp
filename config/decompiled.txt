@@ -2885,3 +2885,4 @@ tskUmnMailMenu = 0x00A07EB0, 0x430; // tskUmn.c
 xglMenuDrawType1Sub = 0x0021C968, 0x178; // xglMenu.c
 RSsdSifRpcThread = 0x0023FB90, 0x24; // ssd.c
 FileSelectListReload = 0x0021EC50, 0x120; // xglCd.c
+tskUmnDataBaseExWin = 0x00A0A8F8, 0x3E4; // tskUmn.c
