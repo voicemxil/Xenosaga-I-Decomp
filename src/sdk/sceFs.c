@@ -424,3 +424,59 @@ int sceDread(int fd, void *buf)
     DeleteSema(semid);
     return result;
 }
+
+/* sceSync: flush a mounted filesystem by name.  The path is copied into
+ * the request block a byte at a time with a 1024 cap; gcc peels the
+ * first iteration itself (the i < 1024 test is known true), so the
+ * source must NOT peel it by hand.  Overflowing the cap forces a
+ * terminator into the last byte, which is the annulled `beql` store.
+ *
+ * The terminator test reads back sd->path[i], NOT the source byte: gcc
+ * then tests the QImode pseudo it just stored, which needs the
+ * `lbu` + `sll 24` pair the original has.  Testing `name[i]`, or a
+ * `char`/`unsigned char` local holding it, gives a plain `lb` and comes
+ * out three words short. */
+int sceSync(char *name, int flag)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_t *sd;
+    int done;
+    int i;
+
+    sd = &_send_data;
+    _sceFsWaitS(19);
+    if (_fs_init == 0)
+        sceFsInit();
+    for (i = 0; i < 1024; i++) {
+        sd->path[i] = name[i];
+        if (sd->path[i] == 0)
+            break;
+    }
+    if (i == 1024)
+        sd->path[1023] = 0;
+    sd->u.arg = flag;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->dst = &result;
+    sd->semid = semid;
+    sd->size = 4;
+    if (sceSifCallRpc(&_cd, 19, 0, &_send_data, 1044, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}
