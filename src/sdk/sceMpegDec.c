@@ -274,18 +274,27 @@ void _quantMatrixExtension(MPEGSTREAM *pStream)
 void _outputFrame(MPEGSTREAM *pStream, int nIdx, int nDoIt)
 {
     if (nDoIt != 0) {
-        if (pStream->nUnk174 == 3) {
-            if (pStream->nUnk150 == 3) {
-                _dispRefImage(pStream, pStream->pUnk1C4, nIdx - 1);
-            } else {
-                _dispRefImage(pStream, pStream->pUnk1B8, nIdx - 1);
-            }
-        } else if (pStream->nUnk150 == 3) {
-            _dispRefImageField(pStream, pStream->pUnk1D4, pStream->pUnk1D8,
-                               nIdx - 1);
+        int nType;
+
+        nType = pStream->nUnk174;
+        if (nType == 3) {
+            nType = pStream->nUnk150;
+            _dispRefImage(pStream,
+                          nType == 3 ? pStream->pUnk1C4 : pStream->pUnk1B8,
+                          nIdx - 1);
         } else {
-            _dispRefImageField(pStream, pStream->pUnk1C8, pStream->pUnk1E4,
-                               nIdx - 1);
+            REFIMAGE *pTop;
+            REFIMAGE *pBot;
+
+            nType = pStream->nUnk150;
+            if (nType == 3) {
+                pTop = pStream->pUnk1D4;
+                pBot = pStream->pUnk1E4;
+            } else {
+                pTop = pStream->pUnk1C8;
+                pBot = pStream->pUnk1D8;
+            }
+            _dispRefImageField(pStream, pTop, pBot, nIdx - 1);
         }
     }
     if (pStream->nUnk0F8 == 1) {
@@ -296,15 +305,20 @@ void _outputFrame(MPEGSTREAM *pStream, int nIdx, int nDoIt)
 /* Reject an output request whose rectangle does not fit the decoded frame. */
 int _isOutSizeOK(MPEGSTREAM *pStream, OUTREQ *pReq)
 {
-    char sBuf[288];
+    char sBuf[256];
     int bOK;
 
-    if (pStream->nUnk0E0 == 0) {
-        bOK = pStream->nUnk0E4 >= pReq->nUnk0C * pReq->nUnk10;
-    } else if (pStream->nUnk0DC < pReq->nWidth) {
-        bOK = 0;
+    if (pStream->nUnk0E0 != 0) {
+        if (pStream->nUnk0DC < pReq->nWidth) {
+            bOK = 0;
+        } else {
+            bOK = pStream->nUnk0E0 >= pReq->nHeight;
+            /* Keeps this arm's slt/xori tail out of the shared block that
+             * gcc's cross-jumping otherwise folds the two arms into. */
+            LAUNDER(bOK);
+        }
     } else {
-        bOK = pStream->nUnk0E0 >= pReq->nHeight;
+        bOK = pStream->nUnk0E4 >= pReq->nUnk0C * pReq->nUnk10;
     }
     if (bOK == 0) {
         sprintf(sBuf, D_004D5DA8, pReq->nWidth, pReq->nHeight);
