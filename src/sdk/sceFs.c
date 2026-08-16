@@ -247,8 +247,13 @@ typedef struct t_fs_send {
     void *dst;                  /* +4  where the reply is DMAd */
     int   size;                 /* +8  reply size */
     int   fd;                   /* +12 IOP-side descriptor */
-    int   index;                /* +16 EE-side slot index */
-} fs_send_t;                    /* 20 bytes */
+    union {                     /* +16 one call-specific word */
+        int   index;            /*     EE-side slot index */
+        void *buf;              /*     caller's data buffer */
+        int   arg;
+    } u;
+    char  path[1024];           /* +20 name argument, when there is one */
+} fs_send_t;                    /* 1044 bytes */
 
 extern fs_send_t _send_data;
 extern int _rcv_data_rpc;
@@ -341,7 +346,7 @@ int sceClose(int fd)
         return -9;
     }
     sd->fd = p->fd;
-    sd->index = p - _iob;
+    sd->u.index = p - _iob;
     sema.max_count = 1;
     sema.init_count = 0;
     sema.option = 0;
@@ -369,4 +374,53 @@ int sceClose(int fd)
     if (lim < r)
         r = 0;
     return r;
+}
+
+/* sceDread: read one directory entry into the caller's buffer.  The
+ * result is returned verbatim (no normalising compare), and the RPC
+ * failure arm waits on the semaphore instead of deleting it -- both
+ * differences from sceDclose are in the original. */
+int sceDread(int fd, void *buf)
+{
+    ee_sema_t sema;
+    int result;
+    iob_t *p;
+    int semid;
+    fs_send_t *sd;
+    int done;
+
+    sd = &_send_data;
+    p = get_iob(fd);
+    _sceFsWaitS(11);
+    if (_fs_init == 0) {
+        _sceFsSigSema();
+        return -1;
+    }
+    if (p == 0 || p->used == 0) {
+        _sceFsSigSema();
+        return -9;
+    }
+    sd->fd = p->fd;
+    sd->u.buf = buf;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    _send_data.semid = semid;
+    sd->dst = &result;
+    sd->size = 4;
+    if (sceSifCallRpc(&_cd, 11, 0, sd, 32, &_rcv_data_rpc, 4, 0, 0) < 0) {
+        WaitSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
 }
