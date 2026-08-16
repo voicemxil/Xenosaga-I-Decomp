@@ -270,7 +270,7 @@ extern int _lf_version(void);
 extern int sceSifCallRpc(void *pCd, unsigned int nFno, int nMode,
                           void *pSend, int nSSize, void *pRecv, int nRSize,
                           void *pEndFunc, void *pEndArg);
-extern int cd_00994A40;
+extern struct SifRpcClientData cd_00994A40;
 
 /* The loadfile RPC send/receive block at 0x994840. Its first word is the
  * scalar argument (module id, address) or reply; sceSifSearchModuleByName
@@ -347,7 +347,7 @@ extern int DIntr(void);
 extern int EIntr(void);
 extern void *_data_table_00993280[16];
 extern int _bind_check;
-extern int _lfversion;
+extern char _lfversion[4];
 void *memset(void *dst, int c, int n);
 
 /* sceSifLoadFileReset: drop the loadfile RPC binding so the next call
@@ -1067,6 +1067,54 @@ SifRpcServerData *_search_svdata(int sid, void **tbl)
         for (sd = q->link; sd != 0; sd = sd->link) {
             if (sd->sid == sid)
                 return sd;
+        }
+    }
+    return 0;
+}
+
+/* The loadfile RPC's version handshake.  `_lfversion` is the four
+ * version bytes the IOP module reported at bind time; they are accepted
+ * if they equal this build's own libinfo version (the 12-byte offset
+ * into __ps2_klibinfo__) or the wildcard the caller may have installed.
+ * Non-zero means "incompatible". */
+extern char __ps2_klibinfo__[];
+extern void *_lfwildcard;
+extern int memcmp(const void *a, const void *b, unsigned int n);
+
+int _lf_version(void)
+{
+    const char *mine = __ps2_klibinfo__ + 12;
+    int bad = 0;
+
+    if (memcmp(_lfversion, mine, 4) != 0)
+        if (memcmp(_lfversion, _lfwildcard, 4) != 0)
+            bad = (memcmp(mine, _lfwildcard, 4) != 0);
+
+    return bad;
+}
+
+/* _lf_bind: bind the loadfile RPC server once, retrying while the IOP has
+ * not published it yet, then read back its four version bytes.  The
+ * argument is ignored -- every caller passes something, but the original
+ * never reads it.  `_bind_check` negative means "not bound yet". */
+int _lf_bind(int unused)
+{
+    int i;
+
+    if (_bind_check < 0) {
+        for (;;) {
+            if (sceSifBindRpc(&cd_00994A40, 0x80000006, 0) < 0)
+                return -1;
+            if (cd_00994A40.serve != 0) {
+                _bind_check = 0;
+                if (sceSifCallRpc(&cd_00994A40, 255, 0, 0, 0,
+                                  &_senddata, 4, 0, 0) < 0)
+                    return (int)0xfffeffff;
+                memcpy(_lfversion, &_senddata, 4);
+                return 0;
+            }
+            for (i = 0x100000; i != -1; i--)
+                ;
         }
     }
     return 0;
