@@ -53,6 +53,26 @@ them independently).
 
 **One local, two roles.** A C local is one pseudo, so reusing it for two
 sequential purposes pins the second value into the first's register.
+This cuts BOTH ways and the direction is worth testing: reusing the
+function's actor pointer for a later, unrelated pointer was the whole
+difference between a match and 60 diffs in `updateCursorMode2`, while
+reusing ONE `char *` local for two format strings cost 16 diffs in
+`updateCursor` because the shared pseudo's longer live range pushed it to
+the end of the callee-saved order and shifted every other assignment.
+
+**A constant used on both sides of a call gets a callee-saved register.**
+Two tests against the same literal with a call between them become one
+pseudo that crosses the call, so `global_alloc` gives it $s2 and the
+whole frame grows; the original rematerialises it with a second `li`.
+No source spelling found so far separates them -- swapping the arms,
+comparing a different equivalent constant, block-scoping the locals and
+LAUNDER on the loaded value all leave the CSE intact. Recorded because it
+is the last word standing between `tskUmnSimulationList` and a match.
+
+**Assigning a field and a local the same constant: two statements, not a
+chain.** `p->nMode = 2; n = 2;` materialises the constant TWICE, which is
+what the original does when the local then feeds a range test.
+`n = 2; p->nMode = n;` shares one register and comes out a word short.
 
 **Let CSE invent the FP temporaries.** Naming `cur`/`dst`/`v` rotates
 every FP register; leaving them as memory reads matches.
@@ -211,6 +231,33 @@ align 4 → `ldl/ldr` for 8-byte chunks plus a `lw/sw` tail; align 8 (the
 **`a = b = c = 1.0f` stores c, b, a.** Three separate statements will not
 reproduce that order.
 
+**A general float constant is a `li.s` MACRO, and gas's own -G decides
+what it expands to.** The compiler emits `li.s $f1,<decimal>` for every
+SFmode constant. Whether that becomes inline `lui`/`ori`/`mtc1` or a
+`.lit4` pool entry loaded through `$gp` is decided by the ASSEMBLER's
+small-data threshold, which is independent of the -G passed to gcc. At
+gas's default -G8 a two-halfword constant is pooled and costs ONE word;
+the original build's inline form costs THREE. Symptom: a `lwc1
+$fN,off($gp)` where the original has `lui $at`/`ori $at`/`mtc1`, and a
+function two words short. The fix is `FILE_ASFLAGS_OVERRIDE[file] =
+"-G0"` (set it with `tools/set_flags.py --asflags`, and declare it to the
+post-processor with `--as-g0` so the COP1 hazard pads come back). A
+constant that needs only a `lui` -- 1.0f, 7.5f, 3.0f, 0.5f -- inlines at
+either threshold, so a file can look fine until its first awkward
+constant. -G0 is a WHOLE-FILE switch and it also stops gas resolving
+`lw $reg,extern_sym` through $gp, so any function in the same file that
+reaches a 4-byte global that way breaks: give the float-constant function
+its own translation unit rather than dragging them down.
+
+**And the decimal round-trip truncates TWICE.** gcc prints the constant
+into the `li.s` as a decimal, and gas parses it back. Both conversions
+fold toward zero, so `0.001f` leaves the compiler as
+`9.99999931082129478455e-4` and arrives one ulp low (0x3A83126E, not
+0x3A83126F). Writing the exact decimal expansion does NOT fix this one --
+it is the printing that loses the bit. Nudge the source constant UP until
+gcc prints the decimal for the value you want (`0.0010000001f` here) and
+check the `li.s` line in `cc -S` output, not the source.
+
 **ee-gcc 2.96 truncates every float constant fold toward zero** —
 `0.1f` → 0x3dcccccc, `1.0f/3.0f` → 0x3eaaaaaa, all one ulp low. The
 original build's compiler did too. If a constant is one ulp off, write
@@ -231,6 +278,14 @@ and can never match. Add a name to `config/symbol_addrs.txt` instead.
 ---
 
 ## Stores and memory
+
+**A pointer that is live across a call in ONE branch wants that branch to
+own it.** Writing the loop's store through the global by name
+(`cursor.pSel = p`) instead of through the enclosing block's pointer is
+what keeps that pointer a single-block quantity in a caller-saved
+register and gives the loop its own callee-saved copy -- the `move
+$s2,$a2` in the preheader. An explicit `q = p;` does not work: regalloc
+coalesces the copy away. Measured: 164 words to 166, the last two.
 
 **Store order is a search, not a deduction.** Several "no permutation
 reproduces it" notes turned out to be hand attempts; exhaustive or
