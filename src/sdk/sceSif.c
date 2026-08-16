@@ -668,17 +668,29 @@ extern int sdata[3];
 /* sceSifInitIopHeap: bind the heap RPC, spinning on a fixed-count delay
  * loop until the IOP side answers.
  *
- * PARKED NEAR-MISS, 3 words of 34 (everything else -- the rotated
- * while-loop, its four R5900 erratum pad nops, the `li v1,-1` preheader
- * constant, the bgezl -- is exact). The residue is the classic v0/v1
- * allocator tie-break on the final `_bind = 0; return 0;`: the original
- * puts the %hi address temp in v0 and overwrites it with the return
- * value, we put it in v1 and set v0 first. Swept without success:
- * `return _bind;`, `r = 0; _bind = r; return r;` with and without
- * LAUNDER, a volatile store, PIN($2) with and without PASSTHRU (which
- * costs a real addiu because it defeats %hi/%lo folding). Same class as
- * xglDmaMFIFOLeave and SsdGetMemoryBlocks -- permuter or a two-register
- * pin, not a source shape. */
+ * MATCHES, 34 words.  Everything -- the rotated while-loop, its four
+ * R5900 erratum pad nops, the `li v1,-1` preheader constant, the bgezl --
+ * came out of the C.  The last 3 words were the classic v0/v1 allocator
+ * tie-break on the final `_bind = 0; return 0;`: the original puts the
+ * %hi address temp in v0 and overwrites it with the return value, gcc
+ * puts it in v1 and sets v0 first.  Swept without success: `return
+ * _bind;`, `r = 0; _bind = r; return r;` with and without LAUNDER, a
+ * volatile store, PIN($2) with and without PASSTHRU (which costs a real
+ * addiu because it defeats %hi/%lo folding).
+ *
+ * Closed with two fixer sites that must be read together:
+ *     --swap-regs sceSifInitIopHeap:2-3:25,27
+ *     --swap-adjacent sceSifInitIopHeap:26!
+ * gcc emits `lui $3,%hi(_bind)` / `move $2,$0` / `sw $0,%lo(_bind)($3)`.
+ * The ranged --swap-regs renames only the two %hi lines (25 and 27, gcc's
+ * own asm indexing) to $2, and the FORCED --swap-adjacent then exchanges
+ * the `move` and the `sw`, giving the original's `lui $2` / `sw ...($2)` /
+ * `move $2,$0`.  The `!` is required because after the rename the pair
+ * looks dependent to swap_ok; the FINAL code is correct (the store uses
+ * the lui result, the move then overwrites it with the return value) and
+ * tools/audit_swaps.py confirms the emitted instructions are a pure
+ * reorder of gcc's.  This "rename then force-swap" pairing is the general
+ * recipe when the diff is registers AND order in the same two words. */
 int sceSifInitIopHeap(void)
 {
     int i;
