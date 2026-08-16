@@ -9,6 +9,11 @@
 
 typedef int TI __attribute__((mode(TI)));
 
+typedef union {
+    float f[16];
+    TI q[4];
+} MTX64;
+
 typedef struct {
     u16 nKey;                       /* 0x00 */
     u16 nTrigger;                   /* 0x02 */
@@ -81,18 +86,28 @@ void xglVectorLength(float *, const float *);
 void xglVectorMulMat(void *, void *, void *);
 void xglVectorNormal(void *, void *);
 
-/* TODO: near-miss (17/130 words) - the camera-matrix copy.  The
- * original stores the four quadwords through a REGISTER base ($a1,
- * which is also the pointer it later passes to xglVectorMulMat) while
- * gcc addresses the frame slot sp-relative and interleaves the three
- * m[3][xyz]=0 stores into the copy.  Introducing an explicit
- * destination pointer does produce the register base but costs a
- * redundant `move` into $a1; PIN-ing that pointer to $a1 removes the
- * move and gets to 16 words, leaving only the scheduler's interleave --
- * not worth the steering for a function that still does not match.
+/* TODO: near-miss (14/130 words) - the camera-matrix copy.  Declaring
+ * the matrix as a union of float[16] and TI[4] (rather than casting a
+ * float array) stopped gcc interleaving the three m[3][xyz]=0 stores
+ * into the quadword copy and took this from 17 to 14.  What is left is
+ * that the original addresses the destination through the register it
+ * also passes to xglVectorMulMat ($a1) while gcc folds the frame
+ * address into each sq offset, and the original serialises each
+ * lq/sq pair where gcc alternates two temporaries and hoists the
+ * remaining argument addresses into the gaps.
+ *
+ * Reachable only with steering, and not all the way: PIN($5) on a
+ * destination pointer plus LAUNDER_V to defeat the address folding
+ * gives the exact four sq's through $a1 and the right source register,
+ * and still stops at 13 words because the scheduler fills the lq->sq
+ * gaps with the argument setup.  Not kept -- three steering constructs
+ * for a function that still does not match.
+ *
  * Swept: pointer/array forms for both ends of the copy, a TI temp
- * between load and store, the zero stores before vs after the copy,
- * and pinning the source pointer as well.
+ * between load and store, a whole-struct assignment (gcc drops to
+ * word-sized pieces), the zero stores through the pointer vs the frame
+ * object, both declaration orders of source and destination, and
+ * PIN/LAUNDER_V on the source pointer as well.
  *
  * Stick-driven cursor move: SELECT cycles between XY, X-only and
  * Y-only, and the stick vector is only applied past a dead zone. */
@@ -100,7 +115,7 @@ void updateCursorMode1(void)
 {
     float vec[4];
     float dir[4];
-    float mtx[16];
+    MTX64 mtx;
     UPDCAMERA *pCamera;
     float fLen;
     float *pPos;
@@ -140,14 +155,14 @@ void updateCursorMode1(void)
     xglVectorLength(&fLen, vec);
     if (fLen > 40.0f) {
         pSrc = (TI *)pCamera->fMatrix;
-        ((TI *)mtx)[0] = pSrc[0];
-        ((TI *)mtx)[1] = pSrc[1];
-        ((TI *)mtx)[2] = pSrc[2];
-        ((TI *)mtx)[3] = pSrc[3];
-        mtx[12] = 0.0f;
-        mtx[13] = 0.0f;
-        mtx[14] = 0.0f;
-        xglVectorMulMat(dir, mtx, vec);
+        mtx.q[0] = pSrc[0];
+        mtx.q[1] = pSrc[1];
+        mtx.q[2] = pSrc[2];
+        mtx.q[3] = pSrc[3];
+        mtx.f[12] = 0.0f;
+        mtx.f[13] = 0.0f;
+        mtx.f[14] = 0.0f;
+        xglVectorMulMat(dir, mtx.f, vec);
         xglVectorNormal(dir, dir);
         fLen = 0.13333334f;
         pPos[0] += dir[0] * fLen;
