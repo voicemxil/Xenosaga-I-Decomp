@@ -660,3 +660,82 @@ fields are 64-bit even though the arguments are plain `int`.
   original rematerialises the `%hi` each time, gcc hoists it into a spare
   register once. Scoping the pointers per loop makes it worse, not
   better.
+
+## Sound driver, run 4 (sef/sdv/srs)
+
+**Take the element address into a local inside the loop body to defeat
+strength reduction.** `p = &tbl[i]; if (p->a == x) p->b++;` keeps the
+original's per-iteration `base + i*stride` recomputation and its reload
+of the loop bound. Spelled with plain `tbl[i].a` subscripts, gcc builds
+a walking pointer and hoists the count -- 5 words shorter.
+(sefSetHitSignal, sefSetSeSignal.)
+
+**...and the reverse.** Two plain subscript accesses to the SAME element
+in one loop (`if (buf[i] == 0) { buf[i] = 1; ... }`) make gcc build TWO
+givs off a copy of the base, which is what the original has; one walking
+pointer is 2 words shorter. (sdvAllocSpecialWork.) So the choice between
+subscript and walking pointer is a real two-way lever -- read the
+original's address arithmetic before picking.
+
+**Name the table base.** `t = &_battleActor;` then `t->aActor` /
+`t->nActors` makes the base the master register and the walker a copy;
+using `_battleActor.aActor` directly gives the mirror-image assignment.
+(sefSetLightFlag.)
+
+**LAUNDER_V on a value reloaded at the end of a loop body** fences the
+EE scheduler, which otherwise issues the loop-counter increment ahead of
+the reload no matter what the source order is. (sefSetLightFlag.) It
+does NOT work when the same value is also loaded in the loop preheader:
+there gcc keeps it in a register and adds `move` copies (swept in
+sefCaclAllTarget).
+
+**LAUNDER a pointer that was just tested against null** before passing
+it as an argument, or gcc folds it to `$zero` and costs a `move a1,zero`
+the original does not have. (sefInitEffectBattle.)
+
+**A stack record wants to be a struct local, not a `char[]` behind a
+pointer variable.** The pointer costs an extra callee-saved register and
+six words. Pad the struct out to its real size and `memset(&r, 0,
+sizeof(r))`. (sefDeleteEffectWait.)
+
+**`(float)(int)(x & 0x7FFF)`, never `(float)(unsigned)`.** There is no
+unsigned-to-float instruction, so gcc emits a branchy halve/or/add.s
+sequence: sefGetCubePosBtm went 62 -> 96 words. The intermediate cast is
+load-bearing.
+
+**An inlined LCG wants one local per draw.** `nA = seed*M+C; nB = nA*M+C;
+nC = nB*M+C;` reproduces the original's v0/v1/a1 chain; reusing a single
+`seed` variable funnels every intermediate through v0. The seed must be
+`unsigned` or the extract is `sra`, not `srl`. (sefGetSpherePos.)
+
+**A single-use float local can fix a schedule.** In sefGetOfsRange
+`(float)pPrm[0]` written inline in a call argument is scheduled after
+the seed update (10 words out); hoisted into a local that another arm of
+the function also uses, it spills to a second callee-saved float (27
+words out). A FRESH single-use local gets both the placement and the
+register right.
+
+### VU0 in the sound driver
+
+The samplers' trig and vector math are VU0, not compiler output, and the
+same shapes repeat -- see the VU_SIN/VU_COS/VU_ITOF/VU_MUL/VU_SUB/
+VU_SCALE macros at the foot of src/ssd/sef.c.
+
+**Every one of those asm bodies MUST carry `.set noreorder`.** Without
+it gas inserts its own hazard nop (e.g. between `mfc1` and `qmtc2`) and
+the function is long by exactly that many words. Leave the trailing
+`mtc1 -> mul.s` pad to gas, though: that one matches.
+
+**Pass a stack quadword with an "m" constraint** to keep the original's
+`lqc2 $vf1, 0(sp)`; an "r"(&x) operand can force an address into a GPR.
+(sefGetSpherePos.)
+
+### Registered-and-failing hazard
+
+sefSetLightFlag / sefSetHitSignal / sefSetSeSignal existed TWICE tonight:
+non-matching near-misses in sef.c and matching versions in sefIs.c. Two
+definitions of one symbol in two translation units -- the build still
+linked, but `checkfile.py src/ssd/sef.c` diffed the stale copies against
+the registered entries and reported registered-and-failing. Before
+writing a function, grep the whole territory for its name, not just the
+file you expect it in.
