@@ -463,7 +463,9 @@ extern void DefocusMain(GAME_DEFOCUS *p);
 
 /* Game.c's view of xgl's shared render state - only the post-effect hook */
 typedef struct {
-    u8 pad00[0x34];                     /* 0x00 */
+    u8 pad00[0x14];                     /* 0x00 */
+    unsigned short nDrawFbp;            /* 0x14 */
+    u8 pad16[0x34 - 0x16];              /* 0x16 */
     void (*pDefocusFunc)(GAME_DEFOCUS *); /* 0x34 */
     u8 pad38[0x5C - 0x38];              /* 0x38 */
 } GAME_RENDER;
@@ -734,4 +736,37 @@ void GameResourcePreLoad(int nScene)
             xglCdReadFile(szPath, nAddr, 1, 1);
         }
     }
+}
+
+typedef unsigned long GAME_U64;
+
+extern void FlushCache(int nMode);
+
+/* The DIRECT packet that paints the saved back buffer over the frame:
+   word 6 is its BITBLTBUF source pointer, word 8 its TEX0 alpha. */
+static GAME_U64 BackEnv[20] = {
+    0x0UL, 0x5000000900000000UL,
+    0x80AB400000008001UL, 0x53531E6EUL,
+    0x30000UL, 0x47UL,
+    0x0UL, 0x6UL,
+    0x0UL, 0x42UL,
+    0x8000000080UL, 0x8000000080UL,
+    0x0UL, 0x0UL,
+    0x71F800006FF8UL, 0x0UL,
+    0x1C0000002000UL, 0x0UL,
+    0x8DF800008FF8UL, 0x0UL,
+};
+
+void DrawBack(int nAlpha)
+{
+    if (nAlpha < 0) {
+        nAlpha = 0;
+    }
+    /* The framebuffer pointer is read inline: a named local for it costs
+       the register tie-break here (the opposite of DrawBackSet, where the
+       load has to be staged in one). */
+    BackEnv[6] = (0x24120000 | (sRender.nDrawFbp << 5)) | 0x640000000UL;
+    BackEnv[8] = ((GAME_U64)nAlpha << 32) | 100;
+    FlushCache(0);
+    sceVif1PkRef(xglPacketGetCurrent(), BackEnv, 10, 0, 0, 0);
 }
