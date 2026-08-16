@@ -72,7 +72,28 @@ void *scAdrToImm(int ofs) {
     return v;
 }
 
-typedef struct { char pad[0x450]; } SCRIPTWORK_SLOT;
+/* The script work table: 16 slots of 0x450 bytes, each holding 8 task
+ * contexts of 0x80 bytes followed by the slot header at +0x400. The
+ * SC_SLOT view used by scGet.c is this same table addressed from +0x400,
+ * which is why its stride is also 0x450. */
+typedef struct {
+    char pad0[4];
+    short taskNo;              /* 0x04 */
+    short slotNo;              /* 0x06 */
+    char pad8[0x80 - 8];
+} SCTASK_ENT;
+
+typedef struct {
+    SCTASK_ENT task[8];        /* 0x000 */
+    unsigned short *pTable;    /* 0x400 */
+    char pad404[0x440 - 0x404];
+    int field440;              /* 0x440 */
+    short dataIdx;             /* 0x444 */
+    short field446;            /* 0x446 */
+    short nTask;               /* 0x448 */
+    short field44A;            /* 0x44A */
+    char pad44C[4];
+} SCRIPTWORK_SLOT;
 extern SCRIPTWORK_SLOT _scriptWork[];
 /* Index arithmetic: (slot<<4)+slot; <<2; +slot; <<2 == slot*0x450, same
  * shape as the SC_SLOT indexing documented in scGet.c */
@@ -818,4 +839,98 @@ int scEFFECTScript(SCOBJ *o)
         }
     }
     return 1;
+}
+
+extern void *memset(void *p, int c, int n);
+extern void sefDestroyScriptScheduler(void);
+
+/* Tear a script slot down: drop its table and reset every task context,
+ * stamping each with its own index and its owning slot. */
+void scDestroyScript(int slot)
+{
+    SCTASK_ENT *t;
+    int i;
+    if (slot < 0) {
+        return;
+    }
+    sefDestroyScriptScheduler();
+    if (_scriptWork[slot].pTable == 0) {
+        return;
+    }
+    _scriptWork[slot].pTable = 0;
+    _scriptWork[slot].dataIdx = -1;
+    _scriptWork[slot].nTask = 0;
+    _scriptWork[slot].field446 = 0;
+    _scriptWork[slot].field44A = 0;
+    /* The slot's byte offset is spelled as its two halves -- the 8*0x80 task
+       array plus the 0x50 header -- because that is the shift/multiply pair
+       the original forms here; &_scriptWork[slot].task[0] folds them into a
+       single 1104 multiply and costs two words. */
+    t = (SCTASK_ENT *)((char *)_scriptWork + (slot << 10) + slot * 80);
+    i = 0;
+    do {
+        memset(t, 0, 128);
+        t->taskNo = i;
+        i = i + 1;
+        t->slotNo = slot;
+        t = t + 1;
+    } while (i < 8);
+}
+
+void scInitScript(void)
+{
+    SCTASK_ENT *t;
+    int i;
+    int slot;
+    _cmdPut = 0;
+    slot = 0;
+    do {
+        _scriptWork[slot].dataIdx = -1;
+        _scriptWork[slot].pTable = 0;
+        _scriptWork[slot].field446 = 0;
+        _scriptWork[slot].field44A = 0;
+        _scriptWork[slot].nTask = 0;
+        t = (SCTASK_ENT *)((char *)_scriptWork + (slot << 10) + slot * 80);
+        i = 0;
+        do {
+            memset(t, 0, 128);
+            t->taskNo = i;
+            i = i + 1;
+            t->slotNo = slot;
+            t = t + 1;
+        } while (i < 8);
+        slot = slot + 1;
+    } while (slot < 16);
+}
+
+extern int _nowDataIdx;
+
+/* One frame of every live script: each slot publishes itself in
+ * _nowScript/_nowDataIdx, then each of its eight task contexts runs with
+ * _nowEvent set to its index. A slot with no tasks left is destroyed. */
+void scExecScript(void)
+{
+    SCTASK_ENT *t;
+    int slot;
+    int i;
+    slot = 0;
+    do {
+        _nowScript = slot;
+        if (_scriptWork[slot].pTable != 0) {
+            _nowDataIdx = _scriptWork[slot].dataIdx;
+            if (_scriptWork[slot].nTask == 0) {
+                scDestroyScript(slot);
+            } else {
+                t = (SCTASK_ENT *)((char *)_scriptWork + (slot << 10) + slot * 80);
+                i = 0;
+                do {
+                    _nowEvent = i;
+                    i = i + 1;
+                    scDispatchScript((SCTASK *)t);
+                    t = t + 1;
+                } while (i < 8);
+            }
+        }
+        slot = slot + 1;
+    } while (slot < 16);
 }
