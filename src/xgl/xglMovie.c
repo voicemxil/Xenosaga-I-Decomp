@@ -3,9 +3,12 @@
 /* MPEG/IPU initialization wrappers */
 
 typedef struct {
-    char pad00[0x24];
+    char pad00[8];
+    unsigned char nEnd;  /* 0x08 */
+    char pad09[0x17];
+    char *pRing;         /* 0x20 */
     int nStreamSize;     /* 0x24 */
-    char pad28[4];
+    int nWritePos;       /* 0x28 */
     int nUnk2C;          /* 0x2C */
     char pad30[0x10];
     short nWidth;        /* 0x40 */
@@ -310,6 +313,52 @@ typedef struct {
 } XGLMPEGPKT;
 
 void *memcpy(void *pDst, const void *pSrc, int nSize);
+
+void xglCdStreamReadRingCore(void *pStr);
+
+/* Pull up to 16K of demuxer input out of the CD ring buffer, spinning
+ * until either the stream ends or enough has arrived */
+int fileRead(XGLMOVIEINFO *pInfo)
+{
+    char *pDst;
+    int nAvail;
+    int i;
+    int n;
+    int nFirst;
+    int nMax;
+
+    nMax = 16384;
+    nAvail = 0;
+    i = 0;
+    pDst = pInfo->pBuf;
+    while (i <= 0xFFFFFF) {
+        i++;
+        xglCdStreamReadRingCore(pInfo);
+        n = (pInfo->nWritePos - pInfo->nUnk2C + pInfo->nStreamSize)
+            % pInfo->nStreamSize;
+        nAvail = (n != 0) ? n : pInfo->nStreamSize;
+        if (pInfo->nEnd != 0) {
+            break;
+        }
+        if (nAvail > nMax) {
+            break;
+        }
+    }
+    nFirst = pInfo->nStreamSize - pInfo->nUnk2C;
+    /* nMax doubles as the copy length -- sharing one local is what puts
+     * the clamp in the same register as the 16384 limit. */
+    if (nAvail < 16384) {
+        nMax = nAvail;
+    }
+    if (nFirst >= nMax) {
+        memcpy(pDst, pInfo->pRing + pInfo->nUnk2C, nMax);
+    } else {
+        memcpy(pDst, pInfo->pRing + pInfo->nUnk2C, nFirst);
+        memcpy(pDst + nFirst, pInfo->pRing, nMax - nFirst);
+    }
+    pInfo->nUnk2C = (pInfo->nUnk2C + nMax) % pInfo->nStreamSize;
+    return nMax;
+}
 
 /* sceMpeg video callback: append one demuxed packet to the ring the IPU
  * reads from, splitting it around the wrap and writing through the
