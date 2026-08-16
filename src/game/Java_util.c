@@ -1276,9 +1276,19 @@ void Java_xeno_util_Menu_addQuery__aLjava_lang_String_I(JThread *thread, JValue 
     count = arr->nLength;
     count = (count < 0x21) ? count : 0x20;
     menu = args[0].p;
-    items = (JString **)arr->pData;
-    for (i = 0; i < count; i++) {
-        strs[i] = items[i]->pArray->pData;
+    /* The index is zeroed ahead of the guard and the element pointer is
+     * only fetched inside it: that leaves the guard branch with the menu
+     * load as its delay-slot fill, which is what the original does. Any
+     * shape where the element pointer is live before the guard fills the
+     * slot with that load instead, and shifts the clamp constant off
+     * $v1. */
+    i = 0;
+    if (count > 0) {
+        items = (JString **)arr->pData;
+        do {
+            strs[i] = items[i]->pArray->pData;
+            i++;
+        } while (i < count);
     }
     TMENU_addQuery2(menu, strs, count);
 }
