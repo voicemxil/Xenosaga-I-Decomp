@@ -6,6 +6,7 @@
 typedef union EWVAL {
     int n;
     short h;
+    struct { short h0; short h2; } w;
 } EWVAL;
 
 typedef struct EWCOMP {
@@ -17,7 +18,7 @@ typedef struct EWCOMP {
     short h0C;                     /* 0x0C */
     short h0E;                     /* 0x0E */
     EWVAL u10;                     /* 0x10 */
-    EWVAL u14;                     /* 0x14 */
+    EWVAL u14;                     /* 0x14 (and 0x16 through .w.h2) */
     int n18;                       /* 0x18 */
     char pad01C[0x24 - 0x1C];
     int n24;                       /* 0x24 */
@@ -46,13 +47,13 @@ typedef struct TMENU {
     short h0C;                     /* 0x0C: running max line width */
     unsigned short h0E;            /* 0x0E: addQuery2 reads it with lhu */
     int nFlags;                    /* 0x10 */
-    short h14;                     /* 0x14 */
+    unsigned short h14;            /* 0x14: drawDefault reads it with lhu */
     char pad016[0x20 - 0x16];
     float nField20;              /* 0x20 */
     float nField24;              /* 0x24 */
     char pad028[0x50 - 0x28];
     int n50;                       /* 0x50 */
-    unsigned char b54;             /* 0x54 */
+    signed char b54;               /* 0x54: drawDefault reads it with lb */
     unsigned char b55;             /* 0x55 */
     unsigned char nItemCount;      /* 0x56: occupied item slots */
     unsigned char b57;             /* 0x57: widest line so far */
@@ -63,7 +64,8 @@ typedef struct TMENU {
     MBUF *pMBuf2;                 /* 0x64 */
     char pad068[0xD8 - 0x68];
     MSGQUEUE queue;                /* 0xD8 */
-    char pad0EC[0xFC - 0xEC];  /* MSGQUEUE is word-aligned, so it rounds up to 0xEC */
+    char pad0EC[0xF8 - 0xEC];  /* MSGQUEUE is word-aligned, so it rounds up to 0xEC */
+    int nTexF8;                    /* 0xF8: cursor sprite texture handle */
     EWCOMP *pEwComp;               /* 0xFC */
     EWCOMP *pComp[16];             /* 0x100: child component table */
     unsigned char nItemMax;        /* 0x140: item slot capacity */
@@ -514,5 +516,123 @@ done:
         for (i = nFirst; i < nCount; i++) {
             TMENU_addItem(t, ppSrc[i]);
         }
+    }
+}
+
+extern void EW_sprtSetCursorUV(EWCOMP *pComp, int nIdx, int nTex);
+
+/* Lay out the menu's nine EW children for this frame: frame, shadow,
+ * backdrop, title text, item text, the two scroll arrows and the cursor.
+ * Positions come from the panel's float origin, the item count and the
+ * current selection; the arrows and cursor are shown or hidden by
+ * clearing bit 0x4000 of the component's flag word.
+ *
+ * NEAR-MISS, 43 diffs of 223 words, LENGTH already correct.  The whole
+ * residue is one register-allocation channel: retail puts nField20 in
+ * $f1/$s3 and nField24 in $f0/$s2, and this build has them the other way
+ * round, which then renames $v0/$v1 through every component block.
+ * Swept: both orders of the x/y assignments, both orders of the two
+ * (int)(field + 16.0f) stores, swapping the x/y declaration order, and
+ * dropping the x/y locals so CSE invents the temporaries (243 words --
+ * CSE does not fold the repeated (int)field + 16).  A full
+ * adjacent-swap hill climb over every p-> store statement in the
+ * function took it 65 -> 43 and then stalled; the four store swaps it
+ * found are already applied here.  What is left needs whatever decides
+ * which of two equally-used float pseudos is created first. */
+void TMENU_drawDefault(TMENU *t)
+{
+    EWCOMP *p;
+    int x;
+    int y;
+    int nOff;
+    int nCur;
+    int n;
+
+    if (t->nFlags & 0x10) {
+        /* 0xFFFF, not -1: retail materialises the addend with li+addu. */
+        if ((unsigned short)(t->h14 + 0xFFFF) < 2) {
+            return;
+        }
+        y = (int)t->nField24 + 16;
+        x = (int)t->nField20 + 16;
+        p = t->pComp[1];
+        p->n08 = 0xFFFFF1;
+        p->h06 = (int)(t->nField24 + 16.0f);
+        p->h04 = (int)(t->nField20 + 16.0f);
+        p->h0C = t->h0C;
+        p->h0E = t->h0E;
+        p->h00 |= 0x4000;
+        p = t->pComp[5];
+        p->h04 = x;
+        p->h06 = y;
+        p->n08 = 0xFFFFF0;
+        p->h00 |= 0x4000;
+        p->h0C = t->h0C;
+        p->h0E = t->h0E;
+        if (t->b141 != 0) {
+            n = t->b141;
+            nOff = n * 24 + 12;
+        } else {
+            nOff = 0;
+        }
+        p = t->pComp[0];
+        p->h04 = x;
+        p->h06 = y;
+        p->n08 = 0xFFFFF1;
+        p->h0C = t->h0C;
+        p->h0E = t->h0E;
+        p->h00 |= 0x4000;
+        p = t->pComp[3];
+        p->n24 = (int)t->ppLine144;
+        p->h04 = x;
+        p->h06 = y;
+        p->n08 = 0xFFFFFF;
+        p->u14.h = t->b141;
+        p->u14.w.h2 = 0;
+        p->h00 |= 0x4000;
+        p = t->pComp[2];
+        p->h04 = x + 20;
+        p->h06 = y + nOff;
+        p->n08 = 0xFFFFFF;
+        p->u14.w.h2 = t->h58;
+        p->n24 = (int)t->ppItem;
+        p->h00 |= 0x4000;
+        p->u14.h = t->h5A + 1;
+        p = t->pComp[6];
+        p->h04 = t->h0C + x - 16;
+        p->n08 = 0xFFFFFF;
+        p->h06 = y;
+        EW_sprtSetCursorUV(p, 1, t->nTexF8);
+        if (t->h58 > 0) {
+            p->h00 |= 0x4000;
+        } else {
+            p->h00 &= 0xBFFF;
+        }
+        p = t->pComp[7];
+        p->n08 = 0xFFFFFF;
+        p->h04 = t->h0C + x - 16;
+        p->h06 = t->h0E + y - 16;
+        EW_sprtSetCursorUV(p, 2, t->nTexF8);
+        if (t->h58 + t->h5A < t->nItemCount) {
+            p->h00 |= 0x4000;
+        } else {
+            p->h00 &= 0xBFFF;
+        }
+        nCur = 12;
+        if (t->b54 >= 0) {
+            nCur = (t->b54 - t->h58) * 24 + 12;
+        }
+        if (t->b141 != 0) {
+            n = t->b141;
+            nOff = n * 24 + 12;
+        } else {
+            nOff = 0;
+        }
+        p = t->pComp[8];
+        p->n08 = 0xFFFFFF;
+        p->h04 = (int)(t->nField20 + 20.0f + 0.0f + 0.0f);
+        p->h06 = (int)((float)nCur + ((t->nField24 + 16.0f) - 6.0f + (float)nOff));
+        EW_sprtSetCursorUV(p, 0, t->nTexF8);
+        p->h00 |= 0x4000;
     }
 }
