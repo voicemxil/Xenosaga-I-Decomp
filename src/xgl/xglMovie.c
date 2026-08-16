@@ -17,7 +17,12 @@ typedef struct {
     unsigned char nErrCount;/* 0x98 */
     unsigned char nUnk99;/* 0x99 */
     unsigned char nUnk9A;/* 0x9A */
-    char pad9B[0x1D];
+    unsigned char nVideoCount;/* 0x9B */
+    int nVideoBuf;       /* 0x9C */
+    int nVideoSize;      /* 0xA0 */
+    int nVideoWrite;     /* 0xA4 */
+    int nVideoRead;      /* 0xA8 */
+    char padAC[0xC];
     void *pIpuBuf;       /* 0xB8 */
     void *pSpuBuf;       /* 0xBC */
     char padC0[9];
@@ -279,4 +284,48 @@ ready:
         pSrc = pInfo->pBuf;
     }
     pInfo->nLeft -= sceMpegDemuxPss((char *)pInfo + 48, pSrc, pInfo->nLeft);
+}
+
+typedef struct {
+    int nUnk00;
+    int nUnk04;
+    char *pData;         /* 0x08 */
+    int nSize;           /* 0x0C */
+} XGLMPEGPKT;
+
+void *memcpy(void *pDst, const void *pSrc, int nSize);
+
+/* sceMpeg video callback: append one demuxed packet to the ring the IPU
+ * reads from, splitting it around the wrap and writing through the
+ * uncached-accelerated window */
+int videoCallback(int nCode, XGLMPEGPKT *pPkt, XGLMOVIEINFO *pInfo)
+{
+    int nWrite;
+    int nFree;
+    int nSize;
+    int nOver;
+
+    pInfo->nVideoCount++;
+    nWrite = pInfo->nVideoWrite;
+    nFree = pInfo->nVideoRead - nWrite;
+    if (nFree < 0) {
+        nFree += pInfo->nVideoSize;
+    }
+    nSize = pPkt->nSize;
+    if ((unsigned int)nFree < (unsigned int)nSize) {
+        return 0;
+    }
+    nOver = nWrite + nSize - pInfo->nVideoSize;
+    if (nOver > 0) {
+        memcpy((void *)(((pInfo->nVideoBuf + nWrite) & 0x0FFFFFFF) | 0x20000000),
+               pPkt->pData, nSize - nOver);
+        memcpy((void *)((pInfo->nVideoBuf & 0x0FFFFFFF) | 0x20000000),
+               pPkt->pData + (pPkt->nSize - nOver), nOver);
+        pInfo->nVideoWrite = nOver;
+    } else {
+        memcpy((void *)(((pInfo->nVideoBuf + nWrite) & 0x0FFFFFFF) | 0x20000000),
+               pPkt->pData, nSize);
+        pInfo->nVideoWrite += pPkt->nSize;
+    }
+    return 1;
 }
