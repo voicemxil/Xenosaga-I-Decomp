@@ -561,6 +561,20 @@ int hex2val(int nChar)
  * Swept: nU inlined into the return, nU accumulated, LAUNDER(nRow). */
 /* Map a Shift-JIS style kanji code to its (u,v) position in the font
  * texture, and optionally to the CLUT address that goes with its row */
+/* TODO: near-miss.  As written it is 46 words against retail's 44: gcc
+ * spills pClut into $a3 (`move $a3,$a1`) because the two `sltiu` range
+ * flags take $a1/$a2, and the extra word drags an alignment nop in too.
+ * Wave-5 sweep: a PIN'd `$a1` copy of pClut removes the spill and gets
+ * the length right (44 words, 34 diffs); adding PIN(nLo,"$6") takes it
+ * to 28; splitting the column term into its own statement so it is
+ * finished before the pClut test takes it to 21.  What is left after
+ * that is (a) the whole nIdx chain naming $a0 where retail names $v0 --
+ * PIN(nIdx,"$2") costs four words back -- and (b) retail testing pClut
+ * BEFORE the `(nRow & 0x1F) * 3` term while gcc sinks the branch past
+ * it however the source is ordered.  Not registered, and the PINs are
+ * left out: three of them for 176 bytes is worse steering than the
+ * miss.  Also swept with no effect: u_char nLo, hi-before-lo, a local
+ * copy of nCode, nested ifs, and the reversed >= comparison chain. */
 u_int xglFontGetKanjiClutUV(u_short nCode, u_int *pClut)
 {
     u_int nLo;
