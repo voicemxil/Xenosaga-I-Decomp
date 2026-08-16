@@ -342,3 +342,76 @@ void PrintThumbnail(void **packet, PRINT_THUMBNAIL *thumb)
     ThumDrawEnv[46] = thumb->z;
     sceVif1PkAddDirectDataN(*packet, ThumDrawEnv, 12);
 }
+
+typedef struct {
+    PRINT_U32 x;            /* 0x00 */
+    PRINT_U32 y;            /* 0x04 */
+    PRINT_U32 z;            /* 0x08 */
+    PRINT_U32 nNext;        /* 0x0C */
+    unsigned char r;        /* 0x10 */
+    unsigned char g;        /* 0x11 */
+    unsigned char b;        /* 0x12 */
+    unsigned char a;        /* 0x13 */
+    unsigned char pad14[0x20 - 0x14];
+} PRINT_LINE2;
+
+/* NEAR MISS -- 36 diffs at the right 64 words. The shape is settled:
+   the vertex-count loop's giv must be anchored on `line + 1` and read
+   through `(p++)->nNext` (the address-form giv, which is what gives
+   `addiu $v0,$a0,12` + `addiu $a0,$a0,32` instead of a folded
+   `lw 12($a0)`), the packet base and the walking destination are two
+   locals, and the body walks its own copy of the vertex pointer. What is
+   left is entirely register naming: the original puts the counter in
+   $t0, the walking destination in $a3 and the base in $t1, and we get
+   $a3/$a0/$t0 -- and with $a0 for the destination gcc rematerialises
+   `addiu $a0,$s1,64` where the original increments `addiu $a3,$a3,16`.
+   Swept: base/dst assignment before vs after the count loop and both
+   assignment orders, header stores through base vs dst, the four header
+   stores in several orders with the two scalar inits moved around them,
+   and six declaration orders of the six locals.
+
+   A GS line strip: one RGBAQ + XYZ2 pair per vertex, for as many leading
+   vertices as have a non-zero link field. */
+void PrintLine2(void **packet, PRINT_LINE2 *line)
+{
+    PRINT_U32 *base;
+    PRINT_U32 *dst;
+    PRINT_LINE2 *p;
+    PRINT_LINE2 *q;
+    int n;
+    int nCount;
+
+    endPrintInfoSet(packet, 0, 0);
+    p = line + 1;
+    n = 0;
+    if (line->nNext != 0) {
+        do {
+            n++;
+        } while ((p++)->nNext != 0);
+    }
+    base = (PRINT_U32 *)((char *)packet + 0x30);
+    dst = base;
+    dst[0] = 0x8000 + n;
+    q = line;
+    dst[1] = 0x20654000;
+    nCount = 1;
+    dst[2] = 81;
+    dst[3] = 0;
+    dst += 4;
+    while (n > 0) {
+        dst[0] = q->r;
+        n--;
+        nCount += 2;
+        dst[1] = q->g;
+        dst[2] = q->b;
+        dst[3] = q->a;
+        dst += 4;
+        dst[0] = q->x;
+        dst[1] = q->y;
+        dst[3] = 0;
+        dst[2] = q->z;
+        q++;
+        dst += 4;
+    }
+    sceVif1PkAddDirectDataN(*packet, base, nCount);
+}
