@@ -594,7 +594,17 @@ void CB_DelayTh(int id, unsigned short time, void *common)
     PS2_ASM("sync.l\n\tei");
 }
 
-/* cmd_sem_init: create the three libcdvd semaphores, but only if either
+/* PARKED NEAR-MISS, 4 words of 37 (was 7 before the sceSemaParam field
+ * order was swapped to initCount-then-maxCount, which is what puts the
+ * sp+4 store ahead of the sp+8 one). What is left is two delay-slot
+ * fill tie-breaks in a scheduled TU: the original puts the first
+ * CreateSema result's store into the SECOND call's delay slot where we
+ * put the `move a0,sp`, and it reuses the dead v0 for the last %hi temp
+ * where we take a0. Swept: moving `_sceCd_c_cb_sem = 0` above the third
+ * CreateSema (worse -- 6 words, the store migrates into that call's
+ * slot).
+ *
+ * cmd_sem_init: create the three libcdvd semaphores, but only if either
  * command semaphore is still -1 -- the two tests are separate `if`s
  * because the original branches on each independently rather than
  * folding them.  One sceSemaParam on the stack is filled once and
@@ -606,8 +616,8 @@ void cmd_sem_init(void)
     if (_sceCd_ncmd_semid != -1 && _sceCd_scmd_semid != -1)
         return;
     sp.option = 0;
-    sp.maxCount = 1;
     sp.initCount = 1;
+    sp.maxCount = 1;
     _sceCd_ncmd_semid = CreateSema(&sp);
     _sceCd_scmd_semid = CreateSema(&sp);
     sp.initCount = 0;
@@ -615,7 +625,16 @@ void cmd_sem_init(void)
     _sceCd_c_cb_sem = 0;
 }
 
-/* cdvd_exit: wake the callback thread with a poison command code if it
+/* PARKED NEAR-MISS, 5 words of 32. Everything from the first
+ * DeleteSema to the EIntr tail call is exact, including the `j` tail
+ * call. The residue is one delay-slot choice in the cb_thid arm: the
+ * original stores `sceCdCbfunc_num = -1` before the call and fills
+ * SignalSema's slot with the `lw` of cb_semid; the scheduler here picks
+ * the store for the slot and hoists the load. Statement order does not
+ * reach it (the two are independent), and --swap-into-slot would leave
+ * the `lui` for cb_semid in the wrong place.
+ *
+ * cdvd_exit: wake the callback thread with a poison command code if it
  * is running, drop the three semaphores, and unhook the SIF command
  * handler.  The trailing EIntr() is a real tail call -- gcc 2.9 emits
  * `j` for a void call in the tail position of a void function. */
