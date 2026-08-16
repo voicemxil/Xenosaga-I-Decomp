@@ -774,3 +774,63 @@ linked, but `checkfile.py src/ssd/sef.c` diffed the stale copies against
 the registered entries and reported registered-and-failing. Before
 writing a function, grep the whole territory for its name, not just the
 file you expect it in.
+
+
+---
+
+## From the nml (model / packet) run
+
+**A `volatile` cast costs the gp-relative store.** `*(volatile int *)&g =
+0;` makes gcc materialise the address; plain `g = 0;` uses the
+small-data `sw $0,-N($gp)` the original emitted. `nmlPacketGsInit` was
+registered-and-failing for exactly this, and the fix was DELETING the
+steering.
+
+**`--unfill-gcc-slots` only sees noreorder/nomacro fill blocks.** gcc
+emits a plain `b` in REORDER mode and lets gas fill the slot; the flag
+never touches those, and applied whole-function it unfills the
+bgez/bltz/jal slots the original DOES fill. For a gas-filled slot the
+tool is `--pin-slot-nop FUNC:N`, whose N counts only reorder-mode
+branches.
+
+**A `.p2align 3,,7` pad nop appears by itself once a slot holds a nop.**
+gcc aligns after a loop/branch; the extra trailing nop that looks like a
+second thing to reproduce is just the alignment shifting. Fix the delay
+slot and stop counting nops. (608 bytes in one edit:
+`nmlModelSetActiveFadeOut` / `...FadeIn`.)
+
+**Get the FRAME SIZE right before anything else.** A stack buffer handed
+to an SDK filler pins its own declared size: `sceGsSetDefLoadImage`
+uploads five quadwords but the original reserved SIX, and until the
+frame was 144 rather than 128 every other diff was noise.
+
+**Read a table INDEXED, not walked, when the original has an `addiu` +
+`move` pair before the loop.** `pOfs[i]` makes loop strength reduction
+build a giv whose initial value is a separate pseudo (`addiu $16,$18,48`
+then `move $17,$16`); `*pOfs++` folds both into one `addiu` and comes out
+two words short. This is the mirror image of the "walked tables want a
+block-local pointer" lever above -- check which side of it you are on.
+
+**`addu rd,<int>,<ptr>` needs integer arithmetic in the source.** Every
+spelling of pointer-plus-int canonicalises to `addu rd,<ptr>,<int>`;
+`(T *)(n + (u_int)p)` is what produces the other operand order.
+
+**A short-truncated sum of an int field wants its own int local.** Passed
+as an expression to a `short` parameter, gcc's combine folds the
+truncation back into the load and emits `lhu` where the original has
+`lw`. Assigning the sum to an `int` local first blocks it -- worth 4
+words in `nmlPacketTextureTrans`, and it is a natural source shape, not
+steering.
+
+**Arm order tells you the source condition.** gcc emits the THEN block
+inline and branches to the ELSE. So a branch-LIKELY (`bnezl`) jumping
+past a call means that call is the THEN arm and the condition in the
+source is the one you would have written second. Swapping the two arms
+of `nmlPacketAddTexture`'s inner dispatch took it from 42 diffs to a
+match in one edit.
+
+**A rotated loop's reset lives in the bottom branch's delay slot.**
+`move $t0,$0` in the delay slot of the loop-back `bnez $t0` is the loop
+body's FIRST statement, duplicated into the preheader -- i.e. the source
+is `flag = 1; while (flag) { flag = 0; ... }`. Writing it as
+`do { flag = 0; ... } while (flag)` instead costs a word.
