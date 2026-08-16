@@ -12,5 +12,7 @@
 # Usage: tools/rebuild.sh [verify args...]
 set -e
 find src -name '*.c' -exec touch {} +
-ninja
+# Serialized: concurrent ninja runs corrupt the shared intermediate
+# .o.s files. See tools/build.sh.
+sh tools/build.sh
 exec python3 tools/verify.py "$@"
