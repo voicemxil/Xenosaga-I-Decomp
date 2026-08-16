@@ -129,6 +129,13 @@ of `&p->vtx[i+1]` produces that base. `char *q = (char *)&p->vtx[0].nColor`
 does — and it frees the counter so gcc reverses it into a `bgez`
 down-counter.
 
+**Let LSR build the giv.** `arr[i].field` yields `%hi/%lo(arr)` plus a
+separate `addiu +off` for the giv's initial value; a hand-walked pointer
+folds the offset into the `%lo` and comes out ONE WORD SHORTER — and
+that word is what makes the loop-top `.p2align` pad appear. Took one
+function 37 diffs -> match. Note this is the opposite direction from the
+entry below; read the original's address arithmetic before choosing.
+
 **Walked tables want a block-local pointer.** `u_char *q = base + 2 +
 i*2;` inside the loop, then `q[0]`/`q[1]`. Writing `base[i*2+2]` puts
 the giv at base+3 with -1/0 offsets.
@@ -158,6 +165,17 @@ expected `lh` is a FINGERPRINT of a rotated loop, not of a cast in the
 source.** Everything downstream of the un-hoisted loads stays inside
 too, which is why address arithmetic rematerialises each iteration.
 Measured: 312 bytes → 264, plain C, no steering.
+
+**A compound loop condition rotates the loop and turns LICM off.**
+`while (r >= 0 && i < 256)` rematerialises a shared `li 10` divisor
+three times; moving the second test to a `break` inside keeps it
+hoisted. Same mechanism as the rotated-loop entry above, reached
+accidentally.
+
+**A deferred store wants its value computed with its siblings.** In an
+`n%10` / `n/=10` chain, a store deferred past unrelated stores must have
+its digit computed alongside the others, or its divisor's `li 10`
+materialises after the character constants and every `$t4..$t7` shifts.
 
 **Loop direction.** gcc reverses a `for (i = 0; i < N; i++)` whose
 counter is dead into a down-counter, and the `li N-1` it creates
@@ -208,6 +226,10 @@ difference. Case-label order decides block layout.
 **Range tests are order-sensitive.** "x is 32 or 33" must be NESTED IFS;
 both `&&` and `||` let gcc fold it to `(x-32) < 2`. Conversely "state is
 -1 or 0" only matches as the byte-width wrap `(u8)(nState + 1) < 2`.
+
+**Guarded arithmetic belongs INSIDE its `if`.** gcc hoists it above the
+branch itself and gets the original's register roles; writing it above
+the guard by hand does not. One function went 10 diffs -> match.
 
 **Read the delay slots first.** A non-annulled delay slot always
 executes, so whatever gcc puts in one is UNCONDITIONAL in the source.
@@ -473,6 +495,10 @@ cases the symptom pointed somewhere other than the cause.
 claims a byte-exact match; if it does not match, the ledger is lying and
 the whole verification is worth less. Either match it or remove the
 entry and document it as a near-miss.
+
+**`tools/sbs.py` reads the BUILT object** and is stale unless
+`checkfile.py` has run since your last edit. Run checkfile first — this
+cost an agent a wrong conclusion.
 
 **The source order that EQUALS the retail store order is not
 necessarily the one that compiles to it** — in one case it was the worst
