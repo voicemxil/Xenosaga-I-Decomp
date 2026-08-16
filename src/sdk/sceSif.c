@@ -267,9 +267,10 @@ void sceSifExitRpc(void)
 
 extern int _lf_bind(int a0);
 extern int _lf_version(void);
-extern int sceSifCallRpc(void *pCd, unsigned int nFno, int nMode,
-                          void *pSend, int nSSize, void *pRecv, int nRSize,
-                          void *pEndFunc, void *pEndArg);
+struct SifRpcClientData;
+extern int sceSifCallRpc(struct SifRpcClientData *pCd, unsigned int nFno, int nMode,
+                         void *pSend, int nSSize, void *pRecv, int nRSize,
+                         void *pEndFunc, void *pEndArg);
 extern struct SifRpcClientData cd_00994A40;
 
 /* The loadfile RPC send/receive block at 0x994840. Its first word is the
@@ -448,8 +449,13 @@ struct SifRpcPacket {
     SifRpcPacket *pkt_addr;     /* 20 */
     int           pid;          /* 24 */
     void         *client;       /* 28  binding client data */
-    unsigned int  sid;          /* 32  server id being bound */
-    int           pad1[7];      /* 36..63 */
+    unsigned int  sid;          /* 32  server id / function number */
+    int           ssize;        /* 36 */
+    void         *recv;         /* 40 */
+    int           rsize;        /* 44 */
+    int           async;        /* 48 */
+    void         *serve;        /* 52 */
+    int           pad1[2];      /* 56..63 */
 };
 
 typedef struct SifRpcHeader {
@@ -1179,6 +1185,97 @@ int sceSifBindRpc(SifRpcClientData *cd, unsigned int sid, int mode)
     if (sceSifSendCmd(0x80000009, pkt, 64, 0, 0, 0) == 0) {
         _sceRpcFreePacket(pkt);
         return -2;
+    }
+    return 0;
+}
+
+/* TODO: near-miss, 17 of 123 words (6 with a different opcode), and the
+ * residue is ONE hoisted load.  The original reads `cd->serve` between
+ * `pkt->pkt_addr = pkt` and `pkt->client = cd`, and stores it into
+ * pkt->serve in the `bnez` delay slot; ours schedules that load/store
+ * pair nine slots earlier, which also steals $a0 from the `mode & 2`
+ * test and shifts the two `sw`s around the second sceSifSendCmd.
+ * Everything else -- all 123 instructions, both write-back arms, the
+ * shared `li 1` in $s3, the semaphore block -- is exact.
+ * Swept without success: a named local for the loaded value, that local
+ * PIN'd to $2 (LENGTH), a volatile-qualified read, LAUNDER_V(cd) as a
+ * fence before the pkt stores (19), and every position of the
+ * `pkt->serve` statement inside the store group.  What DID land:
+ * `pkt->async` must be an if/else with a store in each arm, written
+ * `if (endfunc == 0) ... else ...` so the branch is `bnez` to the
+ * `= 1` arm -- as a `?:` gcc emits a branchless sltu and the function is
+ * three words short.
+ *
+ * sceSifCallRpc: issue one RPC on an already-bound client.  Bit 1 of
+ * `mode` suppresses the data-cache write-back of the two buffers (when
+ * they are the same buffer, one flush of the larger size covers both);
+ * bit 0 selects the non-blocking form, where `endfunc` is called from the
+ * reply handler instead of this thread waiting on a semaphore. */
+extern void sceSifWriteBackDCache(void *ptr, int size);
+
+int sceSifCallRpc(SifRpcClientData *cd, unsigned int fno, int mode,
+                  void *send, int ssize, void *recv, int rsize,
+                  void *endfunc, void *efarg)
+{
+    SifRpcPacket *pkt;
+
+    pkt = _sceRpcGetPacket((SifRpcData *)_data_table_00993280);
+    if (pkt == 0)
+        return -1;
+
+    cd->para = efarg;
+    cd->hdr.pkt_addr = pkt;
+    cd->hdr.rpc_id = pkt->pid;
+    cd->func = (void (*)(void *))endfunc;
+    pkt->sid = fno;
+    pkt->ssize = ssize;
+    pkt->recv = recv;
+    pkt->rsize = rsize;
+    pkt->pkt_addr = pkt;
+    pkt->client = cd;
+    pkt->serve = cd->serve;
+
+    if ((mode & 2) == 0) {
+        if (send == recv) {
+            sceSifWriteBackDCache(send, (ssize < rsize) ? rsize : ssize);
+        } else {
+            if (ssize > 0)
+                sceSifWriteBackDCache(send, ssize);
+            if (rsize > 0)
+                sceSifWriteBackDCache(recv, rsize);
+        }
+    }
+
+    if (mode & 1) {
+        if (endfunc == 0)
+            pkt->async = 0;
+        else
+            pkt->async = 1;
+        cd->hdr.sema_id = -1;
+        if (sceSifSendCmd(0x8000000a, pkt, 64, send, cd->buff, ssize) != 0)
+            return 0;
+        _sceRpcFreePacket(pkt);
+        return -2;
+    }
+
+    {
+        struct SemaParam sema;
+
+        sema.maxCount = 1;
+        sema.initCount = 0;
+        cd->hdr.sema_id = CreateSema(&sema);
+        if (cd->hdr.sema_id < 0) {
+            _sceRpcFreePacket(pkt);
+            return -3;
+        }
+        pkt->async = 1;
+        if (sceSifSendCmd(0x8000000a, pkt, 64, send, cd->buff, ssize) == 0) {
+            DeleteSema(cd->hdr.sema_id);
+            _sceRpcFreePacket(pkt);
+            return -2;
+        }
+        WaitSema(cd->hdr.sema_id);
+        DeleteSema(cd->hdr.sema_id);
     }
     return 0;
 }
