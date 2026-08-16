@@ -2479,3 +2479,4 @@ SeisanDisp = 0x002A18F0, 0xEC; // Seisan.c
 TopMenuWinMain = 0x002779B0, 0x1A4; // Top.c
 TopInfoMain = 0x00277838, 0x174; // Top.c
 AgwsFaceMain = 0x0029D390, 0x1A0; // Agws.c
+MIF2_dummy = 0x0025C1A8, 0x34; // MIF.c

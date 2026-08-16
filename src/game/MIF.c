@@ -152,3 +152,15 @@ char *MIF2_code(char *pDst, int nUnused, MIF2_ARG *pArg)
     *pEnd = 0;
     return pEnd;
 }
+
+/* A tag that expands to nothing: burn nCount iterations and emit no bytes */
+char *MIF2_dummy(char *pDst, int nCount, MIF2_ARG *pArg)
+{
+    int i = nCount;
+
+    if (i > 0) {
+        do {
+        } while (--i != 0);
+    }
+    return pDst;
+}
