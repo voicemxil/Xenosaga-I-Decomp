@@ -66,6 +66,20 @@ def main():
                     help="instead of retargeting, delete the COMMENTED-OUT "
                          "`// name = ...` TODO line for each name (what a "
                          "wall leaves behind once it falls)")
+    ap.add_argument("--add", metavar="ADDR,SIZE",
+                    help="append a NEW entry at an explicit address instead "
+                         "of retargeting. For a function whose name cannot be "
+                         "looked up in the original ELF symbol table -- either "
+                         "it has no symbol there, or the name collides with an "
+                         "unrelated function. register.py cannot do this: it "
+                         "only takes addresses from that same by-name lookup. "
+                         "Exactly one name may be given.")
+    ap.add_argument("--dup-ok", action="store_true",
+                    help="with --add, allow a name that is already "
+                         "registered. Only safe when BOTH entries carry a "
+                         "source hint that resolves (a hint without the .c "
+                         "suffix), because that is the only thing that tells "
+                         "decomplib which object each address belongs to.")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     src = args.source[:-2] if args.source.endswith(".c") else args.source
@@ -76,6 +90,33 @@ def main():
         text = fh.read()
         before = index(text)
         have = set(e[0] for e in before)
+
+        if args.add:
+            if len(args.names) != 1:
+                raise SystemExit("retarget: --add takes exactly one name")
+            name = args.names[0]
+            if name in have and not args.dup_ok:
+                raise SystemExit(
+                    "retarget: %s is already registered. If this is a genuine "
+                    "name collision between two different functions in the "
+                    "image, re-run with --dup-ok, and make sure the EXISTING "
+                    "entry's source hint has no .c suffix or it will not "
+                    "resolve." % name)
+            a, _, sz = args.add.partition(",")
+            line = "%s = %s, %s; // %s" % (name, a.strip(), sz.strip(), src)
+            new = text.rstrip("\n") + "\n" + line + "\n"
+            if index(new)[:len(before)] != before:
+                raise SystemExit("retarget: an unrelated entry moved -- aborted")
+            print("  + " + line)
+            if args.dry_run:
+                print("(dry run -- nothing written)")
+                return 0
+            fh.seek(0)
+            fh.write(new)
+            fh.truncate()
+            print("added 1 entry")
+            return 0
+
         missing = sorted(n for n in want if n not in have)
         if args.drop_todo:
             missing = []

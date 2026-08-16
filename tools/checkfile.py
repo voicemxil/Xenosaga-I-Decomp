@@ -52,8 +52,19 @@ def check_object(repo, objpath, srcname, registered, only_new=False,
         if loc:
             addr, osize = loc
             if reg and reg[0] != addr:
+                # The by-name ELF lookup lost a name collision: two
+                # different functions in the image are called this, e.g.
+                # a static frame_init in gcc's frame.c and an unrelated
+                # game frame_init. The registration names an ADDRESS and
+                # is a deliberate human statement, so it wins; comparing
+                # against the wrong function would report a byte-exact
+                # function as broken. The ELF bounds still win when the
+                # two agree on the address, which is the case that
+                # catches a wrong size in decompiled.txt.
                 regnote = (f"  [!] decompiled.txt says {reg[0]:#010x}, the ELF "
-                           f"symbol is at {addr:#010x}")
+                           f"symbol of that name is at {addr:#010x} -- "
+                           f"name collision, using decompiled.txt")
+                addr, osize = reg
             elif reg and reg[1] != osize:
                 regnote = (f"  [!] decompiled.txt size {reg[1]:#x} vs ELF "
                            f"symbol size {osize:#x}")

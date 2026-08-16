@@ -1,3 +1,18 @@
+/* VENDORED at gcc CVS rev ec6bfc9b7ca (1999-12-29), with two later
+   upstream commits applied -- the ee-gcc 2.96 snapshot is dated
+   2000-10-03, so its frame.c is newer than the base rev:
+
+     78a0d70cdf55  2000-02-01  frame.c (find_fde): Convert for loop to
+                               do-while so compiler sees it's always
+                               executed at least once.
+     89d7f003d32b  2000-06-08  frame.c (end_fde_sort): Remove extraneous
+                               erratic array test.  (Also makes
+                               start_fde_sort's linear malloc conditional
+                               on count.)
+
+   Each hunk is marked with its sha below. Both are verbatim upstream;
+   nothing here is a decomp-only edit.  */
+
 /* Subroutines needed for unwinding stack frames for exception handling.  */
 /* Compile this one with gcc.  */
 /* Copyright (C) 1997, 1998, 1999 Free Software Foundation, Inc.
@@ -286,7 +301,8 @@ typedef struct fde_accumulator
 static inline int
 start_fde_sort (fde_accumulator *accu, size_t count)
 {
-  accu->linear.array = (fde **) malloc (sizeof (fde *) * count);
+  /* 89d7f003d32b */
+  accu->linear.array = count ? (fde **) malloc (sizeof (fde *) * count) : NULL;
   accu->erratic.array = accu->linear.array ?
       (fde **) malloc (sizeof (fde *) * count) : NULL;
   accu->linear.count = 0;
@@ -457,8 +473,8 @@ end_fde_sort (fde_accumulator *accu, size_t count)
 	abort ();
       frame_heapsort (&accu->erratic);
       fde_merge (&accu->linear, &accu->erratic);
-      if (accu->erratic.array)
-        free (accu->erratic.array);
+      /* 89d7f003d32b */
+      free (accu->erratic.array);
     }
   else
     {
@@ -629,12 +645,15 @@ find_fde (void *pc)
 	{
 	  fde **p = ob->fde_array;
 	  
-	  for (; *p; ++p)
+	  /* 78a0d70cdf55 */
+	  do
 	    {
 	      f = search_fdes (*p, pc);
 	      if (f)
 		break;
+	      p++;
 	    }
+	  while (*p);
 	}
       else
 	f = search_fdes (ob->fde_begin, pc);

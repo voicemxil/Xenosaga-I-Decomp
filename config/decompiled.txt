@@ -2432,3 +2432,4 @@ frame_init = 0x0032D028, 0x168; // gcc_frame
 Java_xeno_util_Format_toString__Z = 0x002F69D0, 0x88; // Java_util.c
 FontTestP0 = 0x00254970, 0x4B0; // Font.c
 DrillCameraControlFunc = 0x002CAA28, 0x1E8; // Drill.c
+PauseMenuPage0 = 0x00250CF0, 0xAC; // tskMenuPausePage.c
