@@ -2859,12 +2859,12 @@ __ieee754_asinf (float x)
       else
 	{
 	  t = x * x;
-	  w = t * (pS0f + t * (pS1f + t * (pS2f + t * (pS3f + t * (pS4f
+	  p = t * (pS0f + t * (pS1f + t * (pS2f + t * (pS3f + t * (pS4f
 								  +
 								  t *
 								  pS5f)))));
 	  q = one_asf + t * (qS1f + t * (qS2f + t * (qS3f + t * qS4f)));
-	  w = w / q;
+	  w = p / q;
 	  return x + x * w;
 	}
     }
