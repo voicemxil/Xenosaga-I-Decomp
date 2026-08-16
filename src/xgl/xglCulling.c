@@ -197,3 +197,31 @@ void xglCullingMapCreate(void)
         s_inCulling.nCount++;
     }
 }
+
+typedef struct {
+    char *pName;
+    int nUnk04;
+    int nUnk08;
+    int nUnk0C;
+} XGLCULLINGMAP;
+
+extern XGLCULLINGMAP s_aCullingMap[];
+int strcmp(const char *p1, const char *p2);
+
+/* Look a map name up in the culling map table; -1 when it is not there */
+int check_culling_map(char *pName)
+{
+    int nFound;
+    int i;
+
+    nFound = -1;
+    i = 0;
+    while (s_aCullingMap[i].nUnk04 != 0 || s_aCullingMap[i].nUnk08 != 0) {
+        if (strcmp(s_aCullingMap[i].pName, pName) == 0) {
+            nFound = i;
+            break;
+        }
+        i++;
+    }
+    return nFound;
+}

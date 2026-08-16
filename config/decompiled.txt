@@ -2744,3 +2744,4 @@ ACT_resetParent = 0x003066D0, 0xD8; // ACT.c
 sefGetOfsRange = 0x002E25E8, 0x230; // sef.c
 RES_getScenePath = 0x0024A3C0, 0x128; // RES.c
 PrintThumbnail = 0x0027DB30, 0xDC; // Print.c
+check_culling_map = 0x0023EBE0, 0xB8; // xglCulling.c
