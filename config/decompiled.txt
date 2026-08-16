@@ -2398,3 +2398,4 @@ InitMapParts = 0x002BEB00, 0xA8; // INIT.c
 InitMapKoware = 0x002BEBA8, 0x17C; // INIT.c
 Get_Attr = 0x002D8908, 0xB0; // Get.c
 xglMovieMakeXtxHeader = 0x00221AA8, 0x9C; // xglMovie.c
+Get_Attr_NU = 0x002D89B8, 0xB0; // Get.c

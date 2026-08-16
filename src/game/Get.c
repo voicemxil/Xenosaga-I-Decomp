@@ -401,46 +401,56 @@ extern int UnduDataGetHeader(int, int);
 extern void UnduCheck(void *, int, UNDUPARAM *);
 extern void *D_00338684[];
 
-/* TODO: near-miss (LOGIC) - close (struct/branch shape recovered, including
- * the ld+dsll32+dsra32 64-bit-field truncation idiom) but the original keeps
- * the struct base in a SECOND alias register (s4) distinct from the one used
- * for the setup calls (s2), reloaded after UnduCheck returns; a single local
- * doesn't reproduce that register split. Parked after several attempts. */
+/* Three details are load-bearing here and in Get_Attr_NU below.
+ *
+ * The setup calls go through the `param` local while the query and the
+ * result read name D_003B2610 directly: the original keeps the struct
+ * base in TWO registers (s4 from the address computation, s2 a copy of
+ * it), and that split only appears when the address reaches the two
+ * halves of the function by two different routes.
+ *
+ * `nFlags | 0x800` sits AFTER UnduParamInit(): computed before the call
+ * gcc fuses the argument copy and the or into one `ori s0,a2,0x800`,
+ * where the original has the plain `move s0,a2` arg copy and a separate
+ * `ori s0,s0,0x800`.
+ *
+ * `param->f00 = 0` is unconditional (UnduParamInit has already zeroed
+ * it, so this is a redundant re-store either way). Inside the `if` it
+ * cannot go anywhere; hoisted out, it is what the original puts in the
+ * nType branch's delay slot. */
 int Get_Attr(void *actor, int nType, int nFlags)
 {
     UNDUPARAM *param;
-    int flags;
 
     param = &D_003B2610;
-    flags = nFlags | 0x800;
     UnduParamInit(param);
-    param->f08 = flags;
+    param->f08 = nFlags | 0x800;
+    param->f00 = 0;
     if (nType == 0) {
-        param->f00 = 0;
         param->f18 = ((int *)D_00338684[0])[312];
     } else {
         param->f18 = UnduDataGetHeader(nType, 0x8000);
     }
-    UnduCheck(actor, 0, param);
-    return (int)param->f20;
+    UnduCheck(actor, 0, &D_003B2610);
+    return (int)D_003B2610.f20;
 }
 
-/* TODO: near-miss (LOGIC) - same struct-base register-split issue as Get_Attr. */
+/* Same two-register/delay-slot levers as Get_Attr above. Note this
+ * variant does NOT set the 0x800 flag bit -- the original stores nFlags
+ * straight into f08, with no `ori`. */
 int Get_Attr_NU(void *actor, int nType, int nFlags)
 {
     UNDUPARAM *param;
-    int flags;
 
     param = &D_003B2610;
-    flags = nFlags | 0x800;
     UnduParamInit(param);
-    param->f08 = flags;
+    param->f08 = nFlags;
+    param->f00 = 0;
     if (nType == 0) {
-        param->f00 = 0;
         param->f18 = ((int *)D_00338684[0])[312];
     } else {
         param->f18 = UnduDataGetHeader(nType, 0x8000);
     }
-    UnduCheck(actor, 0, param);
-    return (int)param->f20;
+    UnduCheck(actor, 0, &D_003B2610);
+    return (int)D_003B2610.f20;
 }
