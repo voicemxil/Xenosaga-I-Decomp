@@ -1022,7 +1022,10 @@ typedef struct
     int  nUsed;              /* 0x6B0 */
     char pad6B4[0xA78 - 0x6B4];
     short nActorID;          /* 0xA78 */
-    char padA7A[0xAB0 - 0xA7A];
+    char padA7A[0xA92 - 0xA7A];
+    short nScriptA;          /* 0xA92 */
+    short nScriptB;          /* 0xA94 */
+    char padA96[0xAB0 - 0xA96];
 } SEF_SCHED_SLOT;
 
 extern SEF_SCHED_SLOT _schedSlots[] __asm__("_scheduler");
@@ -1037,6 +1040,20 @@ void sefKillEffect(int nID)
             if (nID < 0 || _schedSlots[i].nActorID == nID) {
                 sefFreeScheduler(i);
             }
+        }
+    }
+}
+
+/* --- sefDestroyScriptScheduler2: free every scheduler slot tagged with
+ * this (script, entry) pair. Same walker as sefKillEffect but with no
+ * "in use" test -- the tag comparison is the whole filter. --- */
+void sefDestroyScriptScheduler2(int nScript, int nEntry)
+{
+    int i;
+
+    for (i = 0; i < 128; i++) {
+        if (_schedSlots[i].nScriptA == nScript && _schedSlots[i].nScriptB == nEntry) {
+            sefFreeScheduler(i);
         }
     }
 }
