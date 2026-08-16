@@ -331,19 +331,32 @@ void Java_xeno_util_Format_toString__C(JThread *thread, JValue *args, JValue *re
     ret->p = str;
 }
 
-/* Format a float value into the shared temp String */
-/* TODO: near-miss - the format string address is not kept in a callee-saved register */
+/* Format a float value into the shared temp String.
+ * The format-string address has to be a local: the original materialises
+ * it into a callee-saved register BEFORE the fptodp call, which is what
+ * a separate assignment gets. Left inline as a call argument, gcc
+ * evaluates the nested call first and builds the address afterwards
+ * straight into $a1, which is three instructions shorter and drops a
+ * whole callee-saved register.
+ * Two scheduler tie-breaks remain, both pure reorders (audit_swaps):
+ *   --swap-into-slot ...:3     sprintf's two argument copies fill the
+ *                              delay slot the other way round
+ *   --rotate ...:32:2 / :34:-4 the original runs the nLength store
+ *                              before the first callee-saved restore and
+ *                              retires `ld $ra` last, not third */
 void Java_xeno_util_Format_toString__F(JThread *thread, JValue *args, JValue *ret)
 {
     JArray *arr;
     char *buf;
+    char *fmt;
 
     if (JAVA_tmpString == 0) {
         JAVA_tmpString = (JString *)newObject(classString);
         JAVA_tmpString->pArray = newArray(classByte, 0xFF);
     }
+    fmt = D_004DC0A0;
     buf = JAVA_tmpString->pArray->pData;
-    sprintf(buf, D_004DC0A0, fptodp(args[0].f));
+    sprintf(buf, fmt, fptodp(args[0].f));
     arr = JAVA_tmpString->pArray;
     arr->nLength = strlen(arr->pData);
     ret->p = JAVA_tmpString;
