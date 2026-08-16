@@ -149,11 +149,13 @@ float sefRandf(void) {
     return (float)(int)(((unsigned int)sefRandSeed >> 16) & 0x7FFF) * D_004D82D8;
 }
 
-extern int sefCnvEtEffectNo(int a);
+/* sefCnvEtEffectNo takes two arguments; the original passes only one
+ * here, so this call site goes through a one-argument view of it. */
+extern int sefCnvEtEffectNo1(int a) __asm__("sefCnvEtEffectNo");
 extern void svFileLoadScript(int a, int b);
 void sefLoadEffect(int a0) {
     if (a0 > 0) {
-        int v0 = sefCnvEtEffectNo(a0);
+        int v0 = sefCnvEtEffectNo1(a0);
         svFileLoadScript(0, v0);
     }
 }
@@ -1114,10 +1116,7 @@ void sefGetWeaponPosition(SEF_VEC4 *pDst, char *pAct, int nIdx)
  * hits at all" answer comes back as sltiu count,1. The loop counter is
  * dead (only the slot pointer is used), so gcc turns the forward loop
  * into the down-counter the original has. --- */
-/* sefCnvEtEffectNo really takes two arguments; sefLoadEffect above calls
- * it with one (the original does too), so the two-argument view is
- * declared under an alias rather than by widening that prototype. */
-extern int sefCnvEtEffectNo2(int nActorID, int nParam) __asm__("sefCnvEtEffectNo");
+extern int sefCnvEtEffectNo(int nActorID, int nParam);
 
 int sefIsFinishEffect2(int nEftNo)
 {
@@ -1130,8 +1129,8 @@ int sefIsFinishEffect2(int nEftNo)
     }
     for (i = 0; i < 128; i++) {
         if (_schedSlots[i].nUsed != 0) {
-            if (sefCnvEtEffectNo2(_schedSlots[i].nActorID,
-                                  _schedSlots[i].nEtParam) == nEftNo) {
+            if (sefCnvEtEffectNo(_schedSlots[i].nActorID,
+                                 _schedSlots[i].nEtParam) == nEftNo) {
                 nHits++;
             }
         }
@@ -1250,4 +1249,108 @@ void *sefAllocEffectData(SEF_EFFBLOCK *p)
     p->nDirty = 1;
     p->nCount = (unsigned short)p->nCount + 1;
     return &_lineDataTbl[nLine];
+}
+
+/* --- sefCnvEtEffectNo: nudge an effect number by a fixed offset when
+ * the caller's variant selector disagrees with the band the number
+ * falls in. Four bands; the last one is a movz on `nVariant ^ 1`, which
+ * is why its adjustment must be the only statement in its arm.
+ *
+ * NEAR-MISS (35/35 words, 18 differing). The original gives each of the
+ * first three bands its OWN `jr ra / move v0,a0` epilogue, reached by
+ * fall-through, and branches the adjust path away with a branch-likely
+ * carrying the adjustment in the annulled slot. gcc cross-jumps all
+ * three epilogues into one shared block and reverses the arm layout.
+ * Swept: both arm orders (adjust-first and return-first) in the
+ * goto/return mix -- byte-identical output either way; and plain `if`
+ * with no goto, which turns all three bands into movz/movn conditional
+ * moves and comes out two words short. A jump-optimisation difference,
+ * not a source shape. --- */
+int sefCnvEtEffectNo(int nEftNo, int nVariant)
+{
+    if ((unsigned int)(nEftNo - 2027) < 3) {
+        if (nVariant != 2) {
+            nEftNo -= 3;
+            goto out;
+        }
+        return nEftNo;
+    }
+    if ((unsigned int)(nEftNo - 2024) < 3) {
+        if (nVariant == 2) {
+            nEftNo += 3;
+            goto out;
+        }
+        return nEftNo;
+    }
+    if ((unsigned int)(nEftNo - 2040) < 2) {
+        if (nVariant != 1) {
+            nEftNo -= 2;
+            goto out;
+        }
+        return nEftNo;
+    }
+    if ((unsigned int)(nEftNo - 2038) < 2) {
+        if (nVariant == 1) {
+            nEftNo += 2;
+        }
+    }
+out:
+    return nEftNo;
+}
+
+/* --- sefCnvWaitEffectNo: resolve a line's "wait" effect number, but
+ * only for lines still carrying the 0x4001 placeholder. Small ids index
+ * a static table; boss ids go through srsGetBossWaitEftNo; anything else
+ * clears the field.
+ *
+ * NEAR-MISS (32/32 words, correct instruction multiset, ~6 differing).
+ * What is left is a pure allocator naming tie-break: the original keeps
+ * nID in $a0 / the scaled table offset in $a1 / the boss test in $v1,
+ * and we get exactly those four values in the swapped registers, with
+ * the sll/sra pair scheduled two slots later. Swept: the 16-bit
+ * truncation spelled as `(unsigned short)(nID - 151)` inline (gcc folds
+ * the andi away), as an `unsigned short` local (gcc builds the constant
+ * with li 0xff69 + addu instead of addiu -151), and as an int local
+ * narrowed at the test (this version, which is the one that gives
+ * addiu + andi); the table index hoisted into its own local or written
+ * as a byte offset (both make gcc issue a SECOND load, an `lh`, instead
+ * of deriving the signed value from the single lhu). Closing it would
+ * need two --swap-regs pairs plus a reorder, which is more flag debt
+ * than 128 bytes is worth. --- */
+typedef struct
+{
+    char pad00[0x10];
+    unsigned short nWaitID;  /* 0x10 */
+    short pad12;
+    short nEffectNo;         /* 0x14 */
+} SEF_WAITLINE;
+
+extern unsigned short steftTbl[];
+extern int srsGetBossWaitEftNo(int nID);
+
+void sefCnvWaitEffectNo(SEF_WAITLINE *p)
+{
+    unsigned int nID;
+    int nBoss;
+
+    if (p->nEffectNo != 16385) {
+        return;
+    }
+    nID = p->nWaitID;
+    nBoss = nID - 151;
+#ifdef MATCHING
+    /* Zero-cost, zero-register barrier: without it gcc sinks the whole
+     * boss-range test past the small-id branch, and the original has it
+     * computed before (its sltiu sits in that branch's delay slot). */
+    __asm__ __volatile__("");
+#endif
+    if (nID - 1 < 16) {
+        p->nEffectNo = steftTbl[(short)nID];
+        return;
+    }
+    if ((unsigned short)nBoss < 36) {
+        p->nEffectNo = srsGetBossWaitEftNo((short)nID);
+    } else {
+        p->nEffectNo = 0;
+    }
 }
