@@ -5,7 +5,7 @@ int sceUmount(const char *pfs);
 int sceFormat(const char *dev, const char *fs, void *arg, int len);
 int sceMkdir(const char *path, int mode);
 int sceDevctl(const char *dev, int cmd, void *arg, int alen, void *buf, int blen);
-int sceOpen(const char *path, int flag);
+int sceOpen();
 int sceIoctl2(int fd, int cmd, void *arg, int alen, void *buf, int blen);
 int sceClose(int fd);
 int printf(const char *fmt, ...);
@@ -195,5 +195,65 @@ void HddTest1024Save(void)
             break;
         }
     }
+    HddTestUnmountCommon();
+}
+
+int sceWrite(int fd, void *buf, int size);
+
+/* NEAR MISS -- 53 diffs, same 101-word length, LOGIC class but every
+   residue is placement: gas fills each sceDevctl's delay slot from a
+   different argument move (the original emits `move $a0,$s0` last and
+   we emit it first), $s6/$s7 are swapped between the nStep copy and the
+   "%d:%d\n" %hi base (the original hoists that base into the very first
+   call's delay slot, we hoist it only into the loop preheader), the
+   free-zone subtraction reads $v0 rather than $s2, and the loop's
+   back-branch keeps a real nop in its slot where gcc copies the target
+   `slt` in. Swept: pfs1 as a local vs the literal at each call site, a
+   named `const char *` for the loop format (that one is much worse --
+   101 diffs, LENGTH), nStep/nFree computed in either order, and staging
+   the devctl result in its own local first.
+
+   Fill the common partition with one huge dummy save, written in
+   zone-sized steps until the drive reports an error */
+void HddTestDummySave(void)
+{
+    const char *pfs1 = "pfs1:";
+    int nZone;
+    int nFree;
+    int nStep;
+    int fd;
+    int i;
+    int r;
+
+    i = 0;
+    HddTestMountCommon();
+    sceDevctl(pfs1, 20481, 0, 0, 0, 0);
+    nZone = sceDevctl(pfs1, 20482, 0, 0, 0, 0);
+    nStep = 0x1000000 / nZone;
+    nFree = nZone - 3;
+    printf("zone:%d,%d\n", nFree, nZone);
+    printf("step:%d\n", nStep);
+    r = sceMkdir("pfs1:/999", 511);
+    printf("mkdir:%d\n", r);
+    fd = sceOpen("pfs1:/999/dummy", 1538, 511);
+    printf("open:%d\n", fd);
+    if (nFree > 0) {
+        do {
+            int nSize;
+
+            if (nStep < nFree) {
+                nSize = nStep * nZone;
+                nFree = nFree - nStep;
+            } else {
+                nSize = nFree * nZone;
+                nFree = 0;
+            }
+            r = sceWrite(fd, (void *)0x1000000, nSize);
+            printf("%d:%d\n", i, r);
+            i++;
+        } while (r >= 0);
+    }
+    r = sceClose(fd);
+    printf("close:%d\n", r);
     HddTestUnmountCommon();
 }
