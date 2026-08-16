@@ -413,3 +413,207 @@ SifRpcServerData *sceSifRemoveRpc(SifRpcServerData *sd, SifRpcDataQueue *q)
     EIntr();
     return p;
 }
+
+/* ------------------------------------------------------------------
+ * SIF RPC transport: packet pool and header structures.
+ *
+ * The RPC layer keeps three pools inside one control block: `pkt_table`
+ * (client request packets, scanned for a free slot), `rdata_table`
+ * (receive-data packets, handed out round-robin through `rdata_index`)
+ * and `fpkt_table` (directly indexed by request id). Every packet is 64
+ * bytes; `rec_id` bit 0 is the in-use flag.
+ * ------------------------------------------------------------------ */
+
+typedef struct SifRpcPacket SifRpcPacket;
+
+struct SifRpcPacket {
+    int           pad0[4];      /*  0..15 */
+    unsigned int  rec_id;       /* 16  bit 0 = allocated */
+    SifRpcPacket *pkt_addr;     /* 20 */
+    int           pid;          /* 24 */
+    int           pad1[9];      /* 28..63 */
+};
+
+typedef struct SifRpcHeader {
+    SifRpcPacket *pkt_addr;     /*  0 */
+    int           rpc_id;       /*  4 */
+    int           sema_id;      /*  8 */
+    unsigned int  mode;         /* 12 */
+} SifRpcHeader;
+
+typedef struct SifRpcData {
+    int           pid;              /*  0 */
+    SifRpcPacket *pkt_table;        /*  4 */
+    int           pkt_table_len;    /*  8 */
+    int           pad0;             /* 12 */
+    void         *client_table;     /* 16 */
+    SifRpcPacket *rdata_table;      /* 20 */
+    int           rdata_table_len;  /* 24 */
+    SifRpcPacket *fpkt_table;       /* 28 */
+    int           fpkt_table_len;   /* 32 */
+    int           rdata_index;      /* 36 */
+} SifRpcData;
+
+/* _sceRpcFreePacket: drop the in-use bit and the request id. */
+void _sceRpcFreePacket(SifRpcPacket *pkt)
+{
+    pkt->pid = 0;
+    pkt->rec_id &= ~1;
+}
+
+/* _sceRpcGetPacket: linear-scan the client packet table for a slot with
+ * the in-use bit clear, stamp it with its table index and a fresh
+ * request id, and return it. Request id 0 is skipped -- `id` is the
+ * post-increment result, so a wrapped counter reaching 0 takes a second
+ * bump. */
+SifRpcPacket *_sceRpcGetPacket(SifRpcData *rd)
+{
+    SifRpcPacket *pkt;
+    int i;
+    int n;
+    int id;
+
+    DIntr();
+    pkt = rd->pkt_table;
+    for (i = 0; i < rd->pkt_table_len; i++, pkt++) {
+        if (!(pkt->rec_id & 1)) {
+            pkt->rec_id = (i << 16) | 5;
+            n = ++rd->pid;
+            if (n == 1) {
+                rd->pid++;
+                id = 1;
+            } else {
+                id = n;
+            }
+            pkt->pkt_addr = pkt;
+            pkt->pid = id;
+            EIntr();
+            return pkt;
+        }
+    }
+    EIntr();
+    return 0;
+}
+
+/* _sceRpcGetFPacket: the round-robin receive-data pool. */
+SifRpcPacket *_sceRpcGetFPacket(SifRpcData *rd)
+{
+    int i = rd->rdata_index % rd->rdata_table_len;
+    SifRpcPacket *pkt = rd->rdata_table + i;
+
+    rd->rdata_index = i + 1;
+    return pkt;
+}
+
+/* _sceRpcGetFPacket2: index the directly-addressed pool when the id is
+ * in range, otherwise fall back to the round-robin one. */
+SifRpcPacket *_sceRpcGetFPacket2(SifRpcData *rd, int rid)
+{
+    if (rid < 0 || rid >= rd->fpkt_table_len)
+        return _sceRpcGetFPacket(rd);
+    return rd->fpkt_table + rid;
+}
+
+/* sceSifCheckStatRpc: a request is complete once its packet still
+ * carries our request id and the SIF side has set the done bit. */
+int sceSifCheckStatRpc(SifRpcHeader *hdr)
+{
+    SifRpcPacket *pkt = hdr->pkt_addr;
+
+    if (pkt == 0)
+        goto err;
+    if (hdr->rpc_id != pkt->pid)
+        goto err;
+    if (pkt->rec_id & 1)
+        goto ok;
+err:
+    return 0;
+ok:
+    return 1;
+}
+
+/* sceSifSendCmd / sceSifSendCmdIntr share one internal entry point that
+ * takes an extra leading "from interrupt" argument; the public entry
+ * passes 0. Seven int arguments fit in registers on this ABI ($a0-$a3,
+ * $t0-$t3), so the shift is pure register moves. */
+extern unsigned int _sceSifSendCmd(unsigned int fid, int intr, void *pkt,
+                                   int pktsize, void *src, void *dest,
+                                   int size);
+
+unsigned int sceSifSendCmd(unsigned int fid, void *pkt, int pktsize,
+                           void *src, void *dest, int size)
+{
+    return _sceSifSendCmd(fid, 0, pkt, pktsize, src, dest, size);
+}
+
+/* sceSifSetRpcQueue: zero a queue descriptor, give it its server
+ * thread, and append it to the global queue list. */
+void sceSifSetRpcQueue(SifRpcDataQueue *q, int thread_id)
+{
+    SifRpcDataQueue *head;
+    SifRpcDataQueue *p;
+
+    DIntr();
+    head = (SifRpcDataQueue *)_data_table_00993280[10];
+    q->thread_id = thread_id;
+    q->active = 0;
+    q->link = 0;
+    q->start = 0;
+    q->end = 0;
+    q->next = 0;
+    if (head == 0) {
+        _data_table_00993280[10] = q;
+    } else {
+        p = head;
+        while (p->next != 0)
+            p = p->next;
+        p->next = q;
+    }
+    EIntr();
+}
+
+/* sceSifRegisterRpc: fill in a server descriptor and append it to its
+ * queue's server list. */
+void sceSifRegisterRpc(SifRpcServerData *sd, int sid, void *func, void *buff,
+                       void *cfunc, void *cbuff, SifRpcDataQueue *q)
+{
+    SifRpcServerData *head;
+    SifRpcServerData *p;
+
+    DIntr();
+    sd->next = 0;
+    sd->link = 0;
+    sd->sid = sid;
+    head = q->link;
+    sd->func = func;
+    sd->buff = buff;
+    sd->cfunc = cfunc;
+    sd->cbuff = cbuff;
+    sd->base = q;
+    if (head == 0) {
+        q->link = sd;
+    } else {
+        p = head;
+        while (p->link != 0)
+            p = p->link;
+        p->link = sd;
+    }
+    EIntr();
+}
+
+/* sceSifRpcLoop: the server thread body -- drain the queue, then sleep
+ * until the SIF interrupt handler wakes us with more. Never returns, so
+ * there is no epilogue. */
+extern void sceSifExecRequest(SifRpcServerData *sd);
+extern void SleepThread(void);
+
+void sceSifRpcLoop(SifRpcDataQueue *q)
+{
+    SifRpcServerData *sd;
+
+    for (;;) {
+        while ((sd = (SifRpcServerData *)sceSifGetNextRequest(q)) != 0)
+            sceSifExecRequest(sd);
+        SleepThread();
+    }
+}

@@ -36,6 +36,15 @@ MEM_OPS = ("sw", "sh", "sb", "swc1", "lw", "lh", "lb", "lbu", "lhu",
 MEM_OPS_BIGOFF = MEM_OPS + ("sd", "ld")
 
 RE_MOVE = re.compile(r'\tmove\t(\$[0-9a-z]+),(\$[0-9a-z]+)')
+# gcc's integer divide-by-zero trap is emitted as the one-operand
+# `break 7`.  The original ee-as put that 7 in the LOW code field
+# (bits 6-15), giving 0x000001cd; modern gas puts a one-operand code in
+# the HIGH field (bits 16-25), giving 0x0007000d.  Spelling it as the
+# two-operand `break 0,7` gets the original encoding out of both.  The
+# original image contains 223 copies of 0x000001cd and not one
+# 0x0007000d, so this is unconditional -- every integer / or % in the
+# tree depends on it.
+RE_BREAK = re.compile(r'^\tbreak\t([0-9]+)\s*$')
 RE_LA = re.compile(r'^\tla[ \t](.*)$')
 # Symbol operands can be named globals (`foo($2)`) or compiler-generated
 # local labels (`$L41($2)`, most commonly jump tables).  Both are assembler
@@ -1125,6 +1134,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
     lit_pool = []
     for i, line in enumerate(lines):
         line = RE_MOVE.sub(r'\tdaddu\t\1,\2,$0', line)
+        m_brk = RE_BREAK.match(line)
+        if m_brk:
+            line = '\tbreak\t0,%s' % m_brk.group(1)
 
         following = next_insn(lines, i)
         omitted = any(following.startswith("\t" + op) for op in omitted_hazards)

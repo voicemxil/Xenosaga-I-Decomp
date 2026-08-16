@@ -106,3 +106,22 @@ void _sceFs_Poff_Intr(int cause, PoffCb *cb)
         cb->func(cb->arg);
     PS2_ASM("sync.l\n\tei");
 }
+
+/* _sceFsIobSemaMK: the same lazy creation for the iob/fsq semaphore
+ * pair. Only `_fs_iob_semid` is tested; both are made together. */
+
+extern int _fs_iob_semid;
+extern int _fs_fsq_semid;
+
+void _sceFsIobSemaMK(void)
+{
+    ee_sema_t sema;
+
+    if (_fs_iob_semid == -1) {
+        sema.option = 0;
+        sema.init_count = 1;
+        sema.max_count = 1;
+        _fs_iob_semid = CreateSema(&sema);
+        _fs_fsq_semid = CreateSema(&sema);
+    }
+}

@@ -2543,3 +2543,5 @@ sceSifCheckStatRpc = 0x002038A0, 0x3C; // sceSif.c
 sceSifSetRpcQueue = 0x002038E0, 0x94; // sceSif.c
 sceSifRegisterRpc = 0x00203978, 0xD0; // sceSif.c
 nmlModelRenderCircle = 0x00234A68, 0x108; // nmlModel.c
+_sceRpcGetPacket = 0x00203038, 0xA8; // sceSif.c
+srsChangeSeparator = 0x002E8658, 0x54; // srsGet.c
