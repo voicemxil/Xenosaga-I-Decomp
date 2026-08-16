@@ -227,3 +227,107 @@ void TopInfoMain(void)
     MoveSlide(&w->win.nY, &nY, 5.0f);
     WindowDXMain(&w->win);
 }
+
+/* One party member's slot in the status strip: the tag message the frame
+ * renderer draws, followed by that member's gauges and numbers. */
+typedef struct {
+    u8 nId;                    /* 0x000: MenuMaryIdChange result */
+    u8 nFont;                  /* 0x001 */
+    char pad002[2];
+    short nX;                  /* 0x004 */
+    short nY;                  /* 0x006 */
+    char pad008[0x840 - 8];
+} TOPSTATUSENT;
+
+typedef struct {
+    u8 nState;                 /* 0x000 */
+    char pad001[2];
+    u8 nCount;                 /* 0x003: frames actually built */
+    int nColor;                /* 0x004 */
+    WINDOWDX win[3];           /* 0x008 */
+    TOPSTATUSENT ent[3];       /* 0x4C4 */
+} TOPSTATUSWIN;
+
+extern TOPSTATUSWIN *TopStatusWin;
+extern void *PartyDataGet(void);
+extern int MenuMaryIdChange(int nId);
+extern char *MenuTagTextGet(int nKind);
+extern void MenuStatusDisp(void);
+
+/* TODO: near-miss (95 diffs, 118 built vs 132 orig words). The logic is
+ * confirmed against m2c's reading of the original: the layouts, the
+ * PartyDataGet()+48+4i party-id fetch, the MenuTagTextGet(1) tag and the
+ * two loops are all right. What is not reproduced is how many induction
+ * variables the original carries: it keeps FIVE givs over the two arrays
+ * (w, w+0xC, ent, ent-4, and a bare i*404 byte offset re-added to w after
+ * the MenuTagTextGet call, because the call clobbers the address) plus two
+ * spilled counters. Written with plain pointers, as here, 2.96 keeps two
+ * givs and comes out 14 instructions short; written with w->win[i], it
+ * keeps an index and comes out 10 long. */
+/* The party status strip down the left of the top menu: one frame per
+ * party member that actually exists, stacked 120 pixels apart, all
+ * sliding in and out together. */
+void TopStatusWinMain(void)
+{
+    TOPSTATUSWIN *w;
+    WINDOWDX *pWin;
+    TOPSTATUSENT *pEnt;
+    short nX;
+    int nPage;
+    int nId;
+    int nOfs;
+    int nY;
+    int i;
+
+    w = TopStatusWin;
+    switch (w->nState) {
+    case 0:
+        w->nCount = 0;
+        w->nColor = 0x00F000F0;
+        nY = 28;
+        nOfs = 48;
+        pWin = w->win;
+        pEnt = w->ent;
+        for (i = 0; i < 3; i++) {
+            nId = MenuMaryIdChange(*(u16 *)((char *)PartyDataGet() + nOfs));
+            nOfs += 4;
+            if (nId != 0) {
+                WindowDXSet(pWin);
+                pWin->pFunc = MenuStatusDisp;
+                pWin->nX = -272;
+                pWin->nColor = w->nColor;
+                pWin->nH = 99;
+                pWin->nW = 240;
+                pWin->pMsg = pEnt;
+                pWin->nY = nY;
+                pWin->pText = MenuTagTextGet(1);
+                pWin->unk011 = 1;
+                pEnt->nFont = 1;
+                pEnt->nId = nId;
+                pEnt->nX = 0;
+                pEnt->nY = 0;
+                pWin->nState = 1;
+                WindowDXMain(pWin);
+                pWin->nState = 3;
+                w->nCount++;
+            }
+            nY += 120;
+            pWin++;
+            pEnt++;
+        }
+        w->nState = 2;
+    case 2:
+        nX = 16;
+        nPage = MenuWork.nPage;
+        if (nPage >= 34 || nPage < 32) {
+            nX = -272;
+        }
+        pWin = w->win;
+        for (i = 0; i < w->nCount; i++) {
+            MoveSlide(&pWin->nX, &nX, 5.0f);
+            WindowDXMain(pWin);
+            pWin++;
+        }
+        return;
+    }
+}
