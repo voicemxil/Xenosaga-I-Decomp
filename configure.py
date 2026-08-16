@@ -466,6 +466,30 @@ def find_asset_files():
     return asset_files
 
 
+def generate_symbol_ld():
+    """Write build/symbol_addrs.ld: symbol_addrs.txt minus // comments.
+
+    config/symbol_addrs.txt is splat's format and carries `// type:func`
+    annotations. GNU ld's script parser has no `//` comment -- it reads
+    the first one as a syntax error -- so the pinned linker script cannot
+    INCLUDE that file directly. Splat needs the annotations; ld cannot
+    have them. So generate a stripped copy for ld and leave the source of
+    truth alone.
+
+    This surfaced when six new symbols were prepended and the link began
+    failing at symbol_addrs.txt:7. Worth knowing: a broken link is easy
+    to miss, because verify.py checks per-function objects and only
+    verify_elf.py looks at the linked image.
+    """
+    import re as _re
+    src = CONFIG_DIR / "symbol_addrs.txt"
+    if not src.exists():
+        return
+    text = _re.sub(r"[ \t]*//.*$", "", src.read_text(), flags=_re.M)
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    (BUILD_DIR / "symbol_addrs.ld").write_text(text)
+
+
 def generate_ninja(asm_files, src_files, asset_files):
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -625,6 +649,7 @@ def main():
         print("Error: No assembly files found. Run with --split.")
         sys.exit(1)
 
+    generate_symbol_ld()
     generate_ninja(asm_files, src_files, asset_files)
     generate_objdiff()
     print("\nBuild configured! Run 'ninja' to build.")

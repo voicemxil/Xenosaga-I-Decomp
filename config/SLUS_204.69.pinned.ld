@@ -1,6 +1,6 @@
 INCLUDE "config/undefined_funcs_auto.txt";
 INCLUDE "config/undefined_syms_auto.txt";
-INCLUDE "config/symbol_addrs.txt";
+INCLUDE "build/symbol_addrs.ld";
 INCLUDE "config/linker_script_extra.ld";
 
 SECTIONS
