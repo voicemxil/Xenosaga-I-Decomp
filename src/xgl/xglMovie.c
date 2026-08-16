@@ -10,7 +10,10 @@ typedef struct {
     short nUnk46;        /* 0x46 */
     int pad48;           /* 0x48 */
     int nUnk4C;          /* 0x4C */
-    char pad50[0x48];
+    char pad50[0x38];
+    char *pBuf;          /* 0x88 */
+    int nLeft;           /* 0x8C */
+    char pad90[8];
     unsigned char nErrCount;/* 0x98 */
     unsigned char nUnk99;/* 0x99 */
     unsigned char nUnk9A;/* 0x9A */
@@ -228,4 +231,52 @@ int errorCallback(int nCode, char **ppMsg, XGLMOVIEINFO *pInfo)
     pInfo->nErrCount++;
     pInfo->nUnk99 = 0;
     return 1;
+}
+
+int fileRead(XGLMOVIEINFO *pInfo);
+int sceMpegDemuxPss(void *pMpeg, void *pSrc, int nSize);
+
+/* TODO: near-miss (42 words built vs 44; every instruction present is
+ * correct and in the right place). Missing: the original's `move v1,v0`
+ * copying fileRead's result out of $v0, and the alignment `nop` before
+ * the shared tail. The copy means nRead is a MULTI-BLOCK pseudo in the
+ * original (global_alloc gave it $v1); every shape that puts the
+ * `pInfo->nLeft = nRead` store into both successors of the test lets
+ * gcc constant-fold the zero arm into `sw zero,140(s0)` instead.
+ * Swept: for / while / while(1)+break / do-while+goto loop forms (the
+ * do-while is the one that reproduces the block layout -- a `for` or
+ * `while` header gets rotated by duplicate_loop_exit_test and sinks the
+ * nWait test to the bottom, 3 words short); re-reading pInfo->nLeft for
+ * the test; storing through the call expression; pre-initialising
+ * nRead; duplicating the store into both arms (10 diffs, wrong code).
+ */
+/* Top the demux up: if the last read still has bytes left carry on from
+ * where it stopped, otherwise pull fresh data (optionally spinning until
+ * some arrives), then feed the PSS demuxer */
+void fillBuff(XGLMOVIEINFO *pInfo, int nWait)
+{
+    char *pSrc;
+    int nRead;
+    int i;
+
+    if (pInfo->nLeft != 0) {
+        pSrc = pInfo->pBuf - pInfo->nLeft + 0x4000;
+    } else {
+        i = 0;
+        do {
+            if (i > 0xFFFFFF) {
+                goto ready;
+            }
+            i++;
+            nRead = fileRead(pInfo);
+            pInfo->nLeft = nRead;
+            if (nRead != 0) {
+                goto ready;
+            }
+        } while (nWait != 0);
+        return;
+ready:
+        pSrc = pInfo->pBuf;
+    }
+    pInfo->nLeft -= sceMpegDemuxPss((char *)pInfo + 48, pSrc, pInfo->nLeft);
 }
