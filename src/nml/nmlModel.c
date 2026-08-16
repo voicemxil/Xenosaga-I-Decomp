@@ -72,7 +72,7 @@ typedef struct {
     VEC4 inPlaceInv[4];     /* 0x0C0 */
     VEC4 aPointP[4];        /* 0x100 */
     VEC4 aPointC[4];        /* 0x140 */
-    char pad180[0x40];
+    VEC4 aShadowMtx[4];   /* 0x180 */
     VEC4 uFogCol1;           /* 0x1C0 */
     float aFogDist[20];     /* 0x1D0 */
     float fTransparency2;   /* 0x220 */
@@ -1945,4 +1945,69 @@ int nmlModelRenderDropCircle(void *pHdr, int nStep, int nArg)
     nmlPacketSendCircleTexture(D_00955900, D_00956920);
     nmlPacketMakeCircleTexture(pM, nArg);
     return 0;
+}
+
+float s_fShadowOfs = 0.005f;
+
+/* TODO: near-miss, 11 diffs, NOT registered. Every instruction and every
+ * register matches; the whole remaining difference is one sched2 decision, and
+ * the swept space is recorded here so nobody re-opens it blind:
+ *   - gcc fills the `beq s_nShadowVec` delay slot with `l.s $f5,
+ *     s_fShadowOfs` (pulled from below); the original puts the f5 load
+ *     BEFORE the three aVec stores and `s.s $f2,4($sp)` in the slot.
+ *     Same insns, different filler choice. No fixer flag expresses it:
+ *     --swap-into-slot is jal-only, and even extended it would land the
+ *     load one slot too late.
+ *   - the two %hi/%lo materialisations (&s_inLayout for the tail,
+ *     &s_inShadowVec) interleave with the aVec loads differently.
+ * Swept and REJECTED: fOfs assignment at all four positions among the
+ * aVec initialisers (all 11 or worse); no fOfs local at all (72 words --
+ * gcc then loses a div hazard nop and gains a .p2align pad); a
+ * `LAYOUT *p = &s_inLayout` for the tail (69 words, much worse).
+ * Locked in and NOT to be re-derived: aVec[0]/aVec[1]/aVec[2] in that
+ * source order (any other order swaps $f0/$f1); the else arm and both
+ * tail blocks write f[0] BEFORE f[2] -- gcc reverses each pair, so the
+ * source order is the mirror of the emitted order.
+ * tools/permute.py cannot run on this file (raw inline asm defeats
+ * pycparser); a stripped copy would be the next move.
+ */
+
+/* Build the drop-shadow projection matrix from the light direction.
+ * The light vector defaults to (aLightC[0].x, 1.5, aLightC[2].x) and is
+ * overridden by the explicit s_inShadowVec when one has been set -- note
+ * only components 0 and 2 are overridden, 1.5 always survives. */
+void nmlModelCalcDropShadow(void)
+{
+    float aVec[3];
+    float fOfs;
+
+    xglMatrixUnit(s_inLayout.aShadowMtx);
+    aVec[0] = s_inLayout.aLightC[0].f[0];
+    aVec[1] = 1.5f;
+    fOfs = s_fShadowOfs;
+    aVec[2] = s_inLayout.aLightC[2].f[0];
+    if (s_nShadowVec != 0) {
+        aVec[0] = s_inShadowVec.f[0];
+        aVec[2] = s_inShadowVec.f[2];
+    }
+    if (aVec[1] != 0.0f) {
+        s_inLayout.aShadowMtx[1].f[0] = -aVec[0] / aVec[1];
+        s_inLayout.aShadowMtx[1].f[2] = -aVec[2] / aVec[1];
+    } else {
+        s_inLayout.aShadowMtx[1].f[0] = 0.0f;
+        s_inLayout.aShadowMtx[1].f[2] = 0.0f;
+    }
+    s_inLayout.aShadowMtx[1].f[1] = 0.0f;
+    s_inLayout.aShadowMtx[3].f[1] = s_inLayout.inPlace[3].f[1] + fOfs;
+    s_inLayout.aShadowMtx[3].f[0] =
+        -s_inLayout.inPlace[3].f[1] * s_inLayout.aShadowMtx[1].f[0];
+    s_inLayout.aShadowMtx[3].f[2] =
+        -s_inLayout.inPlace[3].f[1] * s_inLayout.aShadowMtx[1].f[2];
+    if (s_inLayout.nShadowHeightOn != 0) {
+        s_inLayout.aShadowMtx[3].f[1] = s_inLayout.fShadowHeight + fOfs;
+        s_inLayout.aShadowMtx[3].f[0] =
+            -s_inLayout.fShadowHeight * s_inLayout.aShadowMtx[1].f[0];
+        s_inLayout.aShadowMtx[3].f[2] =
+            -s_inLayout.fShadowHeight * s_inLayout.aShadowMtx[1].f[2];
+    }
 }
