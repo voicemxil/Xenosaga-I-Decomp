@@ -13,9 +13,9 @@
 
 typedef struct sceGsGParam {
     short interlace;      /*  0  1 = interlaced */
-    short pad02;
-    short pad04;
-    short field;          /*  6  1 = FIELD mode (vs FRAME) */
+    short omode;          /*  2  video output mode (NTSC/PAL/VESA...) */
+    short ffmd;           /*  4  1 = FIELD mode (vs FRAME) */
+    short field;          /*  6  GS revision/ID, read out of CSR bits 16..23 */
     void *vsyncCb;        /*  8  installed VSync callback, 0 if none */
     int   vsyncHid;       /* 12  its INTC handler id */
 } sceGsGParam;
@@ -28,6 +28,8 @@ extern int DisableIntc(int cause);
 extern int EnableIntc(int cause);
 extern int AddIntcHandler(int cause, void *handler, int next);
 extern int RemoveIntcHandler(int cause, int hid);
+extern int GsPutIMR(unsigned int imr);
+extern void SetGsCrt(int interlace, int omode, int ffmd);
 
 /* GS privileged CSR; bit 13 is the current output FIELD. */
 #define GS_CSR (*(volatile unsigned long long *)0x12001000)
@@ -167,4 +169,78 @@ short sceGszbufaddr(short psm, short w, short h)
     if (m == 1)
         return (short)pages;
     return (short)(pages * 2);
+}
+
+/* sceGsResetGraph: bring the GS back to a known state.
+ *
+ *   mode 0  full reset -- CSR RESET, re-latch the GS id out of CSR bits
+ *           16..23, mask every GS interrupt, tear down any installed VSync
+ *           handler, then re-CRT;
+ *   mode 1  CSR FLUSH only, nothing else touched;
+ *   mode 5  re-CRT with new video parameters, leaving the CSR and any
+ *           installed VSync handler alone;
+ *   anything else is ignored.
+ *
+ * The function is void: the original tail-jumps into SetGsCrt from both the
+ * mode-0 and mode-5 arms and never materialises a return value.
+ *
+ * TWO SHAPE FACTS, both reusable:
+ *   1. gcc 2.9 turns `f(...); return;` at the end of a VOID function into a
+ *      tail `j f` after the epilogue -- but only for a void call in a void
+ *      function.  Making this return int (and SetGsCrt return int) costs the
+ *      tail call in BOTH arms: gcc emits jal + a branch to a shared epilogue
+ *      and the function is 9 words short.
+ *   2. The trailing `default: return;` is load-bearing.  Without it the
+ *      mode-5 arm is the function's LAST exit, gcc merges it with the
+ *      implicit end-of-function return before the tail-call conversion runs,
+ *      and that arm alone loses its `j`.  Giving the merge a different
+ *      target restores it.  (Reordering the cases to 0/5/1 also works but
+ *      then the emitted block order is wrong -- gcc lays cases out in source
+ *      order and the original is 0/1/5.)
+ *
+ * TODO: near-miss (23 of 100 words).  The instruction multiset is EXACT.
+ * What is left is the mode-0 and mode-5 blocks' scheduling -- the original
+ * interleaves the four `sh` field stores with the CSR read and the argument
+ * masks differently, and in mode 1 it puts the CSR address in $v0 and the
+ * 0x100 value in $v1 where gcc does the reverse.  Ruled out: pinning the
+ * mode-1 value (no effect), and returning int.  The $a2 pin below IS
+ * load-bearing: the original computes `ffmd != 0` into $a2, the register
+ * SetGsCrt's third argument later occupies, and gcc picks $v0 (27 -> 23). */
+void sceGsResetGraph(short mode, short interlace, short omode, short ffmd)
+{
+    sceGsGParam *g;
+    PIN(int fm, "$6");
+
+    switch (mode) {
+    case 0:
+        g = sceGsGetGParam();
+        GS_CSR = 0x200;
+        g->interlace = interlace;
+        g->omode = omode;
+        g->field = (short)((GS_CSR >> 16) & 0xFF);
+        GsPutIMR(0xFF00);
+        g->ffmd = (ffmd != 0);
+        if (g->vsyncCb != 0) {
+            DisableIntc(2);
+            RemoveIntcHandler(2, g->vsyncHid);
+            g->vsyncHid = 0;
+            g->vsyncCb = 0;
+        }
+        SetGsCrt(interlace & 1, omode & 0xFF, ffmd & 1);
+        return;
+    case 1:
+        GS_CSR = 0x100;
+        return;
+    case 5:
+        g = sceGsGetGParam();
+        PASSTHRU(fm, ffmd != 0);
+        g->ffmd = fm;
+        g->interlace = interlace;
+        g->omode = omode;
+        g->field = (short)((GS_CSR >> 16) & 0xFF);
+        SetGsCrt(interlace & 1, omode & 0xFF, ffmd & 1);
+        return;
+    default:
+        return;
+    }
 }
