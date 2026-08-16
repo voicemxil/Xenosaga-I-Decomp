@@ -2704,3 +2704,4 @@ sceGetstat = 0x00206238, 0x1A0; // sceFs.c
 sefSetLightFlag = 0x002E6738, 0x64; // sefIs.c
 HddTestDummyFolder = 0x00255F08, 0xC8; // HddTest.c
 sefInitEffect = 0x002E6B60, 0xA4; // sef.c
+sefInitEffectBattle = 0x002E6C08, 0x70; // sef.c

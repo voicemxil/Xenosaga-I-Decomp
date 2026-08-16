@@ -1417,3 +1417,38 @@ void sefInitEffect(void)
     _sefLoadEftQue = 0;
     _initialize = 1;
 }
+
+/* Battle-side counterpart of sefInitEffectCf: swap the 2D-draw callback
+ * into the other sRender slot and lazily claim the 256K battle effect
+ * buffer. smAlloc's second argument really is the (still null) buffer
+ * field -- the original reuses the register it was just loaded into. */
+extern void sdvInitAlters(void);
+extern void sefDestroyEffect(void);
+extern void *smAlloc(unsigned int size, void *p);
+typedef struct {
+    char pad000[0x38];
+    void *pBuf;                       /* 0x38 */
+    char pad03C[0x10C - 0x3C];
+    short nFileID;                    /* 0x10C */
+} SRS_MEMRES;
+extern SRS_MEMRES _srsMemRes;
+
+void sefInitEffectBattle(void)
+{
+    void *pBuf;
+
+    _sefBattleMode = 1;
+    sdvInitAlters();
+    sefDestroyEffect();
+    sRender.cb1 = (int) sefDrawEffect2D;
+    sRender.cb2 = 0;
+    pBuf = _srsMemRes.pBuf;
+    if (pBuf == 0) {
+        _srsMemRes.nFileID = -1;
+        /* Steering: gcc otherwise folds the just-tested null pointer to
+         * $zero and emits a `move a1,zero`; the original passes the
+         * register the field was loaded into. */
+        LAUNDER(pBuf);
+        _srsMemRes.pBuf = smAlloc(0x40000, pBuf);
+    }
+}
