@@ -2727,14 +2727,20 @@ int _ModelCalcClipMat2(void *pPos, void *pMat1, void *pMat2)
 /* Occlusion volume: five side planes plus a near distance, built by
  * setup_occlusion from the camera. */
 typedef struct {
-    char pad000[0x100];
+    VEC4 vTrans;            /* 0x00 */
+    VEC4 vAngle;            /* 0x10 */
+    VEC4 vScale;            /* 0x20 */
+    VEC4 vDir;              /* 0x30 */
+    VEC4 aMtx[4];           /* 0x40 */
+    VEC4 aMtxInv[4];        /* 0x80 */
+    VEC4 aCorner[4];        /* 0xC0 */
     float aPlane[5][4];     /* 0x100 */
     float fClip;            /* 0x150 */
-} OCCLUSION;
+} CULLCELL;
 
 /* True when pPos is inside the occlusion volume pOcc (pCam+0x1B0 is the
  * camera's view matrix). */
-int check_occlusion(OCCLUSION *pOcc, void *pCam, void *pPos)
+int check_occlusion(CULLCELL *pOcc, void *pCam, void *pPos)
 {
     VEC4 v;
     float fZ, fNW;
@@ -2851,6 +2857,9 @@ void xglMatrixStackScale(void *pVec);
 void xglMatrixStackSave(void *pMtx);
 void xglMatrixStackInverse(void);
 
+#define VEC_ZERO(d)                                             \
+    PS2_ASM("sq $0, 0x0(%0)" : : "r"(d) : "memory")
+
 #define APPLY_MATRIX33(d, m, s)                                 \
     PS2_ASM(".set noreorder\n"                                  \
             "lqc2 $vf31, 0x0(%2)\n"                             \
@@ -2879,17 +2888,6 @@ void xglMatrixStackInverse(void);
             "sqc2 $vf31, 0x0(%0)\n"                             \
             ".set reorder"                                      \
             : : "r"(d), "r"(m), "r"(s) : "memory")
-
-/* Occlusion cell work area built by culling_matrix. */
-typedef struct {
-    VEC4 vTrans;            /* 0x00 */
-    VEC4 vAngle;            /* 0x10 */
-    VEC4 vScale;            /* 0x20 */
-    VEC4 vDir;              /* 0x30 */
-    VEC4 aMtx[4];           /* 0x40 */
-    VEC4 aMtxInv[4];        /* 0x80 */
-    VEC4 aCorner[4];        /* 0xC0 */
-} CULLCELL;
 
 /* Five separate objects, not an array: retail rematerialises a %hi/%lo
  * pair for each one, which an array base held in a register would not. */
@@ -2931,4 +2929,46 @@ void culling_matrix(CULLCELL *pCell)
     APPLY_MATRIX(&pCell->aCorner[1], pCell->aMtx, &v2);
     APPLY_MATRIX(&pCell->aCorner[2], pCell->aMtx, &v3);
     APPLY_MATRIX(&pCell->aCorner[3], pCell->aMtx, &v4);
+}
+
+/* Build the cell's five clipping planes and near distance from its four
+ * corner directions, seen from the camera pCam. */
+void setup_occlusion(CULLCELL *pCell, void *pCam)
+{
+    VEC4 v0;
+    VEC4 v1;
+    VEC4 v2;
+    VEC4 v3;
+    VEC4 vZero;
+    float *pPlane;
+
+    APPLY_MATRIX(&v0, (char *)pCam + 0x1B0, &pCell->aCorner[0]);
+    APPLY_MATRIX(&v1, (char *)pCam + 0x1B0, &pCell->aCorner[1]);
+    APPLY_MATRIX(&v2, (char *)pCam + 0x1B0, &pCell->aCorner[2]);
+    APPLY_MATRIX(&v3, (char *)pCam + 0x1B0, &pCell->aCorner[3]);
+
+    v0.f[2] = -v0.f[2];
+    v1.f[2] = -v1.f[2];
+    v2.f[2] = -v2.f[2];
+    v3.f[2] = -v3.f[2];
+    pCell->fClip = v0.f[2];
+    if (v1.f[2] < pCell->fClip) pCell->fClip = v1.f[2];
+    if (v2.f[2] < pCell->fClip) pCell->fClip = v2.f[2];
+    if (v3.f[2] < pCell->fClip) pCell->fClip = v3.f[2];
+
+    VEC_ZERO(&vZero);
+    pPlane = pCell->aPlane[0];
+    plane_from_points(v0.f, v1.f, v2.f, pPlane);
+    if (pCell->aPlane[0][3] > 0.0f) {
+        plane_from_points(vZero.f, v0.f, v1.f, pCell->aPlane[1]);
+        plane_from_points(vZero.f, v1.f, v2.f, pCell->aPlane[2]);
+        plane_from_points(vZero.f, v2.f, v3.f, pCell->aPlane[3]);
+        plane_from_points(vZero.f, v3.f, v0.f, pCell->aPlane[4]);
+    } else {
+        plane_from_points(v2.f, v1.f, v0.f, pPlane);
+        plane_from_points(vZero.f, v1.f, v0.f, pCell->aPlane[1]);
+        plane_from_points(vZero.f, v2.f, v1.f, pCell->aPlane[2]);
+        plane_from_points(vZero.f, v3.f, v2.f, pCell->aPlane[3]);
+        plane_from_points(vZero.f, v0.f, v3.f, pCell->aPlane[4]);
+    }
 }

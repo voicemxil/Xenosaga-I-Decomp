@@ -2848,3 +2848,4 @@ SEQ_moveUnitChr = 0x00320288, 0x260; // SEQ.c
 SGsAddReg = 0x002E0E68, 0x38; // sef.c
 SGsAddGifUV = 0x002E0FC0, 0x40; // sef.c
 SEQ_moveChr = 0x00309FD0, 0x2C4; // SEQ.c
+setup_occlusion = 0x0023E570, 0x274; // nmlModel.c
