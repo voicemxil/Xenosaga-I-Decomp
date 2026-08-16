@@ -30,7 +30,8 @@ typedef struct {
     unsigned char nScene;               /* 0x01 */
     char pad02[1];
     unsigned char nPage;                /* 0x03 */
-    char pad04[0x11 - 0x04];
+    char pad04[0x10 - 0x04];
+    signed char nWait;                  /* 0x10: scene fade/hold counter */
     signed char nUiLock;                /* 0x11: cleared while the
                                          * database menu owns the cursor */
     char pad12[0x46 - 0x12];
@@ -2758,4 +2759,91 @@ void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
         }
         break;
     }
+}
+
+
+/* --- plugin screen driver -------------------------------------------- */
+
+extern char *UmnWorkEnd[];
+extern void UmnObjectTaskCreate(void *pFunc, void *pWork);
+extern void UmnChangeTopLevel(int nMode);
+extern void xglFontDebugHex(int nX, int nY, int nValue, int nDigits);
+extern char D_00A13540[];   /* "PLUGIN" (EUC-JP) debug caption */
+
+typedef struct {
+    char nMailBox[0x80];                /* 0x00 */
+    char pad080[6];                     /* 0x80 */
+    unsigned short nPlugin;             /* 0x86: owned-plugin bitmask */
+    unsigned char nMonster[0x10];       /* 0x88 */
+    unsigned char nAnalisis[0x10];      /* 0x98 */
+} UMN_SAVEDATA;
+
+extern UMN_SAVEDATA UmnSaveData;
+
+/* Page 0 spawns the four sub-tasks, then rebuilds plugin_folder[] from the
+   owned-plugin bitmask; 16/17 wait for the confirm button, 0xF0/0xF1 hand
+   control back to the top level. */
+void UmnPlugin(void)
+{
+    switch (UmnWork.nPage) {
+    case 0:
+        {
+            char *pWork = UmnWorkEnd[0];
+            unsigned char *pFolder = plugin_folder;
+            UMN_SAVEDATA *pData;
+            unsigned short nFlags;
+            int i;
+
+            UmnObjectTaskCreate(tskUmnPluginPas, pWork);
+            pWork += 0x3C8;
+            UmnObjectTaskCreate(tskUmnPluginInfo, pWork);
+            pWork += 0x350;
+            UmnObjectTaskCreate(tskUmnPluginList, pWork);
+            UmnObjectTaskCreate(tskUmnPluginExWin, pWork + 0x18C4);
+
+            pData = &UmnSaveData;
+            UmnWork.u.ex.nHi = 0;
+            UmnWork.u.ex.nLo = 0;
+            memset(pFolder, 0, 16);
+            nFlags = pData->nPlugin;
+            for (i = 0; i < 16; i++) {
+                if ((nFlags >> i) & 1) {
+                    *pFolder++ = i;
+                    UmnWork.u.ex.nHi++;
+                }
+            }
+            if (UmnWork.u.ex.nHi >= 7) {
+                UmnWork.u.ex.nHi = 6;
+            }
+            UmnWork.nPage = 16;
+            UmnWork.u.plugin.nSel = plugin_folder[UmnWork.u.ex.nLo];
+        }
+        break;
+    case 16:
+        UmnWork.nPage = 17;
+        UmnWork.nWait = 12;
+        /* fall through */
+    case 17:
+        if (UmnWork.nWait == 0) {
+            if (PadData.trig.b.h & 0x40) {
+                UmnWork.nPage = -16;
+                xglSoundEffectNormalID(2, 0);
+            }
+        }
+        break;
+    case 0xF0:
+        UmnWork.nPage = -15;
+        UmnWork.nWait = 16;
+        /* fall through */
+    case 0xF1:
+        if (UmnWork.nWait == 0) {
+            UmnChangeTopLevel(0);
+        }
+        break;
+    }
+    if (UmnWork.nWait != 0) {
+        UmnWork.nWait--;
+    }
+    xglFontDebugPrintf(32, 208, D_00A13540);
+    xglFontDebugHex(0, 64, UmnWork.nPage, 2);
 }
