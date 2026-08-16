@@ -5014,6 +5014,7 @@ pause.0 = 0x00362720;
 msg1.1 = 0x00362730;
 msg2.2 = 0x00362760;
 TestPrim.0_00362790 = 0x00362790;
+TestPrim_00362790 = 0x00362790;  /* alias for TestPrim.0_00362790 (static local), so C can name it */
 tsk = 0x00362840;
 maptbl0000 = 0x00362858;
 maptbl0100 = 0x00362940;
