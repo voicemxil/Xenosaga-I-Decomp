@@ -15,7 +15,9 @@ typedef struct {
     unsigned char nIdx80;    /* 0x080 */
     char pad81[5];           /* to 0x086 */
     short nUnk86;             /* 0x086 */
-    char pad88[0x848];       /* to 0x8D0 */
+    char pad88[0x18];        /* to 0x0A0 */
+    unsigned char nTeam;      /* 0x0A0 */
+    char padA1[0x82F];       /* to 0x8D0 */
     int nUnk8D0;              /* 0x8D0 */
     char pad8D4[0x114];      /* to 0x9E8 */
     float f9E8;               /* 0x9E8 */
@@ -39,7 +41,9 @@ typedef struct {
     int nFlags;              /* 0x000 */
     char pad04[0x10];        /* to 0x014 */
     float fY;                 /* 0x014 */
-    char pad18[0x8C];        /* to 0x0A4 */
+    char pad18[0x88];        /* to 0x0A0 */
+    unsigned char nTeam;      /* 0x0A0 */
+    char padA1[3];           /* to 0x0A4 */
     short nUnkA4;              /* 0x0A4 */
     char padA6[0xFA];        /* to 0x1A0 */
     MAPUNIT_SHAPE shape;     /* 0x1A0 */
@@ -141,6 +145,54 @@ int CrossCheckActor(ACTOR_CC *pRef, void *arg)
             continue;
         }
         if (CheckCrossCircle(&pRef->pos, arg, &actor[i].pos, actor[i].f9E8)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+extern int CrossCheckMapUnitAt(VECTOR *pPos, void *pOther, MAPUNIT_CC *pUnit);
+
+/* Line-of-sight scan for an aimed shot: like CrossCheckMapUnit, but it also
+   skips the aiming actor's own team and units flagged 0x7000.
+
+   PARKED at 66 of 66 words -- right length, right instruction sequence,
+   but every register is rotated by one.  The cause is a single
+   allocation decision: this loop needs NINE callee-saved values (unit
+   anchor, i, pRef, the i*0x300 byte accumulator, pPos, and the four
+   constants -1 / 0x7000 / 0x10000 / 0x100000), which is exactly $s0-$s8.
+   The original spends all nine on those and rematerialises
+   %hi/%lo(MapUnit) inside the loop for the call's third argument; we
+   hoist that symbol into $s4 instead and then have nowhere to keep -1,
+   so it is rematerialised in the loop and every later register shifts.
+   Swept: the two index tests combined into one `||`, swapped, a cached
+   unit pointer for the call argument, and forming the +0xA0 sub-object
+   pointer first (the giv anchor is already correct at +0xA0 either way).
+   Permuter territory -- the C is semantically right. */
+int CrossCheckMapUnitAim(VECTOR *pPos, ACTOR_CC *pRef)
+{
+    int i;
+
+    for (i = 0; i < 64; i++) {
+        if (MapUnit[i].nUnkA4 == -1) {
+            continue;
+        }
+        if (MapUnit[i].nUnkA4 == 0x7000) {
+            continue;
+        }
+        if ((MapUnit[i].nFlags & 0x100000) != 0) {
+            continue;
+        }
+        if (MapUnit[i].nTeam == pRef->nTeam) {
+            continue;
+        }
+        if (MapUnit[i].shape.nType == 0) {
+            continue;
+        }
+        if ((MapUnit[i].nFlags & 0x10000) == 0) {
+            continue;
+        }
+        if (CrossCheckMapUnitAt(pPos, &pRef->pos, &MapUnit[i]) != 0) {
             return i;
         }
     }
