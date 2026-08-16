@@ -269,7 +269,9 @@ void Enemy_Found(ACTOR *a)
     }
 }
 
-/* Follow the nearest point on the escape route and update movement */
+/* Follow the nearest point on the escape route and update movement
+   TODO: near-match - all 147 instructions match as a multiset; gcc schedules
+   eleven call-setup positions differently before the second spline lookup */
 void Enemy_Escape(ACTOR *a)
 {
     static u16 CoolDown;
@@ -335,7 +337,9 @@ void Enemy_Escape(ACTOR *a)
     }
 }
 
-/* Follow the nearest point on the chase route and update movement */
+/* Follow the nearest point on the chase route and update movement
+   TODO: near-match - all 143 instructions match as a multiset; it has the
+   same eleven-position second spline-call schedule as Enemy_Escape */
 void Enemy_Route_Chase(ACTOR *a)
 {
     static u16 CoolDown;
@@ -402,7 +406,9 @@ void Enemy_Route_Chase(ACTOR *a)
     }
 }
 
-/* Reset battle-linked actors and resume surviving encounter enemies */
+/* Reset battle-linked actors and resume surviving encounter enemies
+   TODO: natural-C draft; direct actor indexing improves the body to 119/135
+   words, but gcc still hoists array bases/induction state unlike the original */
 void Enemy_After_Battle(int nMode)
 {
     ACTOR *pActor;
@@ -435,8 +441,7 @@ void Enemy_After_Battle(int nMode)
     }
 
     for (i = 0; i < 16; i++) {
-        pActor = &actor[i];
-        if (pActor->nAlive > 0 && pActor->nUnk082 != 1) {
+        if (actor[i].nAlive > 0 && actor[i].nUnk082 != 1) {
             p = &enepc[i];
             if (p->nStatus & 1) {
                 if (p->nAfterFlag0 != 0) {
@@ -451,6 +456,7 @@ void Enemy_After_Battle(int nMode)
                     state = p->nState;
                 }
                 if ((char)state == 6) {
+                    pActor = &actor[i];
                     p->nUnk0040 = 0;
                     BSpline_Init(pActor->fAngle, p->aRoute, &pActor->fPos[0],
                                  &p->nUnk0040, state);

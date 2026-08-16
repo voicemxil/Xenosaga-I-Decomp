@@ -1,6 +1,7 @@
 /* Debug widget layer - lightweight on-screen component pool, container plumbing and draw passes */
 
 typedef unsigned short u16;
+typedef unsigned int u32;
 
 typedef struct EWCOMP_t {
     u16 nFlags;                     /* 0x00 */
@@ -52,6 +53,89 @@ extern void EW_setDrawEnv(void *pPacket);
 extern void EW_sendPacket(void *pPacket);
 extern void xglFontReloadTexture(void *pPacket, int nMode);
 extern void xglFontPrintExtFunc(int nAddr, void (*pFunc)(void *), int nArg);
+extern int xglPrimAddGifTagDirect(void *pPacket, void *pData, int nQwc);
+
+typedef struct {
+    u32 word[4];
+} EWQWORD;
+
+typedef struct {
+    char pad00[4];
+    short x;
+    short y;
+    u32 z;
+    short width;
+    short height;
+    u32 flags;
+    unsigned char color1;
+    unsigned char color2;
+    unsigned char color3;
+    unsigned char pad17;
+} EWMASK;
+
+#define MASK_COLOR(q, color) do { \
+    (q)->word[0] = (color); \
+    (q)->word[1] = (color); \
+    (q)->word[2] = (color); \
+    (q)->word[3] = (color); \
+} while (0)
+
+#define MASK_XYZ(q, x, y, z) do { \
+    (q)->word[0] = (x); \
+    (q)->word[1] = (y); \
+    (q)->word[2] = (z); \
+    (q)->word[3] = 0; \
+} while (0)
+
+void mask_put(void **pPacketWork, EWMASK *pMask)
+{
+    EWQWORD *pBase;
+    EWQWORD *p;
+    int x0;
+    int y0;
+    int x1;
+    int y1;
+
+    pBase = (EWQWORD *)(((u32)pPacketWork + 0x3F) & ~0xF);
+    p = pBase;
+
+    p->word[0] = 1;
+    p->word[1] = 0x10000000;
+    p->word[2] = -2;
+    p->word[3] = 0;
+    p++;
+    p->word[0] = pMask->flags;
+    p->word[1] = *(u32 *)((char *)pMask + 0x14);
+    p->word[2] = 0x42;
+    p++;
+    p->word[0] = 0x8004;
+    p->word[1] = 0x20264000;
+    p->word[2] = 0xFFFFFF51;
+    p->word[3] = 0;
+    p++;
+
+    x0 = (pMask->x + 0x700) << 4;
+    y0 = (pMask->y + 0x720) << 4;
+    x1 = x0 + (pMask->width << 4);
+    y1 = y0 + (pMask->height << 4);
+
+    MASK_COLOR(p, pMask->color3); p++;
+    MASK_XYZ(p, x0, y0, pMask->z); p++;
+    MASK_COLOR(p, pMask->color3); p++;
+    if (pMask->flags & 0x100) {
+        MASK_XYZ(p, x1, y0, pMask->z); p++;
+        MASK_COLOR(p, pMask->color2); p++;
+        MASK_XYZ(p, x0, y1, pMask->z); p++;
+    } else {
+        MASK_XYZ(p, x0, y1, pMask->z); p++;
+        MASK_COLOR(p, pMask->color2); p++;
+        MASK_XYZ(p, x1, y0, pMask->z); p++;
+    }
+    MASK_COLOR(p, pMask->color2); p++;
+    MASK_XYZ(p, x1, y1, pMask->z); p++;
+
+    xglPrimAddGifTagDirect(*pPacketWork, pBase, p - pBase);
+}
 
 /* Free a component, clearing every child slot of a container first */
 void EW_dispose(EWCOMP *pComp)

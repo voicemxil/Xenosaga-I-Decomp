@@ -558,8 +558,7 @@ loop_down:
                     if (alive == 0) {
 found:
                         slot = index;
-                    }
-                    else {
+                    } else {
                         goto loop_down;
                     }
                 }
@@ -568,30 +567,30 @@ found:
     }
 
     if (slot >= 0) {
-      if ((unsigned int)slot < 0x40) {
-    a = (ACTOR *)((unsigned int)actor + slot * 0xA70);
-    a->nMatrixType = type >> 16;
-    a->nFlags = 0x20;
-    a->nSerial = slot;
-    a->nAlive = type;
-    a->nChildNum = 0;
-    a->fScale[3] = a->fScale[2] = a->fScale[1] = a->fScale[0] = 1.0f;
-    a->pParent = 0;
-    a->nUnk008 = 0;
-    if ((type & 0xF000) == 0) {
-        a->nShadowType = 4;
-        a->nShadowSize = 0x10;
-    } else {
-        a->nShadowType = 1;
-        a->nShadowSize = 0x50;
-    }
-    *(int *)((unsigned char *)a + 0x9F4) = 0;
-    *(float *)((unsigned char *)a + 0x9E8) = D_004D8450;
-    *(int *)((unsigned char *)a + 0x9F8) = 0;
-    EXM_InitMovedHair(a);
-    *(int *)((unsigned char *)a + 0xA60) = 0;
-    return a;
-      }
+        if ((unsigned int)slot < 0x40) {
+            a = (ACTOR *)((unsigned int)actor + slot * 0xA70);
+            a->nMatrixType = type >> 16;
+            a->nFlags = 0x20;
+            a->nSerial = slot;
+            a->nAlive = type;
+            a->nChildNum = 0;
+            a->fScale[3] = a->fScale[2] = a->fScale[1] = a->fScale[0] = 1.0f;
+            a->pParent = 0;
+            a->nUnk008 = 0;
+            if ((type & 0xF000) == 0) {
+                a->nShadowType = 4;
+                a->nShadowSize = 0x10;
+            } else {
+                a->nShadowType = 1;
+                a->nShadowSize = 0x50;
+            }
+            *(int *)((unsigned char *)a + 0x9F4) = 0;
+            *(float *)((unsigned char *)a + 0x9E8) = D_004D8450;
+            *(int *)((unsigned char *)a + 0x9F8) = 0;
+            EXM_InitMovedHair(a);
+            *(int *)((unsigned char *)a + 0xA60) = 0;
+            return a;
+        }
     }
     return 0;
 }

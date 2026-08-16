@@ -374,13 +374,13 @@ void MATRIX_rotate4(float *m, float angle, float x, float y, float z)
     m[13] = zero;
     m[12] = zero;
 
-    m[10] = (z * z) * oneMinusCosine + cosine;
-    m[0] = (x * x) * oneMinusCosine + cosine;
-    m[2] = (z * x) * oneMinusCosine - y * sine;
-    m[1] = (x * y) * oneMinusCosine + z * sine;
-    m[5] = (y * y) * oneMinusCosine + cosine;
-    m[6] = (y * z) * oneMinusCosine + x * sine;
-    m[4] = (x * y) * oneMinusCosine - z * sine;
-    m[8] = (z * x) * oneMinusCosine + y * sine;
-    m[9] = (y * z) * oneMinusCosine - x * sine;
+    m[0] = oneMinusCosine * (x * x) + cosine;
+    m[1] = oneMinusCosine * (x * y) + z * sine;
+    m[2] = oneMinusCosine * (z * x) - y * sine;
+    m[4] = oneMinusCosine * (x * y) - z * sine;
+    m[5] = oneMinusCosine * (y * y) + cosine;
+    m[6] = oneMinusCosine * (y * z) + x * sine;
+    m[8] = oneMinusCosine * (z * x) + y * sine;
+    m[9] = oneMinusCosine * (y * z) - x * sine;
+    m[10] = oneMinusCosine * (z * z) + cosine;
 }
