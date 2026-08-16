@@ -2789,3 +2789,4 @@ _nextHeader = 0x00213E00, 0x10C; // sceMpegDec.c
 nmlPacketAddExecProg = 0x00238BA8, 0x1FC; // nmlPacket.c
 _flushBuf = 0x00213AD8, 0xF0; // sceMpegDec.c
 _peepBit = 0x002139D0, 0x108; // sceMpegDec.c
+_waitIpuIdle64 = 0x002137A8, 0xB0; // sceMpegDec.c

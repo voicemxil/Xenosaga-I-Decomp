@@ -674,3 +674,23 @@ u_int _peepBit(MPEGSTREAM *pStream, u_int nBits)
     }
     return (u_int)pStream->nUnk838 >> (32 - nBits);
 }
+
+#define IPU_CMD64 (*(volatile long long *)0x10002000)
+
+/* Wait for the posted IPU command to retire and return its 64-bit result. */
+long long _waitIpuIdle64(MPEGSTREAM *pStream)
+{
+    long long nRes;
+    int i;
+
+    i = 0;
+    nRes = IPU_CMD64;
+    while (nRes < 0 && (IPU_CTRL & 0x4000) == 0) {
+        if (i++ > 5000) {
+            _dispatchMpegCbNodata(pStream->pUnk858);
+            i = 0;
+        }
+        nRes = IPU_CMD64;
+    }
+    return nRes;
+}
