@@ -1573,7 +1573,7 @@ int RssdCallFunc(int nCmd, RSSD_PACKET *pPacket, void *pData, int nSize)
     }
 
     *(short *)((char *)pBuf + 0) = (short)nCmd;
-    __asm__ __volatile__("");
+    SCHED_FENCE();
     *(int *)((char *)pBuf + 12) = nSize;
     nBufSize = ((nSize + 15) & ~15) + 32;
     if (0x10020 < nBufSize) {
