@@ -2693,3 +2693,4 @@ sceDread = 0x002060E0, 0x158; // sceFs.c
 PrintPoint = 0x0027C708, 0xC8; // Print.c
 scEFFECT3Script = 0x002EB698, 0x160; // sc.c
 tskUmnBgCubeMain = 0x00A02D68, 0x2F8; // tskUmnBgCube.c
+Check_Undu = 0x002D8A68, 0x160; // Check.c

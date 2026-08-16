@@ -403,7 +403,7 @@ int Check_InsideFan(float *a, float *b, int nId, float fAngle, float fDist,
     if (Check_Undu(a, b, nId, &pt, 1, 0, 1024) == 0) {
         return 0;
     }
-    if (D_004D861C <= Get_Distance(b, &pt)) {
+    if (D_004D861C <= Get_Distance(b, (float *)&pt)) {
         return 0;
     }
     by = b[1];
@@ -417,4 +417,53 @@ int Check_InsideFan(float *a, float *b, int nId, float fAngle, float fDist,
        separate `sltu`, which only appears if the negation is spelled as an
        XOR. `== 0` and `!x` both fold to a single sltiu. */
     return (CrossPointUwamono(a, b, &pt, fHeight) ^ 1) != 0;
+}
+
+typedef struct {
+    int f00;                    /* 0x00 */
+    char pad04[0x04];
+    short f08;                  /* 0x08 */
+    char pad0A[0x0E];
+    int f18;                    /* 0x18 */
+    char pad1C[0x14];
+    long f30;                   /* 0x30 */
+    long f38;                   /* 0x38 */
+} UNDUPARAM;
+
+extern UNDUPARAM D_003B2610;
+extern float D_004D8680;
+extern void UnduParamInit(UNDUPARAM *);
+extern int UnduDataGetHeader(int, int);
+extern void UnduCheck(VECTOR *, VECTOR *, UNDUPARAM *);
+
+/* Walk the undulation (terrain height) grid from a toward b; out receives
+   the first blocked point, and the result says whether it got there. */
+int Check_Undu(float *a, float *b, int nId, VECTOR *out, int nA, int nB,
+               int nFlags)
+{
+    VECTOR dir;
+
+    UnduParamInit(&D_003B2610);
+    D_003B2610.f00 = 0;
+    D_003B2610.f08 = nFlags | 0x813;
+    if (nId == 0) {
+        D_003B2610.f18 = *(int *)((char *)D_00338684[0] + 0x4E0);
+    } else {
+        D_003B2610.f18 = UnduDataGetHeader(nId, 0x8000);
+    }
+    dir.x = b[0] - a[0];
+    dir.y = b[1] - a[1];
+    dir.z = b[2] - a[2];
+    dir.w = 1.0f;
+    /* The 16-byte start-point copy has to come AFTER the direction, not
+       before it: written first, gcc emits the whole ldl/ldr/sdl/sdr block
+       ahead of the float loads and every callee-saved register rotates. */
+    *out = *(VECTOR *)a;
+    D_003B2610.f38 = nA;
+    D_003B2610.f30 = nB;
+    UnduCheck(out, &dir, &D_003B2610);
+    if (Get_Distance3D(b, (float *)out) <= D_004D8680) {
+        return 1;
+    }
+    return 0;
 }
