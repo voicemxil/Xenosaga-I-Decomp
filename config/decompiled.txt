@@ -2381,3 +2381,4 @@ xglFontDebugHex = 0x00219378, 0xB8; // xglFont.c
 Java_xeno_Unit_setArgs__IIIII = 0x003040C8, 0x98; // Java_Unit.c
 Get_Rnd = 0x002D8BC8, 0x4C; // Get.c
 FontTestP2 = 0x00254F78, 0x22C; // Font.c
+nmlModelSetPartsVisible = 0x002304B0, 0xFC; // nmlModel.c

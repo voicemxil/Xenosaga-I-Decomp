@@ -1729,16 +1729,11 @@ int s_nHidePartsNum;
 
 /* Show or hide one named part of a lex model; parts hidden before the
  * model exists are queued for later */
-/* TODO: near-miss (46 diffs but pure REGISTER/layout skew, 63 orig vs 65
- * built) -- logic verified against asm. The loop preheader emits an
- * extra b/nop rotation and nSet/nMask land in t1/t0 vs the original's
- * t0/a3; guarded do-while, while, and split-increment forms all keep
- * the same shape. */
 void nmlModelSetPartsVisible(void *pData, int nParts, int nVisible)
 {
     int i;
     int *pOfs;
-    char *q;
+    int nQ;
     int nSet;
     int nMask;
     int nCnt;
@@ -1758,12 +1753,26 @@ void nmlModelSetPartsVisible(void *pData, int nParts, int nVisible)
             nMask = ~8;
         }
         i = 0;
+        /* The original reloads *pOfs for the loop preheader instead of
+         * reusing the value the 0xC0 test already loaded. Left to CSE,
+         * gcc keeps that value live in a register across the test, which
+         * costs a register and forces an extra b/addu loop-entry
+         * rotation; laundering pOfs here makes the two loads distinct. */
+        LAUNDER(pOfs);
         if (*(int *)((char *)pData + 0x44) > 0) {
             do {
-                q = (char *)pData + *pOfs;
-                if (*(int *)(q + 0x2C) == nParts) {
+                /* Accumulating into one variable is what makes the loaded
+                 * offset and the resulting address share $v1 as in the
+                 * original. But with nQ as both destination and second
+                 * operand gcc commutes the add to reuse the target, giving
+                 * `addu v1,v1,s0`; the tied empty asm gives the add a fresh
+                 * destination (so pData stays first) and then puts it back
+                 * in nQ's register for free. */
+                nQ = *pOfs;
+                PASSTHRU(nQ, (int)pData + nQ);
+                if (*(int *)(nQ + 0x2C) == nParts) {
                     pOfs++;
-                    *(int *)(q + 0x20) = (*(int *)(q + 0x20) | nSet) & nMask;
+                    *(int *)(nQ + 0x20) = (*(int *)(nQ + 0x20) | nSet) & nMask;
                 } else {
                     pOfs++;
                 }
@@ -1807,12 +1816,29 @@ static void set_circle_shadow_ratio(int nRatio)
 
 /* Render the drop-shadow circle for the first visible model in the
  * given index ring */
-/* TODO: near-miss (44 diffs, 52 orig vs 53 built, REGISTER/scheduling)
- * -- logic verified against asm (ring walk, face-model skip bit
- * 0x100000, alpha*transparency ratio). The header lh pair schedules in
- * the opposite order and i/nEnd land in a1/a2 vs the original's a0/a2,
- * cascading through the loop. set_circle_shadow_ratio (its helper)
- * matches. */
+/* TODO: near-miss, 15/52 words (REGISTER + scheduling; instruction counts
+ * now agree). Logic verified against the disasm: ring walk, face-model
+ * skip bit 0x100000, alpha*transparency ratio. Computing nEnd BEFORE i is
+ * what fixed the length -- it lets gcc fill the loop-test beqz delay slot
+ * with `i += nStep` (dead on the exit path), which was the missing word.
+ * What remains is a register cascade: the original puts nStep in $a3, nC
+ * in $a2, D_009550B0 in $t1 and the 0x100000 mask in $t0; gcc shifts all
+ * four one slot up ($t0/$a3/$t2/$t1) because it gives $a2 to nEnd alone
+ * instead of letting nC and nEnd share it.
+ * Best found so far, 8/52: PIN(int nStep2, "$7") + LAUNDER_V on a local
+ * copy of nStep, with the nested D_009550B0[D_00952410[i]] kept as one
+ * expression (an `idx` temp flips which table gets $a1). That fixes every
+ * register except the multiply destination, and leaves a 10-instruction
+ * scheduling permutation in the header: the original issues `lh nC` first
+ * and the mult last, gcc hoists `lh cnt` and the mult to the front of the
+ * block. Because gcc then still has $v1 live for a %hi it writes the
+ * product to $v0 instead of the original's $v1, so no reordering flag can
+ * close it -- --rotate cannot rename a destination register. Left as plain
+ * C rather than shipping the pin, since the pin does not reach a match.
+ * Swept: nEnd/i statement order, nCnt temp, idx temp, for/continue loop
+ * forms, single shared nC/nEnd variable, (cnt-1)*nStep grouping, explicit
+ * pTbl/pIdx table locals, LAUNDER/LAUNDER_V fences on nC, mask and tables,
+ * PIN of nC to $6 and of the product to $3. */
 int nmlModelRenderDropCircle(void *pHdr, int nStep, int nArg)
 {
     LAYOUT *pM;
@@ -1822,8 +1848,8 @@ int nmlModelRenderDropCircle(void *pHdr, int nStep, int nArg)
 
     pM = 0;
     nC = *(short *)pHdr;
-    i = nC - nStep;
     nEnd = *(short *)((char *)pHdr + 2) * nStep + nC - nStep;
+    i = nC - nStep;
     while (i != nEnd) {
         i += nStep;
         pM = D_009550B0[D_00952410[i]];
