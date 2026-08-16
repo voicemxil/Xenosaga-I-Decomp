@@ -43,3 +43,66 @@ int sceFsReset(void)
     memset(_fsversion, 0, 4);
     return 0;
 }
+
+/* ------------------------------------------------------------------
+ * The filesystem driver's mutual-exclusion semaphore.  `_fs_semid` is
+ * a named fixed address from config/symbol_addrs.txt; it holds -1
+ * until the first call creates the semaphore.
+ * ------------------------------------------------------------------ */
+
+#include "matching.h"
+
+/* EE kernel semaphore parameter block (SDK ee_sema_t). */
+typedef struct t_ee_sema {
+    int          count;
+    int          max_count;
+    int          init_count;
+    int          wait_threads;
+    unsigned int attr;
+    unsigned int option;
+} ee_sema_t;
+
+extern int CreateSema(ee_sema_t *param);
+extern void WaitSema(int semid);
+extern void SignalSema(int semid);
+extern int _fs_semid;
+
+void _sceFsSemInit(void)
+{
+    ee_sema_t sema;
+
+    if (_fs_semid == -1) {
+        sema.option = 0;
+        sema.init_count = 1;
+        sema.max_count = 1;
+        _fs_semid = CreateSema(&sema);
+    }
+}
+
+int _sceFsWaitS(void)
+{
+    _sceFsSemInit();
+    WaitSema(_fs_semid);
+    return 0;
+}
+
+void _sceFsSigSema(void)
+{
+    SignalSema(_fs_semid);
+}
+
+/* _sceFs_Poff_Intr: the power-off interrupt hook.  The second argument
+ * is the registered {handler, argument} pair; ExitHandler() (the SDK's
+ * `sync.l; ei`) closes the interrupt context. */
+
+typedef struct t_poff_cb {
+    void (*func)(void *arg);
+    void *arg;
+} PoffCb;
+
+void _sceFs_Poff_Intr(int cause, PoffCb *cb)
+{
+    if (cb->func != 0)
+        cb->func(cb->arg);
+    PS2_ASM("sync.l\n\tei");
+}
