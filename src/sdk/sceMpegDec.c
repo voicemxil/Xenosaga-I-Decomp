@@ -40,9 +40,13 @@ typedef struct {
     int nUnk0F8;                 /* 0x0F8 */
     char pad0FC[0x1C];
     int nUnk118;                 /* 0x118 */
-    char pad11C[0x4];
+    int nUnk11C;                 /* 0x11C */
     int nUnk120;                 /* 0x120 */
-    char pad124[0x2C];
+    char pad124[0x8];
+    int nUnk12C;                 /* 0x12C */
+    char pad130[0xC];
+    int nUnk13C;                 /* 0x13C */
+    char pad140[0x10];
     int nUnk150;                 /* 0x150 */
     int nUnk154;                 /* 0x154 */
     int nUnk158;                 /* 0x158 */
@@ -50,36 +54,46 @@ typedef struct {
     int nUnk160;                 /* 0x160 */
     char pad164[0x10];
     int nUnk174;                 /* 0x174 */
-    char pad178[0x2C];
+    int nUnk178;                 /* 0x178 */
+    char pad17C[0x8];
+    int nUnk184;                 /* 0x184 */
+    char pad188[0x4];
+    int anUnk18C[3];             /* 0x18C */
+    int anUnk198[3];             /* 0x198 */
     int nUnk1A4;                 /* 0x1A4 */
     int nUnk1A8;                 /* 0x1A8 */
     int nUnk1AC;                 /* 0x1AC */
-    char pad1B0[0x4];
+    int nUnk1B0;                 /* 0x1B0 */
     int nUnk1B4;                 /* 0x1B4 */
-    REFIMAGE *pUnk1B8;                 /* 0x1B8 */
+    REFIMAGE *pUnk1B8;           /* 0x1B8 */
     char pad1BC[0x4];
-    REFIMAGE *pUnk1C0;                 /* 0x1C0 */
-    REFIMAGE *pUnk1C4;                 /* 0x1C4 */
-    REFIMAGE *pUnk1C8;                 /* 0x1C8 */
+    REFIMAGE *pUnk1C0;           /* 0x1C0 */
+    REFIMAGE *pUnk1C4;           /* 0x1C4 */
+    REFIMAGE *pUnk1C8;           /* 0x1C8 */
     char pad1CC[0x4];
-    REFIMAGE *pUnk1D0;                 /* 0x1D0 */
-    REFIMAGE *pUnk1D4;                 /* 0x1D4 */
-    REFIMAGE *pUnk1D8;                 /* 0x1D8 */
+    REFIMAGE *pUnk1D0;           /* 0x1D0 */
+    REFIMAGE *pUnk1D4;           /* 0x1D4 */
+    REFIMAGE *pUnk1D8;           /* 0x1D8 */
     char pad1DC[0x4];
-    REFIMAGE *pUnk1E0;                 /* 0x1E0 */
-    REFIMAGE *pUnk1E4;                 /* 0x1E4 */
-    char pad1E8[0x630];
+    REFIMAGE *pUnk1E0;           /* 0x1E0 */
+    REFIMAGE *pUnk1E4;           /* 0x1E4 */
+    char pad1E8[0x628];
+    int nUnk810;                 /* 0x810 */
+    char pad814[0x4];
     int nUnk818;                 /* 0x818 */
     char pad81C[0x4];
     int nUnk820;                 /* 0x820 */
-    char pad824[0x1C];
+    char pad824[0x4];
+    long long llUnk828;          /* 0x828 */
+    long long llUnk830;          /* 0x830 */
+    char pad838[0x8];
     int nUnk840;                 /* 0x840 */
     int nUnk844;                 /* 0x844 */
     char pad848[0x4];
     int nUnk84C;                 /* 0x84C */
     int nUnk850;                 /* 0x850 */
     int nUnk854;                 /* 0x854 */
-    int *pUnk858;                 /* 0x858 */
+    int *pUnk858;                /* 0x858 */
 } MPEGSTREAM;
 
 extern u_int _nextBit(MPEGSTREAM *pStream, u_int nBits);
@@ -339,5 +353,66 @@ int _isOutSizeOK(MPEGSTREAM *pStream, OUTREQ *pReq)
         sprintf(sBuf, D_004D5DA8, pReq->nWidth, pReq->nHeight);
         _Error(pStream, sBuf);
     }
+    return bOK;
+}
+
+extern char D_004D5C90[];  /* skipped macroblock in an I picture */
+
+/* picture_display_extension(): 1..3 frame_centre offsets */
+void _pictureDisplayExtension(MPEGSTREAM *pStream)
+{
+    int nOffs;
+    int i;
+
+    if (pStream->nUnk13C != 0) {
+        if (pStream->nUnk184 != 0) {
+            nOffs = pStream->nUnk178 ? 3 : 2;
+        } else {
+            nOffs = 1;
+        }
+    } else if (pStream->nUnk174 == 3) {
+        nOffs = pStream->nUnk184 ? 3 : 2;
+    } else {
+        nOffs = 1;
+    }
+    for (i = 0; i < nOffs; i++) {
+        pStream->anUnk18C[i] = _nextBit(pStream, 16);
+        _nextBit(pStream, 1);
+        pStream->anUnk198[i] = _nextBit(pStream, 16);
+        _nextBit(pStream, 1);
+    }
+}
+
+/* Fill in a skipped macroblock's prediction state. */
+int _skipMB0(MPEGSTREAM *pStream, int *pMV, int *pType, int *pField, int *pStat)
+{
+    int nStruct;
+    int bOK;
+
+    bOK = 1;
+    *(int *)((char *)pStream + pStream->nUnk810 * 320 + 1740) = 1;
+    pStream->nUnk1B0 = 1;
+    if (pStream->nUnk150 == 2) {
+        pMV[5] = 0;
+        pMV[4] = 0;
+        pMV[1] = 0;
+        pMV[0] = 0;
+    }
+    nStruct = pStream->nUnk174;
+    if (nStruct == 3) {
+        *pType = 2;
+    } else {
+        int bFrame;
+
+        *pType = 1;
+        bFrame = pStream->nUnk174 == 2;
+        pField[1] = bFrame;
+        pField[0] = bFrame;
+    }
+    if (pStream->nUnk150 == 1) {
+        _Error(pStream, D_004D5C90);
+        bOK = 0;
+    }
+    *pStat &= ~1;
     return bOK;
 }
