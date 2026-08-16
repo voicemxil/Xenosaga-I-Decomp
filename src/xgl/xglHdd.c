@@ -319,7 +319,7 @@ int xglHddMcCheck(int *pFree)
 }
 
 extern char yoursaves[];
-int sceDopen(char *pName, void *pBuf);
+int sceDopen();   /* one arg here, two in xglHddMcCheckYourSaves */
 int Judge_MakeNewFolder(int nFd);
 int Judge_MakeNewSavedata(void);
 
@@ -345,6 +345,85 @@ int Judge_MakeNewSavedata(void);
  * keeps the %hi in $v0 and folds the %lo into the delay-slot addiu that
  * writes $a0.  No C spelling reaches that, and no reorder flag can
  * express a move that also renames a register. */
+extern char D_004DC378[];
+extern char D_004DC380[];
+extern char D_004DC388[];
+int sceDread(int nFd, void *pBuf);
+int sceDclose(int nFd);
+int strcmp(const char *pA, const char *pB);
+
+/* One directory entry as sceDread fills it in */
+typedef struct {
+    unsigned int nMode;        /* 0x00 */
+    unsigned int nAttr;        /* 0x04 */
+    unsigned int nSize;        /* 0x08 */
+    unsigned char aCTime[8];   /* 0x0C */
+    unsigned char aATime[8];   /* 0x14 */
+    unsigned char aMTime[8];   /* 0x1C */
+    unsigned int nHiSize;      /* 0x24 */
+    unsigned int aPrivate[6];  /* 0x28 */
+    char aName[256];           /* 0x40 */
+    unsigned int nUnknown;     /* 0x140 */
+} SCEDIRENT;
+
+/* TODO: near-miss (27 diffs, 75/75 words).  Control flow, the frame
+ * layout, the dirent offsets, the two strcmps, the movz/movn tail and
+ * every constant now line up.  The ENTIRE residue hangs off ONE delay
+ * slot: at the second strcmp's `beqz`, the original fills the slot
+ * from the FALL-THROUGH (`lw $v0,0($sp)`, the mode load) and keeps the
+ * branch target at +0xb8; ours fills from the TARGET block (the
+ * `slti $v0,i,1024` loop test) and redirects the branch to +0xbc.
+ * That gives us a FOURTH copy of the loop test where the original has
+ * a `nop`, and the extra reference raises `i`'s allocation priority
+ * above nCount's -- which is the whole register permutation
+ * (ours i=$s2/nCount=$s6, original nCount=$s2/i=$s4, with the two
+ * constants and the two string %hi registers swapping in step).
+ * Swept: all five declaration orders, `while (i++ < 1024)` (77 words),
+ * nested-if vs one &&-chain guard, if/else vs ternary for the
+ * sceDclose fold.  None of them move the slot.  No fix_cc_asm pass
+ * expresses "fill from the fall-through AND leave the target alone":
+ * --swap-slot-target exchanges the slot insn with the target block's
+ * first insn but does not un-redirect the branch. */
+/* Count the save folders already on the card; 1 when there is room for
+ * another (nFd is unused -- the caller passes its own descriptor) */
+int Judge_MakeNewFolder(int nFd)
+{
+    SCEDIRENT sDir;
+    int n;
+    int nRet;
+    int nCount;
+    int i;
+    int nDir;
+
+    nCount = 0;
+    nRet = sceDopen(D_004DC378);
+    if (nRet < 0) {
+        return nRet;
+    }
+    nDir = nRet;
+    i = 0;
+    while (i < 1024) {
+        i++;
+        nRet = sceDread(nDir, &sDir);
+        if (nRet <= 0) {
+            break;
+        }
+        if (strcmp(sDir.aName, D_004DC380) != 0
+            && strcmp(sDir.aName, D_004DC388) != 0
+            && (sDir.nMode & 0xF000) == 0x1000
+            && sDir.aPrivate[0] == 0xFFFF
+            && sDir.aPrivate[1] == sDir.aPrivate[0]) {
+            nCount++;
+            if (nCount >= 256) {
+                break;
+            }
+        }
+    }
+    n = sceDclose(nDir);
+    nRet = (nRet < 0) ? nRet : n;
+    return (nRet < 0) ? nRet : (nCount < 256);
+}
+
 /* Ensure the memory card has a "Your Saves" folder, creating the folder
  * or an empty savedata block as needed */
 int xglHddMcCheckYourSaves(void *pBuf)
