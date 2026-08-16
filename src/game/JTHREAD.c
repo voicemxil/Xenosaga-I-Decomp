@@ -37,7 +37,9 @@ extern JAVA_FIELD *lookupClassField(int nClass, void *pName, int nFlags);
 extern int classJava_xeno_Chr;
 extern int classJava_xeno_Unit;
 extern char D_004DC080[];
+extern char D_004DC088[]; /* "%s.%s" */
 extern int D_00338684[];
+extern void xglFontDebugPrintf(int nX, int nY, char *pFmt, ...);
 
 typedef struct JSYM
 {
@@ -156,6 +158,60 @@ done:
 next:
     pThread = pThread->pNext;
     goto loop;
+}
+
+/* Default stage-thread handler: announce "class.method" on the debug
+   overlay, then run the bound method with the stage object as its only
+   argument. The class name hangs off the object's class block and the
+   method name off the method block, both as byte arrays. */
+void JTHREAD_defaultStage(JTHREAD *pThread)
+{
+    int nArgs[4];
+    int nRet[4];
+    int *pStage;
+    int *pMethod;
+    int *pClass;
+
+    pStage = *(int **)(pThread->nId + 0x2C);
+    if (pStage != 0) {
+        /* Two links of the class chain are walked before the method is
+           even loaded: that is what leaves the method's null test with
+           the third link to fill its delay slot, the way the original
+           schedules it. */
+        pClass = (int *)*(int *)*pStage;
+        pMethod = (int *)pThread->pMethod;
+        if (pMethod != 0) {
+            xglFontDebugPrintf(0, 8, D_004DC088,
+                               *(char **)(*(int *)((char *)pClass + 4) + 8),
+                               *(char **)(*pMethod + 8));
+            nArgs[0] = (int)pStage;
+            JNI_callMethod(pThread, pMethod, nArgs, nRet);
+        }
+    }
+}
+
+/* Default thread handler: call the bound script method with the thread id
+   as its only argument, then drop the "running" flag if the thread asked
+   to be stopped. JTHREAD_defaultScene below is the same routine again --
+   the original build has two identical copies, one per thread class. */
+void JTHREAD_default(JTHREAD *pThread)
+{
+    int nArgs[4];
+    int nRet[4];
+    int nId;
+    int nFlags;
+
+    nId = pThread->nId;
+    if (nId != 0) {
+        if (pThread->pMethod != 0) {
+            nArgs[0] = nId;
+            JNI_callMethod(pThread, pThread->pMethod, nArgs, nRet);
+            nFlags = pThread->nFlags;
+            if ((nFlags & 8) != 0) {
+                pThread->nFlags = nFlags & ~0x10;
+            }
+        }
+    }
 }
 
 /* Default scene-thread handler: call the bound script method with the
