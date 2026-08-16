@@ -268,6 +268,12 @@ int svGetSizeBit(int flags)
     return 0;
 }
 
+/* NEAR MISS (87 diffs, 88 orig vs 90 built): the original keeps `w` and
+ * `h` in callee-saved registers across both svGetSizeBit calls ($s1 from
+ * the andi of the just-stored p->w, $s3 from a reload of p->h); gcc here
+ * rematerialises both from memory instead and so uses four callee-saved
+ * registers where the original uses six. Everything else -- the psm == 4
+ * split, both divisions and the vramPtr bump -- lines up. */
 int svAddImage(SV_IMAGE_LIST *l, SV_CHUNK *c)
 {
     SV_IMAGE *p;
@@ -306,6 +312,12 @@ int svAddImage(SV_IMAGE_LIST *l, SV_CHUNK *c)
     return idx;
 }
 
+/* NEAR MISS (16 diffs, same length): instruction-for-instruction right,
+ * but three values land in different registers -- the original puts the
+ * payload address in $a0, the constant 1 in $v0 and the attr in $v1,
+ * this build $a1/$v1/$a0 -- and the four tail stores schedule one slot
+ * apart. All 24 orderings of the tail block were swept (tools/permute).
+ * m2c agrees with the statement order used here. */
 int svAddClut(SV_IMAGE_LIST *l, SV_CHUNK *c)
 {
     SV_IMAGE *p;
@@ -439,6 +451,11 @@ void svAnalyzeChunk(SV_IMAGE_LIST *l, SV_CHUNK **pp)
     }
 }
 
+/* NEAR MISS (16 diffs, same length): the original's store induction
+ * variable is biased to &list[i].id (offset +16), so the six stores use
+ * offsets -12..+4; gcc bases it on the struct start and uses +4..+20.
+ * All 720 orderings of the store block were swept, and a short* alias
+ * for the three halfword stores does not move the base either. */
 void svInitImageMapper(void)
 {
     static unsigned int siz[40] __asm__("siz.0") = {
@@ -472,6 +489,12 @@ void svInitImageMapper(void)
     }
 }
 
+/* NEAR MISS (2 diffs): same shape, but the original biases the store
+ * induction variable to &ref[i].unk04, giving `sw -4(v0)` / `sw 0(v0)`
+ * off base+4 where this build uses base+0 and `sw 0` / `sw 4`. The
+ * lui/ori constant differs by exactly that 4. Everything else -- including
+ * forming the offset at run time rather than folding it into %hi/%lo,
+ * which is why the base has to be a pointer variable -- matches. */
 void svInitRefImage(void)
 {
     char *m = _imageMapper;
@@ -497,6 +520,13 @@ void svAddImageMapper(int idx, int id, SV_CHUNK **pp, int data)
     svAnalyzeChunk(p, pp);
 }
 
+/* NEAR MISS (15 diffs, same length): gcc eliminates the loop counter and
+ * compares the field pointer against base + 14*0x241C; the original keeps
+ * `i` and tests `slti 14`, which also lets it fold the +16 field offset
+ * into the induction variable's initial value. The explicit byte-offset
+ * variable that fixes svLoadMapperList is not enough here -- the early
+ * return gives the loop a second exit, so check_dbra_loop cannot fire and
+ * gcc falls back to biv elimination. */
 void svDeleteImageMapperID(int id)
 {
     int i;
@@ -707,6 +737,10 @@ typedef struct {
 
 /* Look "<name>.bmp" and "<name>.clt" up in type list 0 and build the
  * TEX0 register that draws the pair. */
+/* NEAR MISS (48 diffs, 79 orig vs 81 built): the TEX0 field packing and
+ * the block layout match; the original keeps the clut pointer in $v0
+ * across the null test (`beqz v0`) and sets the return value early,
+ * while gcc copies it to $t0 first, costing one instruction. */
 SV_PRM *svGetPrmFromName(char *name, SV_PRM *prm)
 {
     char buf[128];
@@ -766,6 +800,11 @@ SV_IMAGE *svGetScript(int no)
 }
 
 /* Bring one effect's script resource in, reusing the shared arena. */
+/* NEAR MISS (47 diffs, same length): the original allocates `no` to $s0
+ * and `p` to $s1, which lets $s1 be reused for the _srsMemRes address
+ * once `p` dies after the cate == 16 branch; gcc allocates them the other
+ * way round and needs a third callee-saved register. Pinning `no` only
+ * adds a register rather than swapping the pair. */
 int svFileLoadScript(void *p, int no)
 {
     int charID;
@@ -816,6 +855,13 @@ extern void SGsTexFlush(void);
 /* The 2D/particle pass. Each mapper category is loaded into GS memory
  * on demand and then drawn; in the _draw3D == 1 sub-pass a category is
  * skipped unless its reference-image slot says something wants it. */
+/* NEAR MISS (151 diffs, 209 orig vs 201 built): the control flow and all
+ * five category blocks line up. The residue is addressing: the original
+ * CSEs %hi(_imageMapper) into $s5 and re-adds %lo per use, so every
+ * reference-table access is (register + run-time constant); gcc here
+ * folds each reference offset into its own %hi/%lo pair, one instruction
+ * shorter per site. Basing them off the `m` pointer gets the run-time add
+ * but then gcc hoists the whole base into a callee-saved register. */
 void svDrawSchedulerParticle(void)
 {
     char *m = _imageMapper;
