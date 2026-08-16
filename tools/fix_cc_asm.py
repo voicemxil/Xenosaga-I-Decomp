@@ -884,6 +884,53 @@ def short_loop_pads(flat, sites):
     return out
 
 
+def byte_move_andi(flat, scope):
+    """`daddu $A,$B,$0` right after `lbu $B,...`  ->  `andi $A,$B,0xff`.
+
+    ee-gcc 2.96 sometimes widens a just-loaded byte with a plain register
+    copy where the original build emitted the zero-extend explicitly.
+    Both write the same bits: the operand is the destination of the
+    immediately preceding `lbu`, so its upper 24 bits are zero by
+    construction and masking them is a no-op. No source spelling reaches
+    it -- a u_char temp, an int temp, `& 0xff`, a cast on the load and a
+    cast on the compare all leave the copy (found on xglMcSetMapName,
+    whose two EUC scan loops differ from each other in the original by
+    exactly this: the first zero-extends, the second copies).
+
+    Deliberately narrow: the rewrite fires only when the previous
+    emitted instruction is an `lbu` into the copy's SOURCE register, so
+    it can never mask a value whose high bits matter.
+    """
+    if scope is None:
+        return flat
+    whole = set()
+    sites = set()
+    for ent in scope:
+        f, sep, n = ent.partition(":")
+        if sep:
+            sites.add((f, int(n)))
+        else:
+            whole.add(f)
+    owner = function_at(flat)
+    out = list(flat)
+    prev = None
+    seen = {}
+    for i, line in enumerate(flat):
+        stripped = line.strip()
+        m = re.match(r'^\tdaddu\t(\$[0-9a-z]+),(\$[0-9a-z]+),\$0\s*$', line)
+        if m and prev is not None:
+            pm = re.match(r'^\tlbu\t(\$[0-9a-z]+),', prev)
+            if pm and pm.group(1) == m.group(2):
+                f = owner[i]
+                n = seen.get(f, 0)
+                seen[f] = n + 1
+                if (not scope) or f in whole or (f, n) in sites:
+                    out[i] = "\tandi\t%s,%s,0xff" % (m.group(1), m.group(2))
+        if stripped and not stripped.startswith(('.', '#')) and not stripped.endswith(':'):
+            prev = line
+    return out
+
+
 def zero_quad_stores(flat, scope):
     """`por $X,$0,$0` + `sq $X,d(b)`  ->  `nop` + `sq $0,d(b)`.
 
@@ -1196,7 +1243,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
          rotate_seq=None, zero_quad_store=None, fp_pair_hazard=None,
-         short_loop_pad=None):
+         short_loop_pad=None, byte_move=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -1535,6 +1582,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = short_loop_pads(flat, short_loop_pad)
 
+    if byte_move is not None:
+        flat = "\n".join(out).split("\n")
+        out = byte_move_andi(flat, byte_move)
+
     if swap_slot:
         flat = "\n".join(out).split("\n")
         out = swap_into_slot(flat, swap_slot)
@@ -1619,6 +1670,12 @@ if __name__ == "__main__":
                              "10 in the original build) and no source shape "
                              "moves it. Only rewrites blocks containing "
                              "nothing but nops.")
+    parser.add_argument("--byte-move-andi", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="rewrite a register copy of a just-lbu'd byte "
+                             "to the explicit `andi $x,$y,0xff` zero-extend "
+                             "the original build emitted; optionally a "
+                             "comma-separated function-name list")
     parser.add_argument("--zero-quad-store", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="rewrite gcc's `por $X,$0,$0` + `sq $X` "
@@ -1759,4 +1816,5 @@ if __name__ == "__main__":
          args.swap_regs,
          [t for t in (args.rotate_seq or "").split(',') if t],
          scope(args.zero_quad_store), scope(args.fp_pair_hazard),
-         [t for t in (args.short_loop_pad or "").split(',') if t])
+         [t for t in (args.short_loop_pad or "").split(',') if t],
+         scope(args.byte_move_andi))

@@ -6,7 +6,9 @@ typedef struct {
     char nUnk00;         /* 0x00 */
     char pad01[3];
     int nState;          /* 0x04 */
-    char pad08[0x158];   /* keeps mw out of sdata (original uses lui/lw) */
+    char pad08[0x78];
+    unsigned char aMapName[0x22];  /* 0x80: map name, Shift-JIS, 17 pairs */
+    char padA2[0xBE];    /* keeps mw out of sdata (original uses lui/lw) */
 } XGLMCWORK;
 
 extern XGLMCWORK mw;
@@ -14,7 +16,7 @@ extern char queue_top;
 extern unsigned char queue_end;
 
 int sceMcInit(void);
-void xglMcSetMapName(char *pName, int nArg);
+void xglMcSetMapName(char *pName, char *pSub);
 void xglMcReset(void);
 
 /* Current memory-card state-machine state */
@@ -167,6 +169,72 @@ int xglMcEasySave(char *pName, void *pBuf, int nSize)
     sceMcClose(nFd);
     sceMcSync(0, &nCmd, &nResult);
     return (nResult < 0) ? -1 : 0;
+}
+
+/* Build the Shift-JIS map name shown on the memory-card save: convert
+ * the EUC name (and an optional second name, joined by a middle dot)
+ * into mw.aMapName, then zero-pad the rest */
+void xglMcSetMapName(char *pName, char *pSub)
+{
+    unsigned char aTmp[2];
+    unsigned char *pDst;
+    int n;
+
+    pDst = mw.aMapName;
+    n = 0;
+    if (pName != 0) {
+        aTmp[0] = pName[0];
+        while (aTmp[0] != 0) {
+            unsigned char *pLow = &aTmp[1];
+
+            aTmp[1] = pName[1];
+            pName += 2;
+            xglMcEUC2SJIS(aTmp, pLow);
+            pDst[0] = aTmp[0];
+            pDst[1] = aTmp[1];
+            n++;
+            pDst += 2;
+            if (n >= 16) {
+                goto tail;
+            }
+            aTmp[0] = pName[0];
+        }
+        if (n < 16) {
+            if (pSub != 0) {
+                if (*pSub != 0) {
+                    pDst[0] = 0x81;
+                    pDst[1] = 0x45;
+                    n++;
+                    pDst += 2;
+                }
+            }
+        }
+    }
+tail:
+    if (pSub != 0) {
+        while (n < 16) {
+            unsigned char *pLow;
+
+            aTmp[0] = pSub[0];
+            if (aTmp[0] == 0) {
+                break;
+            }
+            pLow = &aTmp[1];
+            aTmp[1] = pSub[1];
+            pSub += 2;
+            xglMcEUC2SJIS(aTmp, pLow);
+            pDst[0] = aTmp[0];
+            pDst[1] = aTmp[1];
+            n++;
+            pDst += 2;
+        }
+    }
+    while (n < 17) {
+        pDst[0] = 0;
+        pDst[1] = 0;
+        n++;
+        pDst += 2;
+    }
 }
 
 /* Write the two map-number digits ('O'+digit) into an EUC name buffer */
