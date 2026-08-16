@@ -1135,3 +1135,76 @@ in `_ipuVdec`.
 compiles to `j g` with no frame at all; if the original has
 `addiu sp,-16 / sd ra / jal g / ld ra / jr ra`, no argument shuffling
 will reproduce it (`_dmVector`, parked at 7 words).
+
+---
+
+## Recovering the SHAPE from the object, not the diff
+
+Three levers from the tsk/UMN screen-task run. All three are about
+reading facts out of the original binary instead of guessing a source
+shape and iterating on the diff.
+
+**READ THE JUMP TABLE to find where one `case` ends and the next
+begins.** A `switch` on a state byte compiles to a table of absolute
+addresses; each entry is the exact first instruction of that arm. If
+entry[N+1] is three instructions past entry[N], arm N is three
+instructions long and FALLS THROUGH -- and if a statement sits between
+them in the object, that statement belongs to arm N even when it reads
+like the top of arm N+1. In `tskUmnMailHensin` the first
+`eCursolModeChange` call looks like the head of state 10 and is
+actually the tail of state 0; with it on the wrong side gcc hoists the
+argument address into a callee-saved register and the function is one
+word long. Dump the table with the ELF, not with objdump on the text.
+
+**A `b` whose target is one instruction PAST the next block's first
+instruction means the previous arm falls through into it.** The
+fallthrough path already has some address or constant live in a
+register, so gcc skips the `addiu` that the jump-table edge needs and
+enters the arm one instruction late. Reading that as "the arm ends with
+`break`" costs a word and, worse, hides that the shared pointer wants a
+callee-saved register. Closed `tskUmnPluginList`, and it is what the
+`b <state21+4>` in `tskUmnDataBaseMenu` means too.
+
+**A two-way dispatch on a byte is a `switch`, not an `if`/`else if`.**
+gcc emits a switch's compare chain first and both case bodies after it;
+an `if`/`else if` inlines the first body between the two compares. Same
+semantics, four words apart (`tskUmnMailMenu`).
+
+## Permute the statement GROUPS, do not reason about the scheduler
+
+gcc 2.9x's basic-block scheduler does not emit a run of independent
+stores in source order, and the order it *does* pick is not predictable
+by hand -- but it is a function of the source order, so it is cheap to
+search. Split the run into the 3-5 groups that share a materialised
+constant or a base register and try every permutation with
+`checkfile.py`; each run is ~20 s, so 24 orders is ten minutes and 120
+is under an hour. Measured on this run:
+
+- `tskUmnPluginList`'s init block: 26 diffs -> 12 over 24 orders (only
+  one order is right, and it is not the one that reads naturally).
+- the three row-table stores after its build loop: 12 -> 6.
+- `tskUmnMailHensin`'s three cursor stores: 28 -> 17.
+- `tskUmnMailMenu`'s two window arms: 163 -> 30 over 16 orders.
+
+Two rules of thumb from those sweeps: the win is usually a *rotation*
+of the groups rather than a swap of two adjacent statements, and a group
+that stores a value LOADED from another field (`w->win.nColor =
+w->nColor`) wants to move as a unit with the stores that share its
+register. Script it (see `scratchpad/tsk2/perm*.py`) rather than editing
+by hand -- and use an anchor that includes the enclosing function's
+signature, because short declaration runs like
+`short nTargetOut;\n    int i;` repeat across functions in one file.
+
+## Conversions at a prototyped call
+
+**`lbu` at a call site means the argument is NOT converted to a narrow
+signed type.** Passing an `unsigned char` to a `signed char` parameter
+makes gcc emit `lb` (it folds the sign extension into the load); the
+original's plain `lbu` means the parameter is `int` and any narrowing is
+an explicit cast at the OTHER call site. `UmnPluginTextGet` in tskUmn.c
+is the case: `int` parameter, `UmnPluginTextGet(plugin_folder[i])` in
+`tskUmnPluginList` (`lbu`), and
+`UmnPluginTextGet((signed char)UmnWork.u.plugin.nSel)` in
+`tskUmnPluginInfo` (`lbu` for the compare, then `sll`/`sra`). Changing
+the prototype to `unsigned char` or `signed char` breaks one or the
+other; only `int` plus the cast satisfies both.
