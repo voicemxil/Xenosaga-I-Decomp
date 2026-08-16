@@ -1007,8 +1007,8 @@ void MenuCfTaikiPush(void)
     int *src;
     int *dst;
     int i;
-    PIN(int v, "$2");
-    PIN(int cont, "$3");
+    int v;
+    int cont;
 
     base = sRender_0;
     LAUNDER(base);
@@ -1021,6 +1021,7 @@ void MenuCfTaikiPush(void)
         cont = i < 8;
         LAUNDER(cont);
         *src = 0;
+        LAUNDER(v);
         *dst = v;
         src++;
         dst++;
@@ -7058,6 +7059,95 @@ void MenuTecMenuMain(void)
    while gcc folds every one into an immediate offset off the work pointer.
    -fforce-addr recreates the bases (480 -> 516 bytes here) but overshoots
    MenuTecExMain and MenuItemExMain, so it is not the retail flag. */
+/* One select-list slot: the list header plus the frame's own glyph cache */
+typedef struct {
+    MENUSELECTDX sel;          /* 0x000 */
+    char pad010[0x5F8 - 0x10];
+} MENUSELSLOT;
+
+/* Skill screen top menu: the command list and the confirm list, each a
+   WindowDX that slides in from the right edge when its page is up */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    char pad001[2];
+    signed char b03;           /* 0x003 */
+    int nColor;                /* 0x004 */
+    WINDOWDX win[2];           /* 0x008, 0x19C */
+    MENUSELSLOT sel[2];        /* 0x330, 0x928 */
+} MENU_SKILL_MENU_WORK;
+
+extern MENU_SKILL_MENU_WORK *MenuSkillMenu;
+
+void MenuSkillMenuMain(void)
+{
+    static char *msg00[] = { "Extract\nSet\nCancel" };
+    static char *msg01[] = { "Yes\nNo", " Extract skill?" };
+    MENU_SKILL_MENU_WORK *w;
+    short nTarget[2];
+    WINDOWDX *pw;
+    short *pT;
+    int i;
+
+    w = MenuSkillMenu;
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        for (i = 0; i < 2; i++) {
+            WindowDXSet(&w->win[i]);
+            w->win[i].pFunc = MenuSelectWindow;
+            w->win[i].pTitle = "Menu";
+            w->win[i].nColor = w->nColor;
+            w->win[i].pMsg = &w->sel[i].sel;
+            w->win[i].nH = 78;
+            w->sel[i].sel.nSel = 0;
+            w->win[i].nX = 528;
+            w->win[i].nW = 129;
+            if (i != 1) {
+                w->sel[i].sel.nRow = 0;
+                w->sel[i].sel.apText[0] = msg00[0];
+            } else {
+                w->win[1].nX = -182;
+                w->win[1].nW = 169;
+                w->win[1].nH = 102;
+                w->sel[1].sel.apText[0] = msg01[0];
+                w->sel[1].sel.nRow = i;
+                w->sel[1].sel.apText[1] = msg01[1];
+            }
+            w->win[i].nState = 1;
+            WindowDXMain(&w->win[i]);
+            w->win[i].nState = 3;
+        }
+        w->win[0].nY = 176;
+        w->win[1].nY = 160;
+        w->nState = 2;
+        w->b03 = 0;
+    case 2:
+        nTarget[0] = 528;
+        nTarget[1] = -182;
+        switch (MenuWork.state) {
+        case 32:
+            nTarget[0] = 272;
+            w->sel[0].sel.nSel = MenuWork.b30;
+            break;
+        case 50:
+            nTarget[1] = 36;
+            w->sel[1].sel.nSel = MenuWork.b32;
+            break;
+        }
+        pw = &w->win[0];
+        pT = nTarget;
+        for (i = 0; i < 2; i++) {
+            MoveSlide(&pw->nX, pT, 3.0f);
+            WindowDXMain(pw);
+            pT++;
+            pw++;
+        }
+        break;
+    default:
+        return;
+    }
+}
+
 /* Item screen sort-select window: a small list frame that slides in from
    the left on the sort page, with a cursor sprite tracking the row */
 typedef struct {
