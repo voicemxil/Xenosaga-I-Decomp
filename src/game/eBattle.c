@@ -105,11 +105,35 @@ void *eBattleWinInit2(unsigned char *pWork)
 typedef struct {
     int nStatus;               /* 0x000 */
     int nPage;                 /* 0x004 */
-    char win[0x18 - 8];        /* 0x008 WindowDX block */
+    unsigned short nX;         /* 0x008 WindowDX block */
+    unsigned short nY;         /* 0x00A */
+    int nDepth;                /* 0x00C */
+    short nW;                  /* 0x010 */
+    short nH;                  /* 0x012 */
+    int nUnk14;                /* 0x014 */
     char nState;               /* 0x018 */
-    char pad19[0x19C - 0x19];
-    char msg[4];               /* 0x19C */
+    char nOpen;                /* 0x019 */
+    char pad1A[0x19C - 0x1A];
+    char msg[1];               /* 0x19C */
+    char nMsgAttr;             /* 0x19D */
+    char pad19E[2];
+    short nMsgX;               /* 0x1A0 */
+    short nMsgY;               /* 0x1A2 */
+    int nMsgDepth;             /* 0x1A4 */
+    char pad1A8[0x1B8 - 0x1A8];
+    char nMsgFlag;             /* 0x1B8 */
 } EBWIN;
+
+/* Caller-supplied window description passed to the *Open entry points */
+typedef struct {
+    unsigned short nX;         /* 0x00 */
+    char pad02[2];
+    unsigned short nY;         /* 0x04 */
+    char pad06[2];
+    int nDepth;                /* 0x08 */
+    int nUnk0C;                /* 0x0C */
+    int nMessage;              /* 0x10 */
+} EBOPEN;
 
 typedef struct {
     char pad0[0x2A];
@@ -132,7 +156,7 @@ int eBattleWinMain2(void)
         return 0;
     }
     endPrintExtFunc(0xFFFFFF, 100, 0);
-    WindowDXMain(((EBWIN *)g_pEBattleUnk3)->win);
+    WindowDXMain((char *)g_pEBattleUnk3 + 8);
     w = (EBWIN *)g_pEBattleUnk3;
     switch (w->nState) {
     case 0:
@@ -177,7 +201,7 @@ int eBattleWinMain4(void)
         return 0;
     }
     endPrintExtFunc(0xFFFFFF, 100, 0);
-    WindowDXMain(((EBWIN *)g_pEBattleUnk5)->win);
+    WindowDXMain((char *)g_pEBattleUnk5 + 8);
     w = (EBWIN *)g_pEBattleUnk5;
     /* The window pointer is re-read once after eMessageNextPage and that
        single reload feeds both the page store and the eMessageMain
@@ -209,4 +233,53 @@ int eBattleWinMain4(void)
         break;
     }
     return ret;
+}
+
+extern void WindowDXSet(void *p);
+extern void eMessageSet(void *p, int nMsg);
+extern void eMessageTextChange(void *p, int nMsg);
+
+/* BW4: open the message window from a caller-supplied description, then
+ * place its shadow copy three pixels down-right and one step nearer. */
+/* TODO: near-miss (30/56 words, correct length, every instruction present).
+   One register tie-break cascades through the whole body: the original
+   keeps the window pointer in $v0 for the two store blocks, ours in
+   $t0/$a3 because a description field takes $v0, and that permutes the
+   seven-store block and the read order. Swept: inline field reads vs
+   read-all-then-store-all (read-all is closer, keep it), hoisting the
+   468/112 literals into locals, pre-reading only two of the four fields,
+   and dropping the dead first read of g_pEBattleUnk5. */
+void eBattleWinOpen4(EBOPEN *src)
+{
+    EBWIN *w;
+    int nUnk14;
+    int nX;
+    int nY;
+    int nDepth;
+    WindowDXSet((char *)g_pEBattleUnk5 + 8);
+    w = (EBWIN *)g_pEBattleUnk5;
+    /* Read-all then store-all: the original loads all four description
+       fields before it stores any of them. */
+    nUnk14 = src->nUnk0C;
+    nY = src->nY;
+    nX = src->nX;
+    nDepth = src->nDepth;
+    w->nOpen = 1;
+    w->nUnk14 = nUnk14;
+    w->nY = nY;
+    w->nDepth = nDepth;
+    w->nW = 468;
+    w->nH = 112;
+    w->nX = nX;
+    eMessageSet((char *)g_pEBattleUnk5 + 412, src->nMessage);
+    ((EBWIN *)g_pEBattleUnk5)->nMsgFlag = 1;
+    eMessageTextChange((char *)g_pEBattleUnk5 + 412, src->nMessage);
+    w = (EBWIN *)g_pEBattleUnk5;
+    w->nMsgAttr = 34;
+    w->nMsgDepth = w->nDepth + 2;
+    w->nMsgY = w->nY + 3;
+    w->nMsgX = w->nX + 3;
+    ((EBWIN *)g_pEBattleUnk5)->nState = 1;
+    ((EBWIN *)g_pEBattleUnk5)->nStatus = 1;
+    ((EBWIN *)g_pEBattleUnk5)->nPage = 0;
 }
