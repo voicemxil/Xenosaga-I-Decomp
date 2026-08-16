@@ -1872,3 +1872,13 @@ void SsdSpuDirectRead(void *pAddr, int nSpuAddr, int nSize)
     }
     printf(D_004D4AE0, nSpuAddr, nSize);
 }
+
+extern void RssdInitIop(void);
+extern void sceSifRpcLoop(void *pQueue);
+
+/* The IOP RPC server thread: bring the IOP side up, then never return. */
+void RSsdSifRpcThread(void)
+{
+    RssdInitIop();
+    sceSifRpcLoop(D_004AA20C);
+}

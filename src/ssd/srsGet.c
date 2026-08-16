@@ -301,7 +301,8 @@ done:
  * is exactly one word shorter. Swept: shared-exit accumulator with
  * goto; three `return i`s; block-local `short *` for each of the three
  * compared fields (in use order and in address order); index form vs
- * pointer form for the table walk. The three hoisted base pointers
+ * pointer form for the table walk; an early `if (nKey <= 0) return -1`
+ * overshoots by one instead (34). The three hoisted base pointers
  * (tbl+2, tbl+4, tbl+6) come out right in every variant -- it is only
  * the return-block layout that resists.
  *
@@ -597,3 +598,4 @@ void sresFreeMemoryRes(void)
         p->pCommon = 0;
     }
 }
+
