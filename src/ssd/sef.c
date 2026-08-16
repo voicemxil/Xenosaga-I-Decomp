@@ -773,7 +773,7 @@ void sefInitEffectData(SEF_EFFDATA2 *p, int nUsed, int f26, int f24)
 typedef struct {
     char pad000[0x80];
     int *pLight;         /* 0x80 -- also the actor handle sefIs* matches on */
-    char pad084[0x86 - 0x84];
+    short nDead;         /* 0x84 -- nonzero: skipped by sefCaclAllTarget */
     short nLightFlag;    /* 0x86 */
     unsigned short nHitSignal;  /* 0x88 */
     short pad08A;
@@ -1441,5 +1441,59 @@ void sefClearEffectCf(void *pArg)
             }
         }
         pRec++;
+    }
+}
+
+/* --- sefCaclAllTarget: average the world positions of every live
+ * battle actor into pDst. The accumulate is VU macro-mode (lqc2 /
+ * vadd.xyz / sqc2) and the zeroing store is $vf0, so both are hardware
+ * asm. Only the actors that contribute are counted, and the divide is a
+ * tail call.
+ *
+ * NEAR-MISS (38/40 words). Correct logic and register assignment; the
+ * two missing words are the actor-count reloads the original puts in
+ * the delay slots of the two branch-likelies that skip an actor. Those
+ * appear only when the loop latch STARTS with the count reload, so the
+ * annulling branches copy it; gcc always schedules the loop-index
+ * increment first and copies that instead. Swept: for vs do/while with
+ * the guard as `i < t->nActors`, the count read into a named local at
+ * the end of the body, LAUNDER and LAUNDER_V on that local (both make
+ * gcc keep the count in a register and add `move` copies -- worse),
+ * explicit goto/label instead of the `&&`, and both declaration orders
+ * of the index and the accumulator (that one does fix which of a3/t0
+ * each gets). Latch-schedule tie-break; permuter territory. --- */
+extern void MMathDivVectorS(SEF_VEC4 *pDst, SEF_VEC4 *pSrc, float f);
+
+void sefCaclAllTarget(SEF_VEC4 *pDst)
+{
+    SEF_ACTOR_TBL *t;
+    SEF_ACTOR *p;
+    char *pPos;
+    int i;
+    int n;
+
+    PS2_ASM("sqc2 $vf0, 0(%0)" : : "r"(pDst) : "memory");
+    t = &_battleActor;
+    n = 0;
+    i = 0;
+    if (i < t->nActors) {
+        p = t->aActor;
+        do {
+            if (p->pLight != 0 && p->nDead == 0) {
+                pPos = (char *) p->pLight + 16;
+                PS2_ASM(".set noreorder\n"
+                    "lqc2 $vf1, 0(%0)\n"
+                    "lqc2 $vf2, 0(%1)\n"
+                    "vadd.xyz $vf1, $vf1, $vf2\n"
+                    "sqc2 $vf1, 0(%0)\n"
+                    ".set reorder" : : "r"(pDst), "r"(pPos) : "memory");
+                n++;
+            }
+            i++;
+            p++;
+        } while (i < t->nActors);
+    }
+    if (n != 0) {
+        MMathDivVectorS(pDst, pDst, (float) n);
     }
 }
