@@ -1554,3 +1554,44 @@ nop disappears and the function comes out one word short.
 gp-relative small data.** `_gp` plus the symbol table turns a wall of
 `sw zero,-14140(gp)` into named globals in one pass -- worth doing before
 writing any global-heavy initialiser.
+
+---
+
+## Added from TMENU (drawDefault / updateDefault)
+
+**The order of a store pair in ONE late block can pin a callee-saved
+register channel for the whole function.** `TMENU_drawDefault` writes
+`h04`/`h06` on nine different components from the same two locals
+`x` and `y`. Which of the two gets `$s3` and which gets `$s2` --- and,
+upstream of that, which float member is loaded into `$f1` --- is decided
+by the store order in the *last* block that uses them, not by the
+declaration order, not by the order the locals are computed, and not by
+the first block that stores them. In that function eight blocks want
+`h04` first and exactly one wants `h06` first; writing `h04` first
+everywhere is "consistent", reads better, and inverts the entire
+channel at a cost of twelve words. Sweep the store order of every
+block that touches the pair, not just the first one, and let the diff
+count pick --- it took drawDefault from 43 to 29.
+
+**A named local read once is coalesced into its consumer's register.**
+`n = t->b141; nOff = n * 24 + 12;` puts `n` and `nOff` in the same
+register; retail has `move v1,v0` keeping them apart, which you only
+get from the unnamed `nOff = t->b141 * 24 + 12;`. This is the mirror
+image of the "repeated division must be a named local" row: introduce a
+local to keep a value alive, remove one to let gcc *stop* sharing a
+register. Six words in drawDefault, at two sites.
+
+### Swept and unreachable here
+
+**Respelling a `volatile` steering store does not move anything.** In
+`TMENU_updateDefault`'s double `nFlags` store, fourteen distinct
+spellings --- both stores volatile, the mask folded into the volatile
+store, the mask as its own statement, the dead companion read moved
+between the stores or respelled as `*(volatile int *)`, a volatile load
+with plain stores --- emit **byte-identical** code. gcc normalises them
+before scheduling. If a volatile-steered block has a register-naming
+residue, the volatile is not the knob; stop respelling it. (Two
+spellings do change things, but only by breaking the steering and
+losing the store: volatile on the *pointee* rather than the pointer
+object, and a volatile load with plain stores.)
+
