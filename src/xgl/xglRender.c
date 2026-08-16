@@ -293,10 +293,27 @@ void xglRenderDrawEnvMove(void)
  * Parked per budget rule after 2 attempts. */
 /* Reinitialize the clear-environment packet (giftag, test reg, and the
  * screen-space scissor rectangle derived from the render width/height) */
+/* TODO: near-miss (9 words of 49; was 36 with a length mismatch).
+ * Solved here: LAUNDER on the 0x47 test-address constant is what makes
+ * gcc keep it in a callee-saved register across the two calls, which is
+ * what gives the original's 32-byte frame with s0+s1+ra (without it gcc
+ * rematerializes the constant afterwards and the frame is 16); the
+ * constant must be u_long or the sd needs a dsll32/dsrl32
+ * zero-extension round-trip; nWidth is read BEFORE nUnk06 and as a
+ * plain field (an explicit (short)*(u_short*) cast or a short* alias
+ * both re-base the address at &sRender+4 and shift the lhu offsets);
+ * and a trailing memory barrier keeps sched2 from pulling `ld $ra`
+ * below the scissor store.
+ * Residue: (a) the original puts `sd $s1,24($s0)` in the
+ * xglRenderClearColor delay slot and issues `lui $a0,0x8000` before the
+ * jal, ours the other way round; (b) two adjacent scheduling swaps
+ * around the &sRender materialization; (c) the scissor store still
+ * issues 17 words too early -- every barrier position over the whole
+ * tail block was swept (12 variants) and only the trailing one helps. */
 void xglRenderClearEnvInit(void)
 {
     u_int *p;
-    u_int nTestAddr;
+    u_long nTestAddr;
     u_int nScissorAddr;
     int nHalf1, nHalf2;
 
@@ -306,19 +323,27 @@ void xglRenderClearEnvInit(void)
     p[2] = 0xE551E;
     p[3] = 0;
     nTestAddr = 0x47;
+    /* The original keeps 71 in a callee-saved register across the two
+     * calls (32-byte frame, s0+s1+ra); without the launder gcc
+     * rematerializes the constant afterwards and the frame is 16. */
+    LAUNDER(nTestAddr);
     xglRenderClearFrame();
     xglRenderClearColor(0x80000000);
     ClearEnv.nTestAddr = nTestAddr;
 
-    nHalf1 = (short)sRender.nUnk06 >> 1;
+    nHalf2 = sRender.nWidth >> 1;
     nScissorAddr = 0x50000;
-    nHalf2 = (short)*(u_short *)&sRender.nWidth >> 1;
+    nHalf1 = (short)sRender.nUnk06 >> 1;
     ClearEnv.aUnk30[5] = nTestAddr;
     p[12] = (2048 - nHalf2) << 4;
     p[13] = (2048 - nHalf1) << 4;
     p[16] = (nHalf2 + 2048) << 4;
     p[17] = (nHalf1 + 2048) << 4;
     ClearEnv.aUnk30[4] = nScissorAddr;
+    /* Fence the epilogue: without it sched2 pulls the `ld $ra` down past
+     * the scissor store and hoists the store itself above the four
+     * window words. */
+    __asm__ __volatile__("" : : : "memory");
 }
 
 void sceGsResetPath(void);
@@ -449,7 +474,16 @@ void xglStudioMainCameraInit(void);
  * with daddu $at where the original build used addu (needs ldl/ldr
  * support in fix_cc_asm's --expand-sym-loads or a gas-level fix -- an
  * xglRender.c FILE_FIX_FLAGS entry does not exist to extend), plus
- * head/tail scheduling around the barrier. */
+ * head/tail scheduling around the barrier.
+ * Wave-4 finding on the addu/daddu half: it is purely a gas mode bit.
+ * Assembling with -mgp32 (or -32) makes gas expand the ldl/ldr
+ * symbol+offset(reg) macro with `addu $at,$at,$X` exactly as the
+ * original does -- verified on a standalone .s.  It is NOT usable as a
+ * FILE_ASFLAGS_OVERRIDE for this TU because xglRenderDrawFlip's
+ * `dli $3,0x1000000000008002` then fails to assemble ("number larger
+ * than 32 bits").  So either that one constant has to stop being a dli,
+ * or fix_cc_asm needs to expand ldl/ldr itself the way
+ * --expand-sym-loads already does for the narrower integer loads. */
 void xglRenderSetReso(int nReso)
 {
     char *p = (char *)&sRender;
