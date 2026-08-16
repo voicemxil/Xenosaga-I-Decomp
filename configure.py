@@ -263,7 +263,7 @@ FILE_FIX_FLAGS = {
     # EXM's original object schedules independent FP work into load-delay
     # slots before comparisons and additions.
     "EXM.c": "--omit-hazard c.lt.s --omit-hazard add.s",
-    "MATRIX.c": "--omit-hazard mul.s --omit-hazard add.s",
+    "MATRIX.c": "--omit-hazard mul.s --omit-hazard add.s --fp-pair-hazard",
     # xglLightIntensityAmbient: gcc's own scheduler puts the trailing sq
     # in the jr $31 delay slot; the original keeps it before the branch
     # with a genuine nop in the slot. No other function in this file has

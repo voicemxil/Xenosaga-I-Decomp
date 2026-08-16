@@ -2260,6 +2260,7 @@ MATRIX_convert4MulMatrix = 0x0026E1E0, 0x9C; // MATRIX.c
 MATRIX_convert4MulMatrixRev = 0x0026E280, 0x8C; // MATRIX.c
 MATRIX_mul4sx3 = 0x0026E400, 0x10C; // MATRIX.c
 MATRIX_translate4s = 0x0026EA60, 0xB8; // MATRIX.c
+MATRIX_mul3x4 = 0x0026E310, 0xEC; // MATRIX.c
 JTHREAD_defaultChr = 0x00305510, 0xC4; // JTHREAD.c
 JTHREAD_defaultUnit = 0x00305448, 0xC4; // JTHREAD.c
 scGOSUBScript = 0x002EA820, 0x6C; // sc.c

@@ -308,3 +308,37 @@ void MATRIX_translate4s(float *pMat, float x, float y, float z)
              + pMat[10] * pMat[11] * z
              + pMat[14];
 }
+
+/* Multiply the affine 3x4 portions of two column-major matrices. */
+void MATRIX_mul3x4(float *pDst, const float *pLeft, const float *pRight)
+{
+    float *pOut;
+    float value[4];
+    float zero;
+    float one;
+    int i;
+
+    pOut = pDst;
+    i = 2;
+    do {
+        value[0] = pLeft[0];
+        i--;
+        value[1] = pLeft[4];
+        value[2] = pLeft[8];
+        value[3] = pLeft[12];
+        pLeft++;
+        pOut[0] = value[0] * pRight[0] + value[1] * pRight[1] + value[2] * pRight[2];
+        pOut[4] = value[0] * pRight[4] + value[1] * pRight[5] + value[2] * pRight[6];
+        pOut[8] = value[0] * pRight[8] + value[1] * pRight[9] + value[2] * pRight[10];
+        pOut[12] = value[0] * pRight[12] + value[1] * pRight[13]
+                 + value[2] * pRight[14] + value[3];
+        pOut++;
+    } while (i >= 0);
+
+    zero = 0.0f;
+    one = 1.0f;
+    pDst[11] = zero;
+    pDst[15] = one;
+    pDst[7] = zero;
+    pDst[3] = zero;
+}

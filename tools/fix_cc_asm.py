@@ -203,8 +203,11 @@ def reads_fp_reg(insn, reg, pair=False):
         return False
     mnem = m.group(1)
     ops = [o.strip() for o in m.group(2).split(',')]
-    # every operand of a compare is a source; otherwise operand 0 is the dest
-    sources = ops if mnem.startswith('c.') else ops[1:]
+    # Every operand of a compare is a source.  FP stores also read operand 0
+    # (the FPR being written to memory); treating it as a destination hides
+    # the classic gas pair hazard between mtc1 $f1 and swc1 $f0.
+    sources = ops if (mnem.startswith('c.') or
+                      mnem in ('swc1', 's.s', 'sdc1', 's.d')) else ops[1:]
     if not pair:
         return reg in sources
     want = fp_reg_num(reg)
@@ -214,6 +217,7 @@ def reads_fp_reg(insn, reg, pair=False):
 RE_FPCOMPUTE = re.compile(
     r'^\t(c\.[a-z]+\.s|mul\.s|div\.s|add\.s|sub\.s|mov\.s|abs\.s|neg\.s'
     r'|sqrt\.s|trunc\.w\.s|cvt\.[a-z.]+)[ \t]')
+RE_FP_STORE = re.compile(r'^\t(swc1|s\.s|sdc1|s\.d)[ \t]')
 RE_FP_BRANCH_LIKELY = re.compile(r'^\tbc1[ft]l[ \t]')
 # The R5900's sqrt.s takes its operand in the ft field; modern gas encodes
 # it in fs even under -march=r5900, and no alternate syntax selects the
@@ -1144,7 +1148,8 @@ def main(path, omitted_hazards, barrier_return_store=None,
         pair_hazard = (fp_pair_hazard is not None
                        and in_scope(owner[i], fp_pair_hazard))
         needs_hazard_nop = (hazard_dest is not None
-                            and RE_FPCOMPUTE.match(following)
+                            and (RE_FPCOMPUTE.match(following)
+                                 or RE_FP_STORE.match(following))
                             and reads_fp_reg(following, hazard_dest, pair_hazard)
                             and not omitted
                             and not RE_FP_BRANCH_LIKELY.match(previous_insn(lines, i)))
