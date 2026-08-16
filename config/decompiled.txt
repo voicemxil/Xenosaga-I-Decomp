@@ -2786,3 +2786,4 @@ RSRC_alloc = 0x0026D7A0, 0x110; // RSRC.c
 _sliceA0 = 0x00212AD0, 0x12C; // sceMpegDec.c
 sefInitScheduler = 0x002E4F78, 0xC4; // sef.c
 _nextHeader = 0x00213E00, 0x10C; // sceMpegDec.c
+nmlPacketAddExecProg = 0x00238BA8, 0x1FC; // nmlPacket.c

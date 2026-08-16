@@ -1085,3 +1085,58 @@ void nmlPacketAddGifTag(void *pModel, void *pLayout, int nPrim)
     sceVif1PkAddUpkData128(s_pPacket, inTag.q);
     sceVif1PkCloseUpkCode(s_pPacket);
 }
+
+int add_exec_prog(void *pModel, void *pLayout, int nProg);
+
+/* Pick which microprogram(s) the model needs and queue each one's
+ * transform data, from the model's own draw flags (+0x20) and the
+ * layout status words. */
+void nmlPacketAddExecProg(void *pModel, void *pLayout, int nA, int nB)
+{
+    int n;
+    int st;
+
+    if (nB != 0) {
+        if (add_exec_prog(pModel, pLayout, 0) != 0) {
+            nmlPacketAddTransData(pModel);
+        }
+    } else {
+        n = *(int *)((char *)pModel + 0x20);
+        if ((n & 0x80) != 0
+            || ((st = *(int *)((char *)pLayout + 0x250)) & 0x100) != 0) {
+            if (add_exec_prog(pModel, pLayout, 1) != 0) {
+                nmlPacketAddTransData(pModel);
+            }
+        } else if ((n & 0x100) != 0 || (st & 0x200) != 0) {
+            if (add_exec_prog(pModel, pLayout, 2) != 0) {
+                nmlPacketAddTransData(pModel);
+            }
+        } else if ((n & 0x200) != 0) {
+            if (add_exec_prog(pModel, pLayout, 2) != 0) {
+                nmlPacketAddTransData(pModel);
+            }
+            nmlPacketAddWaitMicrocode();
+            if (add_exec_prog(pModel, pLayout, 1) != 0) {
+                nmlPacketAddTransData(pModel);
+            }
+        } else if (nA != 0 && (n & 0x400) == 0 && (st & 0x8) == 0) {
+            if ((*(int *)((char *)pLayout + 0x2B0) & 4) != 0) {
+                if (add_exec_prog(pModel, pLayout, 3) != 0) {
+                    nmlPacketAddTransData(pModel);
+                }
+            } else {
+                if (add_exec_prog(pModel, pLayout, 5) != 0) {
+                    nmlPacketAddTransData(pModel);
+                }
+                nmlPacketAddWaitMicrocode();
+                if (add_exec_prog(pModel, pLayout, 4) != 0) {
+                    nmlPacketAddTransData(pModel);
+                }
+            }
+        } else {
+            if (add_exec_prog(pModel, pLayout, 3) != 0) {
+                nmlPacketAddTransData(pModel);
+            }
+        }
+    }
+}
