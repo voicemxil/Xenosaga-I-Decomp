@@ -900,6 +900,17 @@ shows any of these, check the source first:
 
 ## Process traps
 
+**The `nonmatching` annotations in `asm/` are STALE.** splat wrote them
+once and nothing updates them, so a function marked `nonmatching` there
+may already be registered and byte-exact. **Check
+`config/decompiled.txt`, never the asm, before starting anything.** An
+agent began work on an already-matched function this way.
+
+**Two symbols must never share a name.** One agent added a name that
+already existed at a different address and caught it before committing —
+a duplicate would have been a silent link hazard of exactly the kind
+`tools/audit_dupes.py` exists to find.
+
 **A stale "near-miss" comment on a function that actually MATCHES is a
 real hazard.** One cost an agent 30 minutes and briefly broke a
 registered match, because the comment invited experimentation on
@@ -1156,6 +1167,24 @@ words in one case.
 **A held pointer to an already-addressable member can COST words** —
 seven, measured across all 16 use combinations in one function. It is
 not a free lever; measure both ways.
+
+---
+
+## Narrow types at stores and compares
+
+**A `short` local whose only fate is an `sh` costs a `sll`/`sra`
+sign-extend pair** — declare it `int`.
+
+**A `(short)` cast on an `unsigned short` field selects `lh` at a
+comparison** while other reads of the same field stay `lhu`. Retail
+mixes both on one field, so read each use separately.
+
+**`LAUNDER` inside an if-body blocks gcc's if-conversion to `movn`** and
+restores the original's real branch. Nothing else reached it.
+
+**An unsized `extern` array indexed `[0]` keeps a store off `$gp`** where
+a plain `extern int` costs the `lui` — the mirror of the `extern char`
+entry above.
 
 ---
 
