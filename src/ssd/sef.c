@@ -1931,3 +1931,49 @@ int sefAllocScheduler(void *pOwner)
     }
     return -1;
 }
+
+/* Release scheduler slot nIdx. Continuous-fire slots (flag 0x202) hand
+ * off to sefFreeSchedulerCf; everything else tears down its 32
+ * effect-data records, drops a reference on the effect record the slot
+ * was playing, and clears the slot header. Retail recomputes
+ * nIdx * 0xAB0 after the loop instead of keeping the slot pointer live
+ * across the calls -- that is what the repeated subscript gives. */
+typedef struct {
+    char           pad0000[8];
+    unsigned short nRefCount;        /* 0x08 */
+    char           pad000A[0x450 - 0xA];
+} SEF_EFT_REC;
+
+extern SEF_EFT_REC D_0041E810[];
+
+void sefFreeScheduler(int nIdx)
+{
+    SEF_SCHED_SLOT *p;
+    char *q;
+    int i;
+    int n;
+
+    if ((unsigned int)nIdx < 128 && _schedSlots[nIdx].nUsed != 0) {
+        p = &_schedSlots[nIdx];
+        if ((p->nFlags & 0x202) != 0) {
+            sefFreeSchedulerCf(p);
+            return;
+        }
+        q = (char *)_schedSlots[nIdx].aEffect;
+        for (i = 31; i >= 0; i--) {
+            sefDestroyEffectData(q);
+            q += 48;
+        }
+        n = _schedSlots[nIdx].nScriptA;
+        if (n >= 0) {
+            SEF_EFT_REC *pRec = &D_0041E810[n];
+            int nRef = pRec->nRefCount;
+
+            pRec->nRefCount = nRef - 1;
+        }
+        _schedSlots[nIdx].nUsed = 0;
+        _schedSlots[nIdx].nScriptA = -1;
+        _schedSlots[nIdx].nScriptB = -1;
+        _schedSlots[nIdx].nState = 0;
+    }
+}
