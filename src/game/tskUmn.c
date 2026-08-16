@@ -117,7 +117,7 @@ extern void eMessageSet(void *pMsg, char *pText);
 extern void eMessageMain(void *pMsg);
 extern void endPrintExtFunc(int nColor, int nMode, void *pBox);
 
-extern char *UmnPluginTextGet(signed char nNo);
+extern char *UmnPluginTextGet(int nNo);
 extern char *ListText[];
 extern char *strcpy(char *pDst, const char *pSrc);
 extern void *memcpy(void *pDst, const void *pSrc, unsigned int nSize);
@@ -230,7 +230,8 @@ void tskUmnPluginInfo(TSK_TASK *pTask, UMN_INFO *w)
             }
         }
         if (UmnWork.u.plugin.nSel < 6) {
-            w->msg.pText = UmnPluginTextGet(UmnWork.u.plugin.nSel) + 32;
+            w->msg.pText =
+                UmnPluginTextGet((signed char)UmnWork.u.plugin.nSel) + 32;
         } else {
             w->msg.pText = "\xa5\xd7\xa5\xe9\xa5\xb0\xa5\xa4\xa5\xf3";
         }
@@ -1373,7 +1374,7 @@ void tskUmnDataBaseMenu(TSK_TASK *pTask, UMN_MENU *w)
             pWin->nState = 3;
             w->bReady = 1;
             w->nState = 21;
-            break;
+            /* fallthrough: state 21 runs on the same frame */
         case 21:
             nTarget = 192;
             pWin = &w->win;
@@ -1411,4 +1412,122 @@ void tskUmnDataBaseMenu(TSK_TASK *pTask, UMN_MENU *w)
             WindowDXMain((WINDOWDX *)&w->win);
         }
     }
+}
+
+/* --- Plugin screen: the installed-plugin list (WindowSP) --- */
+
+extern unsigned char plugin_folder[];
+extern void WindowSPItemChange(SPWIN *pWin);
+extern void xglFontDebugPrintf(int nX, int nY, char *pFmt, ...);
+
+typedef struct {
+    unsigned char nState;               /* 0x0000 */
+    unsigned char bReady;               /* 0x0001 */
+    char pad0002[2];
+    short nX;                           /* 0x0004 */
+    short nY;                           /* 0x0006 */
+    int nColor;                         /* 0x0008 */
+    SPWIN sp;                           /* 0x000C */
+    char pad002C[0x1744 - 0x2C];
+    SPROW row[8];                       /* 0x1744 */
+} UMN_PLIST;
+
+/* Plugin screen: the list of plugins the player has installed.
+ *
+ * State 20 rebuilds the row table from plugin_folder[] (each slot's id is
+ * turned into its caption by UmnPluginTextGet), appends one blank row and
+ * the null terminator, and hands the change to WindowSPItemChange; 30
+ * slides in, 40 accepts input and publishes the selection into UmnWork,
+ * 50 slides back out. */
+void tskUmnPluginList(TSK_TASK *pTask, UMN_PLIST *w)
+{
+    short nTarget;
+    short nTargetOut;
+    int i;
+
+    if (UmnWork.nScene != 4) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nState = 0;
+        w->bReady = 0;
+        w->nX = 528;
+        w->nY = 112;
+        w->nColor = 0x00FF0000;
+        w->sp.nX = 528;
+        w->sp.nY = 112;
+        w->sp.nColor = 0x00FF0000;
+        w->sp.nRows = 3;
+        w->sp.pTitle = "List";
+        w->sp.nFont = 10;
+        w->sp.nStyle = 1;
+        w->sp.nW = 400;
+        w->sp.nH = 246;
+        w->sp.pRows = 0;
+        WindowSPSet(&w->sp);
+        break;
+    case 2:
+        switch (w->nState) {
+        case 0:
+            w->bReady = 0;
+            w->nState = 10;
+            /* fallthrough: the page test runs on the same frame */
+        case 10:
+            if (UmnWork.nPage == 17) {
+                w->bReady = 1;
+                w->nState = 20;
+            }
+            break;
+        case 20:
+            for (i = 0; i < UmnWork.u.ex.nHi; i++) {
+                w->row[i].pText = UmnPluginTextGet(plugin_folder[i]);
+                w->row[i].nParam = 0;
+                w->row[i].bGray = 0;
+            }
+            w->row[i].pText = "";
+            w->row[i + 1].pText = 0;
+            w->sp.pRows = w->row;
+            WindowSPItemChange(&w->sp);
+            w->sp.nState = 17;
+            WindowSPMain(&w->sp);
+            w->nState = 30;
+            /* fallthrough: state 30 runs on the same frame */
+        case 30:
+            nTarget = 56;
+            MoveSlide(&w->nX, &nTarget, 3.0f);
+            if (w->nX == nTarget) {
+                w->nState = 40;
+            }
+            break;
+        case 40: {
+            int nSel = WindowSPSelect(&w->sp, PadData.nRepeat);
+
+            if (nSel >= 0) {
+                UmnWork.u.ex.nLo = nSel;
+                UmnWork.u.plugin.nSel = plugin_folder[UmnWork.u.ex.nLo];
+            }
+            if (UmnWork.nPage != 17) {
+                w->nState = 50;
+            }
+            break;
+        }
+        case 50:
+            nTargetOut = 528;
+            MoveSlide(&w->nX, &nTargetOut, 3.0f);
+            if (w->nX == nTargetOut) {
+                w->nState = 0;
+            }
+            break;
+        }
+        break;
+    }
+    if (w->bReady) {
+        w->sp.nX = w->nX;
+        w->sp.nY = w->nY;
+        w->sp.nColor = w->nColor;
+        WindowSPMain(&w->sp);
+    }
+    xglFontDebugPrintf(0, 16, "list : %2d", w->nState);
 }

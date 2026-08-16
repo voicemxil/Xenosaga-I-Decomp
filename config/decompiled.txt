@@ -2762,3 +2762,4 @@ _sendIpuCommand = 0x002136D0, 0x2C; // sceMpegDec.c
 _nextStartCode = 0x00213D18, 0x7C; // sceMpegDec.c
 _extrainfo = 0x002142F0, 0x48; // sceMpegDec.c
 CheckCornerDist = 0x002C3C70, 0x114; // Check.c
+tskUmnPluginList = 0x00A0E1A0, 0x338; // tskUmn.c
