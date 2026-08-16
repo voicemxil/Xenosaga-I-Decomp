@@ -40,7 +40,8 @@ void sceVif1PkRef(Vif1Packet *pkt, unsigned int addr, unsigned int n,
 /* Build a VIF1 packet that uploads an image to the GS: a DIRECTHL block sets up
    BITBLTBUF/TRXPOS/TRXREG/TRXDIR through a GIF A+D tag, then the pixel data is
    chained in as REF transfers of at most 32767 quadwords each. */
-/* TODO: near-miss, 4 of 122 words, REGISTER class only (was 20).
+/* MATCHES.  122 words.  Closed after a long chain of levers; the history is
+   worth keeping because most of it is reusable.
 
    THE BIG FINDING: tools/tu_boundaries.py shows sceVif1Pk is 26 separate
    __gnu_compiled_c translation units, one per function -- a library archive.
@@ -64,49 +65,65 @@ void sceVif1PkRef(Vif1Packet *pkt, unsigned int addr, unsigned int n,
               gt  = (unsigned long)n;
               eop = gt | EOP_BIT;
               gt |= NONEOP_BIT;
-        Writing the two ORs as independent expressions off `n` lets gcc
-        coalesce the zero-extended temp with `eop` (which is PIN'd to $a0)
-        and fold EOP in place; the original folds the NON-eop value in place
-        into $v1.  Naming the accumulator decides which one is in place.
-        This is a general lever: to choose WHICH of two `x|c` values reuses
-        the shared temp's register, seed that value's variable with the temp
-        and use |= for it.                                   6 -> 6 (fixed 4 words)
+        Naming the accumulator decides WHICH of two `x|c` values reuses the
+        shared temp's register.                              6 -> 6 (4 words)
      4. `LAUNDER_V(sx)` before the TRXPOS shifts.  Without it the second
         AddGsAD's `dsll32 $s6` is hoisted into the FIRST AddGsAD's delay slot
         and its own `li $a1,0x50` is pushed above the jal.   6 -> 4
      Also still needed: `LAUNDER_V(dbp)` after sceVif1PkOpenGifTag (removing
      it costs 25 words even at the new flags).
 
-   WHAT IS LEFT (4 words, registers only, $a1<->$a2 / $s0<->$s4):
-     the scratch register holding `n ^ qwc` for the movz.  The original picks
-     $a1 and therefore sets up the `n` argument ($a2) early and the `addr`
-     argument ($a1) after the movz; we pick $a2 and do it the other way.
-     Both are the same four instructions in the same places -- only the
-     scratch choice differs.
-
-   SWEPT AND RULED OUT for those 4 words:
+   THE LAST 4 WORDS, and why they are a fixer and not a lever.
+     The `n ^ qwc` compare temp took $a2 where the original takes $a1, and
+     the two argument moves that bracket it (`move $a2,n` / `move $a1,addr`)
+     came out in the opposite order.  Mechanism: -fschedule-insns runs BEFORE
+     register allocation, and it hoists ONE of the two hard-register argument
+     copies above the compare; local_alloc then gives the combine-folded
+     compare temp the lowest-numbered register still free.  We hoist addr's
+     copy, so $a1 is taken and the temp lands in $a2; the original hoists n's
+     copy, so the temp lands in $a1.  Proved by blocking $a2 with a PIN'd
+     dummy: the temp moved to $a3, not $a1 -- it is "lowest free", and $a1
+     is not free because the scheduler already took it.
+     No source shape reaches the scheduler's tie-break.  SWEPT AND RULED OUT:
      - flags: -fno-regmove, -fno-caller-saves, -fno-expensive-optimizations,
        -fno-cse-follow-jumps, -fno-rerun-cse-after-loop, -fno-force-mem,
        -fno-thread-jumps, -fomit-frame-pointer, -funroll-loops, -O1, -O3,
-       -fno-schedule-insns2 (85 diffs), -fno-delayed-branch. None moves it.
+       -fno-schedule-insns2 (85 diffs), -fno-delayed-branch, and a second
+       sweep of -fno-sched-interblock, -fno-sched-spec, -fsched-spec-load,
+       -fno-peephole, -fno-function-cse, -fstrict-aliasing,
+       -fno-strength-reduce, -fno-defer-pop, -fcaller-saves,
+       -fno-move-all-movables, -freduce-all-givs, -fno-inline.  None moves it.
      - `PIN(unsigned int ne, "$5")` alone: IGNORED.  The pseudo is dead after
        combine merges the xor into the movz, so the register var evaporates.
      - PIN + LAUNDER / LAUNDER_V / PASSTHRU / PASSTHRU_V on it: these DO fix
-       the register (triage flips to SCHEDULING, i.e. the multiset becomes
-       exact) but every asm form is a hard scheduling barrier for this gcc
-       and costs 9-14 words of order.  NEW LEVER, recorded: an empty asm is
-       the only way to keep a combine-folded compare temp alive, and it buys
-       the register at the price of the schedule -- worth it only if nothing
-       downstream needs to move.
-     - swapping the eop/gt statements (9), pinning gt to $3 (28, LENGTH),
-       double-pinned $3 alias (30, LENGTH), pinning n to $16 (54, LENGTH),
-       pinning addr to $20 (84, LENGTH), naming the `n | 0x51000000` code arm
-       in a local, `0x51000000 | n`, `addr + 0`, `qwc > 0x7FFF` vs
-       `0x7FFF < qwc`, `qwc == n` vs `n == qwc`, ?: instead of if,
-       swapping `qwc -= n` / `addr += n << 4`, hoisting the block-scope
-       declarations to function scope, reordering `n` and `p`,
-       LAUNDER_V/LAUNDER2 on n / addr / qwc / gt, swapping p[0]/p[1] stores.
-       All 4 or worse. */
+       the register but every asm form is a hard scheduling barrier for this
+       gcc and costs 9-14 words of order.  NEW LEVER, recorded: an empty asm
+       is the only way to keep a combine-folded compare temp alive, and it
+       buys the register at the price of the schedule.
+     - ~40 source shapes: swapping the eop/gt statements, pinning gt to $3,
+       double-pinned $3 alias, pinning n to $16, pinning addr to $20, naming
+       the `n | 0x51000000` code arm in a local, `0x51000000 | n`, `addr + 0`,
+       `qwc > 0x7FFF` vs `0x7FFF < qwc`, `qwc == n` vs `n == qwc`,
+       `(n ^ qwc) == 0`, `!(n ^ qwc)`, a named `last = (n == qwc)` boolean,
+       ?: instead of if, an if/assign instead of ?: for the min, swapping
+       `qwc -= n` / `addr += n << 4`, moving either update above the call,
+       hoisting the block-scope declarations to function scope, reordering
+       `n` and `p`, LAUNDER_V/LAUNDER2 on n / addr / qwc / gt at the call
+       site, PASSTHRU'd and PIN'd copies of either argument, swapping
+       p[0]/p[1] stores, `void *`/K&R/`unsigned long` prototypes for
+       sceVif1PkRef, and a 1500-iteration decomp-permuter run over a harness
+       that preserves the PINs (see permuter/sceVif1PkRefLoadImage/prep.py).
+       Every one of them is 4 words or worse.
+     So it is closed with two fixer sites, using the new instruction-RANGE
+     form of --swap-regs (fix_cc_asm.py):
+         --swap-regs sceVif1PkRefLoadImage:5-6:89-98
+         --swap-regs sceVif1PkRefLoadImage:16-20:91,98
+     The first renames $a1<->$a2 across the ten-instruction window that holds
+     the xor, the movz and the two argument moves -- every other $a1/$a2 in
+     the function is an ordinary ABI argument and must not move, which is why
+     the pre-existing whole-function --swap-regs could not be used.  The
+     second exchanges the two argument moves' SOURCES ($s0=n, $s4=addr) on
+     just those two instructions, which is the pure reorder of the pair. */
 void sceVif1PkRefLoadImage(Vif1Packet *pkt, unsigned int dbp, unsigned int dpsm,
                            unsigned int dbw, unsigned int addr, unsigned int qwc,
                            unsigned int dsax, unsigned int dsay,

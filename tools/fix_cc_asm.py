@@ -442,6 +442,17 @@ def hoist_return_delay_stores(lines, scope=()):
 def swap_registers(lines, sites):
     """Swap two raw register numbers throughout a named function's body.
 
+    A site may also be scoped to an instruction RANGE, "FUNC:A-B:LO-HI",
+    where LO and HI are inclusive 0-based instruction indices within FUNC
+    (a bare "LO" means the single instruction LO, and several windows may
+    be given comma-separated: "FUNC:16-20:91,98")
+    (same counting convention as --swap-adjacent: directives, labels and
+    #-comments are not counted). That is what a register tie-break
+    confined to one window needs -- sceVif1PkRefLoadImage picks $a2 for
+    an `n ^ qwc` compare temp where the original picks $a1, and swaps the
+    two argument moves that bracket it, while every other $a1/$a2 in the
+    function is an ordinary ABI argument that must NOT move.
+
     A pure register-numbering tie-break: for a tiny leaf function with
     only two independent pseudos and no other register pressure (e.g. an
     lq address temp and its loaded value), gcc2.96's allocator sometimes
@@ -466,15 +477,27 @@ def swap_registers(lines, sites):
         return lines
     owner = function_at(lines)
     out = []
+    idx = 0
+    prev_owner = None
     for i, line in enumerate(lines):
-        pair = sites.get(owner[i])
-        if pair:
-            a, b = pair
+        if owner[i] != prev_owner:
+            idx = 0
+            prev_owner = owner[i]
+        is_insn = bool(RE_INSN.match(line))
+        entries = sites.get(owner[i]) or ()
+        if entries and isinstance(entries[0], str):   # legacy (a, b) value
+            entries = [tuple(entries) + (None, None)]
+        for entry in entries:
+            a, b, lo, hi = entry if len(entry) == 4 else (tuple(entry) + (None, None))
+            if lo is not None and not (is_insn and lo <= idx <= hi):
+                continue
             ra = re.compile(r'\$%s\b' % re.escape(a))
             rb = re.compile(r'\$%s\b' % re.escape(b))
             line = ra.sub('\x01', line)
             line = rb.sub('$%s' % a, line)
             line = line.replace('\x01', '$%s' % b)
+        if is_insn:
+            idx += 1
         out.append(line)
     return out
 
@@ -1185,14 +1208,29 @@ def main(path, omitted_hazards, barrier_return_store=None,
     if swap_regs is not None:
         spec = {}
         for tok in swap_regs:
-            fn, ab = tok.split(':')
+            parts = tok.split(':')
+            if len(parts) == 2:
+                (fn, ab), rng = parts, None
+            elif len(parts) == 3:
+                fn, ab, rng = parts
+            else:
+                raise SystemExit("--swap-regs: bad site %r (want FUNC:A-B "
+                                 "or FUNC:A-B:LO-HI)" % tok)
             a, b = ab.split('-')
             a, b = a.lstrip('$'), b.lstrip('$')
             for t in (a, b):
                 if not re.match(r'^f?\d+$', t):
                     raise SystemExit("--swap-regs: bad register token %r "
                                      "(want 2, $2, f4 or $f4)" % t)
-            spec[fn] = (a, b)
+            if rng is None:
+                spec.setdefault(fn, []).append((a, b, None, None))
+            else:
+                for part in rng.split(','):
+                    if '-' in part:
+                        lo, hi = (int(x) for x in part.split('-'))
+                    else:
+                        lo = hi = int(part)
+                    spec.setdefault(fn, []).append((a, b, lo, hi))
         lines = swap_registers(lines, spec)
 
     owner = function_at(lines)
@@ -1656,7 +1694,7 @@ if __name__ == "__main__":
                              "reproduces")
     parser.add_argument("--swap-regs", action="append", default=None,
                         metavar="FUNC:A-B",
-                        help="whole-function register-number swap: every "
+                        help="whole-function (or FUNC:A-B:LO-HI instruction-range) register-number swap: every "
                              "$A becomes $B and vice versa within FUNC "
                              "(raw register tokens, e.g. 2-3 for $v0/$v1 "
                              "or f4-f6 for $f4/$f6). An allocator naming "

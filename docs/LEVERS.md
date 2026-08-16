@@ -85,6 +85,26 @@ rotated by one. Fixed three functions.
 alive** — a bare `PIN` on it is silently ignored — **and it buys the
 register at the price of the schedule** (9-14 words for this gcc).
 
+**-fschedule-insns runs BEFORE register allocation, so the pre-RA
+scheduler decides which hard-register ARGUMENT COPY is live at a
+compare, and that decides the compare temp's register.** When gcc hoists
+`move $a1,arg` above the compare, `$a1` is taken and local_alloc gives
+the combine-folded temp the next free number. Diagnose it by blocking
+the register you were given with a PIN'd dummy: if the temp moves to the
+NEXT number instead of the one you want, the register you want is not
+free, and no source shape will free it -- the choice was made by the
+scheduler's tie-break between two equal-priority argument moves, which
+is not reachable from C. `sceVif1PkRefLoadImage` cost ~40 source shapes
+and 25 flags proving this before it was closed with a ranged
+`--swap-regs`.
+
+**`--swap-regs` now takes an instruction RANGE**: `FUNC:A-B:LO-HI`, or
+several windows `FUNC:A-B:91,98` (bare index = single instruction),
+counted like `--swap-adjacent` over gcc's asm. That is what a register
+tie-break confined to one window needs when the same registers are
+ordinary ABI arguments everywhere else in the function, which is where
+the old whole-function form was useless.
+
 **One local, two roles.** A C local is one pseudo, so reusing it for two
 sequential purposes pins the second value into the first's register.
 This cuts BOTH ways and the direction is worth testing: reusing the
