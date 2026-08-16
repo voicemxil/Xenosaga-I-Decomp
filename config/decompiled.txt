@@ -2597,3 +2597,4 @@ sceCdStStat = 0x0020E838, 0x48; // sceCd.c
 eNumberSet = 0x00276C48, 0x30; // eNumber.c
 sefLerpVectorB = 0x002E7F88, 0x5C; // sef.c
 sefLerpIVectorB = 0x002E7FE8, 0x58; // sef.c
+checkN2 = 0x0026CCA0, 0x40; // EW.c

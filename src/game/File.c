@@ -92,20 +92,26 @@ int FileCheckSumCheck(void *data)
     return *(long long *)((char *)data + 8) == checksum;
 }
 
-/* TODO: near-match (LENGTH) - the recovered search/update logic differs in
- * loop setup and FileJpegDec reload scheduling (21 original vs 22 built
- * instructions). Find the original pointer/loop source shape. */
+/* Un-rotated loop: the original branches back to its own top test, so the
+   goto form (no NOTE_INSN_LOOP_BEG) is the only shape that reproduces it. */
 void FileObjectJpegDecChange(int number)
 {
-    int i;
+    int i = 0;
+    int off = 0;
+    char *p;
 
-    for (i = 0; i < 5; i++) {
-        if (FileJpegDec[i * 0xE100 + 1] == number) {
-            FileJpegDec[i * 0xE100 + 1] = -1;
-            FileJpegDecode(number);
-            return;
-        }
+loop:
+    if (i >= 5) {
+        return;
     }
+    i++;
+    p = (char *)(off + (int)FileJpegDec);
+    off = 0xE100 + off;
+    if (p[1] != number) {
+        goto loop;
+    }
+    p[1] = -1;
+    FileJpegDecode(number);
 }
 
 void FileObjectJpegSet(void)

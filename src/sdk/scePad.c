@@ -35,14 +35,15 @@ extern int   buffer_00996C00[32];
 
 /* Per-(port,slot) open/state bookkeeping the RPC wrappers guard on. */
 typedef struct scePadSlotInfo {
-    unsigned char reserved[16];
+    unsigned char *dma;         /* +0: the port's 256-byte DMA buffer */
+    int reserved[3];
     int open;                   /* nonzero once the port/slot is opened */
     int stat20;
     int stat24;
 } scePadSlotInfo;               /* 28 bytes */
 
 extern scePadSlotInfo PadInfo[2][4];
-extern unsigned char *scePadGetDmaStr(int port, int slot);
+unsigned char *scePadGetDmaStr(int port, int slot);
 void *memcpy(void *dst, const void *src, int n);
 
 char *strcpy(char *dst, const char *src);
@@ -201,4 +202,92 @@ int scePadGetButtonMask(int port, int slot)
         return 0;
     return (long)p[121] + ((long)p[122] << 8) + ((long)p[123] << 16)
          + ((long)p[124] << 24);
+}
+
+/* scePadGetDmaStr: hand back the port/slot's DMA buffer after flushing
+ * the 256 bytes the IOP writes into it out of the data cache.  The
+ * buffer is double-banked: two 128-byte halves, and a pair of sequence
+ * counters at +88 and +216 (word 22 of each half) says which half holds
+ * the newest sample.  `(a < b) << 7` is the whole selection -- writing
+ * it as a shifted comparison rather than a ternary is what produces the
+ * original's slt + sll 7 + addu with no branch. */
+extern void SyncDCache(void *start, void *end);
+
+unsigned char *scePadGetDmaStr(int port, int slot)
+{
+    unsigned char *p;
+
+    p = PadInfo[port][slot].dma;
+    SyncDCache(p, p + 256);
+    return p + ((*(int *)(p + 88) < *(int *)(p + 216)) << 7);
+}
+
+/* Sample sequence number of the newest frame in the port's buffer. */
+int scePadGetFrameCount(int port, int slot)
+{
+    int *p;
+
+    if (PadInfo[port][slot].open == 0)
+        return 0;
+    p = (int *)scePadGetDmaStr(port, slot);
+    return p[22];
+}
+
+/* Post a new request code (byte +113 of the DMA buffer) for the IOP
+ * side to pick up; 1 on success, 0 if the port is not open. */
+int scePadSetReqState(int port, int slot, int state)
+{
+    if (PadInfo[port][slot].open == 0)
+        return 0;
+    scePadGetDmaStr(port, slot)[113] = state;
+    return 1;
+}
+
+/* Pressure-sensitive button mode is just a button-info mask: all twelve
+ * bits on to enter, zero to leave, and "are all twelve on?" to test. */
+extern int scePadSetButtonInfo(int port, int slot, int mask);
+extern int scePadGetButtonMask(int port, int slot);
+
+int scePadEnterPressMode(int port, int slot)
+{
+    if (PadInfo[port][slot].open == 0)
+        return 0;
+    return scePadSetButtonInfo(port, slot, 0xFFF);
+}
+
+int scePadExitPressMode(int port, int slot)
+{
+    if (PadInfo[port][slot].open == 0)
+        return 0;
+    return scePadSetButtonInfo(port, slot, 0);
+}
+
+int scePadInfoPressMode(int port, int slot)
+{
+    if (PadInfo[port][slot].open == 0)
+        return 0;
+    return scePadGetButtonMask(port, slot) == 0x3FFFF;
+}
+
+/* RPC opcode 18: version of the IOP-side pad module. */
+int scePadGetModVersion(void)
+{
+    buffer_00996C00[0] = 18;
+    if (sceSifCallRpc(&padsif, 1, 0, buffer_00996C00, 128,
+                      buffer_00996C00, 128, 0, 0) < 0)
+        return 0;
+    return buffer_00996C00[3];
+}
+
+/* RPC opcode 20: set the controller-disconnect warning level.  The
+ * argument is stored into the payload BEFORE the opcode -- reversing
+ * the two statements reverses the two stores. */
+int scePadSetWarningLevel(int level)
+{
+    buffer_00996C00[1] = level;
+    buffer_00996C00[0] = 20;
+    if (sceSifCallRpc(&padsif, 1, 0, buffer_00996C00, 128,
+                      buffer_00996C00, 128, 0, 0) < 0)
+        return 0;
+    return buffer_00996C00[2];
 }

@@ -2,6 +2,7 @@
 
 typedef unsigned short u16;
 typedef unsigned int u32;
+typedef unsigned long long u64;
 
 typedef struct EWCOMP_t {
     u16 nFlags;                     /* 0x00 */
@@ -55,8 +56,9 @@ extern void xglFontReloadTexture(void *pPacket, int nMode);
 extern void xglFontPrintExtFunc(int nAddr, void (*pFunc)(void *), int nArg);
 extern int xglPrimAddGifTagDirect(void *pPacket, void *pData, int nQwc);
 
-typedef struct {
+typedef union {
     u32 word[4];
+    u64 half[2];
 } EWQWORD;
 
 typedef struct {
@@ -95,8 +97,12 @@ void mask_put(void **pPacketWork, EWMASK *pMask)
     int y0;
     int x1;
     int y1;
+    u32 z;
+    u32 *pData;
+    unsigned char color;
 
     pBase = (EWQWORD *)(((u32)pPacketWork + 0x3F) & ~0xF);
+    pData = (u32 *)((char *)pMask + 0x10);
     p = pBase;
 
     p->word[0] = 1;
@@ -104,8 +110,8 @@ void mask_put(void **pPacketWork, EWMASK *pMask)
     p->word[2] = -2;
     p->word[3] = 0;
     p++;
-    p->word[0] = pMask->flags;
-    p->word[1] = *(u32 *)((char *)pMask + 0x14);
+    p->word[0] = pData[0];
+    p->word[1] = pData[1];
     p->word[2] = 0x42;
     p++;
     p->word[0] = 0x8004;
@@ -118,23 +124,153 @@ void mask_put(void **pPacketWork, EWMASK *pMask)
     y0 = (pMask->y + 0x720) << 4;
     x1 = x0 + (pMask->width << 4);
     y1 = y0 + (pMask->height << 4);
+    z = pMask->z;
 
-    MASK_COLOR(p, pMask->color3); p++;
-    MASK_XYZ(p, x0, y0, pMask->z); p++;
-    MASK_COLOR(p, pMask->color3); p++;
-    if (pMask->flags & 0x100) {
-        MASK_XYZ(p, x1, y0, pMask->z); p++;
-        MASK_COLOR(p, pMask->color2); p++;
-        MASK_XYZ(p, x0, y1, pMask->z); p++;
+    if (pData[0] & 0x100) {
+        color = *((unsigned char *)pData + 6);
+        MASK_COLOR(p, color); p++;
+        MASK_XYZ(p, x0, y0, z); p++;
+        MASK_COLOR(p, color); p++;
+        MASK_XYZ(p, x1, y0, z); p++;
+        color = *((unsigned char *)pData + 5);
+        MASK_COLOR(p, color); p++;
+        MASK_XYZ(p, x0, y1, z); p++;
     } else {
-        MASK_XYZ(p, x0, y1, pMask->z); p++;
-        MASK_COLOR(p, pMask->color2); p++;
-        MASK_XYZ(p, x1, y0, pMask->z); p++;
+        color = *((unsigned char *)pData + 6);
+        MASK_COLOR(p, color); p++;
+        MASK_XYZ(p, x0, y0, z); p++;
+        MASK_COLOR(p, color); p++;
+        MASK_XYZ(p, x0, y1, z); p++;
+        color = *((unsigned char *)pData + 5);
+        MASK_COLOR(p, color); p++;
+        MASK_XYZ(p, x1, y0, z); p++;
     }
-    MASK_COLOR(p, pMask->color2); p++;
-    MASK_XYZ(p, x1, y1, pMask->z); p++;
+    MASK_COLOR(p, color); p++;
+    MASK_XYZ(p, x1, y1, z); p++;
 
     xglPrimAddGifTagDirect(*pPacketWork, pBase, p - pBase);
+}
+
+void sprt_put(void **pPacketWork, EWMASK *pSprite)
+{
+    EWQWORD *pBase;
+    EWQWORD *p;
+    unsigned short *pUV;
+    int u0;
+    int v0;
+    int u1;
+    int v1;
+    int x0;
+    int y0;
+    int x1;
+    int y1;
+    u32 z;
+
+    pBase = (EWQWORD *)(((u32)pPacketWork + 0x3F) & ~0xF);
+    pUV = (unsigned short *)((char *)pSprite + 0x10);
+
+    p = pBase + 1;
+    p->half[0] = 0x7F1FC200;
+    p->half[1] = 8;
+    p = pBase + 2;
+    p->half[0] = 0x44;
+    p->half[1] = 0x42;
+    p = pBase;
+    p->word[0] = 1;
+    p->word[1] = 0x20000000;
+    p->word[2] = -0x12;
+    p->word[3] = 0;
+    p = pBase + 3;
+    p->word[0] = 0x8001;
+    p->word[1] = 0x50AB4000;
+    p->word[2] = 0xFFF53531;
+    p->word[3] = 0;
+
+    u0 = pUV[2] << 4;
+    v0 = pUV[3] << 4;
+    x0 = (pSprite->x + 0x700) << 4;
+    y0 = (pSprite->y + 0x720) << 4;
+    u1 = u0 + (pSprite->width << 4);
+    v1 = v0 + (pSprite->height << 4);
+    x1 = x0 + (pSprite->width << 4);
+    y1 = y0 + (pSprite->height << 4);
+    z = pSprite->z;
+
+    p = pBase + 4;
+    p->word[0] = 0x80;
+    p->word[1] = 0x80;
+    p->word[2] = 0x80;
+    p->word[3] = 0x80;
+    p = pBase + 5;
+    p->word[0] = u0;
+    p->word[1] = v0;
+    p = pBase + 6;
+    MASK_XYZ(p, x0, y0, z);
+    p = pBase + 7;
+    p->word[0] = u1;
+    p->word[1] = v1;
+    p = pBase + 8;
+    MASK_XYZ(p, x1, y1, z);
+
+    xglPrimAddGifTagDirect(*pPacketWork, pBase, 9);
+}
+
+void set_clip(void **pPacketWork, EWMASK *pRect)
+{
+    EWQWORD *pBase;
+    int x0;
+    int y0;
+    int x1;
+    int y1;
+    u64 packed;
+
+    x0 = pRect->x;
+    y0 = pRect->y;
+    x1 = x0 + pRect->width - 1;
+    y1 = y0 + pRect->height - 1;
+    if (x0 < 0) {
+        x0 = 0;
+    }
+    if (y0 < 0) {
+        y0 = 0;
+    }
+    if (x1 >= 0x200) {
+        x1 = 0x1FF;
+    }
+    if (y1 >= 0x1C0) {
+        y1 = 0x1BF;
+    }
+
+    pBase = (EWQWORD *)(((u32)pPacketWork + 0x3F) & ~0xF);
+    packed = (u64)x0 |
+             ((u64)x1 << 16) |
+             ((u64)y0 << 32) |
+             ((u64)(y1 - 2) << 48);
+    pBase[1].half[1] = 0x40;
+    pBase[0].word[0] = 0x8001;
+    pBase[0].word[1] = 0x10000000;
+    pBase[0].word[2] = -2;
+    pBase[0].word[3] = 0;
+    pBase[1].half[0] = packed;
+    xglPrimAddGifTagDirect(*pPacketWork, pBase, 2);
+}
+
+int checkN2(int value)
+{
+    int bit;
+    int i;
+    int result;
+
+    i = 0;
+    do {
+        result = i;
+        bit = 1 << i;
+        if (value == bit) {
+            return result;
+        }
+        i++;
+    } while (i < 32);
+    return 0;
 }
 
 /* Free a component, clearing every child slot of a container first */
