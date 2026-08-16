@@ -2337,3 +2337,7 @@ ACT_setArms = 0x00306B28, 0xB4; // ACT.c
 srsGetComboData = 0x002E88F8, 0x2C; // srsGet.c
 JNT_setModel = 0x00313BB0, 0x80; // JNT.c
 nmlFilterSetPacket = 0x0023CA20, 0xD8; // nmlFilter.c
+sefClipViewVolume = 0x002DF1B8, 0x2C; // sef.c
+sefGetPosition = 0x002E2240, 0x40; // sef.c
+sefExecLineData = 0x002E4840, 0x1A8; // sef.c
+sefFreeLocalData = 0x002E34E0, 0x40; // sef.c

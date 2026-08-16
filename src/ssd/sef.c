@@ -202,10 +202,10 @@ void sefInitClipViewVolume(void *p)
         ".set reorder" : : "r"(p));
 }
 
-extern void sefClipViewVolumeA(void *p, void *q);
+extern void sefClipViewVolumeA(void *p);
 void sefClipViewVolume(void *a, void *b) {
     sefInitClipViewVolume((char *)b + 1264);
-    sefClipViewVolumeA(a, b);
+    sefClipViewVolumeA(a);
 }
 
 /* Copy 3 position/orientation quadwords from pA and one quadword from
@@ -367,38 +367,24 @@ void sefGetVecMatrix(void *pObj, SEF_VEC4 *pA, SEF_VEC4 *pB)
 extern void sefLerpVectorSC(void *a, void *b);
 extern void sefLerpIVector(void *a, void *b);
 extern void sefProgressInt(void *a, void *b);
-/* c is dead: only b's null-ness is examined, and the point-table lookup
- * always writes the w=1.0 tail regardless of which branch is taken.
- * TODO: near-miss (12 words, LENGTH 16 orig vs 15 built). The original
- * computes the _zeroPos_004CBF00 address as `lui v0,hi; addiu a1,v0,lo`
- * -- result lands in a1, scratch in v0 -- with an UNFILLED nop in the
- * jal delay slot; this C form gets the arg computation folded straight
- * into a1 with the addiu filling the delay slot (one word shorter).
- * Not registered -- do not add without closing this. */
+/* c is dead: only b's null-ness is examined. The call is unconditional --
+ * the null test only picks the table, it does not skip the lookup -- which
+ * is what leaves the jal delay slot empty and the %hi/%lo pair split across
+ * v0/a1. */
 extern void sefGetPoint(void *p, void *table);
 extern float _zeroPos_004CBF00[];
 void sefGetPosition(void *a, void *b, int c)
 {
     if (b == 0) {
-        sefGetPoint(a, _zeroPos_004CBF00);
+        b = _zeroPos_004CBF00;
     }
+    sefGetPoint(a, b);
     *(float *)((char *)a + 12) = 1.0f;
 }
 
 extern int sefExecLineGlobalData(void *a, int b);
 extern int sefExecLineLocalData(void *a, int b);
 
-/* TODO: near-miss, 2/106 words differ (register tie-break, unreachable from
- * C -- matches the "Allocator-order tie-breaks NOT reachable from C" wall).
- * The very first decrement of f804 is tested via the sll<<16/bgez idiom;
- * gcc's store-forwarding then reuses that shifted v1 (sra) for the later
- * reload of f804 inside the f80C/f814-guarded branch, where the original
- * emits a fresh `lh`. Tried: memory barrier (kills the bnezl delay-slot
- * fold instead), volatile pointer cast (destabilizes the whole function's
- * register allocation), flat-pointer-cast store/reload (no effect),
- * register-pinning icnt to $2 (destabilizes allocation). permute.py
- * confirms no statement reordering changes the schedule. Not registered in
- * config/decompiled.txt -- do not add without closing these 2 words. */
 int sefExecLineData(SEF_LINE *p, int mode)
 {
     unsigned short mode2 = p->f806;
@@ -408,31 +394,27 @@ int sefExecLineData(SEF_LINE *p, int mode)
     int local;
     p->f802 = -1;
 
-    {
-        int icnt;
-        if (p->f80A != 0) {
-            int val = (unsigned short)p->f804 - 1;
-            p->f804 = val;
-            if ((val << 16) < 0) {
-                if (p->f80C == 0) {
-                    p->f804 = 0;
-                    return 0;
-                }
-                if (p->f814 == 0) {
-                    p->f804 = 0;
-                    return 0;
-                }
-                icnt = *(short *)((char *)p + 0x804);
-            } else {
-                icnt = val;
-            }
-        } else {
-            icnt = p->f804;
+    if (p->f80A != 0) {
+        int val = (unsigned short)p->f804 - 1;
+        p->f804 = val;
+        if ((val << 16) >= 0) {
+            /* The countdown did not underflow, so the clamp below is
+             * skipped outright -- the original's bgez jumps past it. */
+            goto no_clamp;
         }
-        if (icnt < 0) {
-            p->f804 = -1;
+        if (p->f80C == 0) {
+            p->f804 = 0;
+            return 0;
+        }
+        if (p->f814 == 0) {
+            p->f804 = 0;
+            return 0;
         }
     }
+    if (p->f804 < 0) {
+        p->f804 = -1;
+    }
+no_clamp:
     v0 = p->f816;
 
     scale = (float)v0 * 0.01f;
@@ -491,19 +473,21 @@ void sefHitEffect(void)
 }
 
 /* Release a "local data" slot's particle-allocator handle, if idx is in
- * range: address calc has no side effects so it is hoisted above the
- * range check, matching the original.
- * TODO: near-miss (8 words, LOGIC). Original folds `idx*2 + 1536` into
- * v0 first and combines with base in a single `addu s0,a0,v0` (a0
- * stays live/untouched); this form (both left-assoc and explicitly
- * `base + (idx*2+1536)`-grouped) instead accumulates into a0 in place
- * (`addu a0,a0,v0`) before the +1536 add, and the sp-decrement prologue
- * word moves relative to the sll/sltiu pair. Not registered. */
+ * range. */
 extern void sevFreePtAllocator(int handle);
+/* The byte offset is materialised in an unsigned int first: written as
+ * `base + (idx * 2 + 1536)` gcc reassociates to `(base + idx*2) + 1536`
+ * so it can fold the constant into the address, clobbering a0. Widening
+ * the offset to unsigned blocks that fold and leaves the original's
+ * `addiu v0,v0,1536` / `addu s0,a0,v0` pair. */
 void sefFreeLocalData(void *base, int idx)
 {
-    short *p = (short *)((char *)base + (idx * 2 + 1536));
+    short *p;
+    unsigned int off;
+
     if ((unsigned int)idx < 256) {
+        off = (unsigned int)(idx * 2 + 1536);
+        p = (short *)((char *)base + off);
         sevFreePtAllocator(*p);
         *p = -1;
     }
