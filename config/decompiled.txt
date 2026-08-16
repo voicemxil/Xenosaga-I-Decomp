@@ -2733,3 +2733,4 @@ set_ot = 0x00218B60, 0x5C; // xglFont.c
 hex2val = 0x0021AD08, 0x58; // xglFont.c
 sefGetCirclePos = 0x002E2280, 0x94; // sef.c
 errorCallback = 0x00222158, 0x44; // xglMovie.c
+StreamReadRingCoreSub = 0x0021E610, 0x70; // xglCd.c

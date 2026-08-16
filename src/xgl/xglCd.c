@@ -638,3 +638,26 @@ void xglCdSifLoadModule(char *pName, char *pArgs)
     }
     sceSifLoadModule(szPath, nArgLen, pArgs);
 }
+
+int sceCdStRead(int nSectors, void *pBuf, int nMode, u_int *pErr);
+int sceRead(int nFd, void *pBuf, int nSize);
+
+/* Pull whole sectors for one stream, either through the CD streaming
+ * engine (type 0) or through a plain file descriptor (types 1 and 2) */
+int StreamReadRingCoreSub(XGLCDSTREAM *pStr, char *pBuf, int nSectors)
+{
+    u_int nErr;
+    int nResult;
+
+    nResult = 0;
+    switch (pStr->nType) {
+    case 0:
+        nResult = sceCdStRead(nSectors, pBuf, 1, &nErr) << 11;
+        break;
+    case 1:
+    case 2:
+        nResult = sceRead(pStr->nFd, pBuf, nSectors << 11);
+        break;
+    }
+    return nResult;
+}
