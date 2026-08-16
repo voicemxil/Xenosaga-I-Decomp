@@ -1856,3 +1856,78 @@ void sefInitScheduler(void)
         q++;
     }
 }
+
+/* PARKED at 37 diffs -- the instruction sequence is retail's, word for
+ * word; every difference is a caller-saved register name (nOfs t0<->a1,
+ * base t2<->t1, nEnd a1<->a2) plus one `move v0,a3` / `sh t4,6` swap.
+ * What DID have to be got right, and is worth keeping:
+ *   - the two address computations are offset-first: `(nOfs + 0x6B0) +
+ *     (int)pBase`, through named int temporaries. Written as
+ *     `nOfs + 0x6B0 + (int)_scheduler` gcc folds the constant into the
+ *     symbol and hoists base+1712 into the preheader (42 diffs); with a
+ *     pBase local but no temporary it adds the base first (51).
+ *   - _nowScript/_nowEvent must be read HERE, not in the preheader.
+ *     gcc lifts both gp loads out as loop invariants; copying them into
+ *     `int` locals and passing the pair through LAUNDER2 (the pseudo is
+ *     then set twice in the loop, so it is no longer invariant) puts
+ *     them back. As `unsigned short` locals the same LAUNDER2 costs two
+ *     extra extension moves (56 words).
+ * Declaration order does not move the remaining names -- they are all
+ * local_alloc temporaries. Permuter territory.
+ *
+ * Round-robin scheduler-slot allocator over the 128 pool entries: scan
+ * forward from the saved cursor, stopping one slot short of it, and
+ * claim the first entry whose owner pointer at +0x6B0 is null. The
+ * header at +0xA90 is stamped with the current script/event ids. */
+typedef struct {
+    short f0A90;
+    short f0A92;
+    short f0A94;
+    short f0A96;
+} SEF_SCHED_SLOT_HDR;
+
+extern unsigned short _nowScript;
+extern unsigned short _nowEvent;
+
+int sefAllocScheduler(void *pOwner)
+{
+    static int _schridx;
+    SEF_SCHED_SLOT_HDR *q;
+    void **ppOwner;
+    char *pBase;
+    int nOfs;
+    int nRec;
+    int nHdr;
+    int i;
+    int nEnd;
+
+    nEnd = (_schridx + 127) % 128;
+    i = _schridx;
+    pBase = (char *)_scheduler;
+    while (i != nEnd) {
+        i = i % 128;
+        nOfs = i * 0xAB0;
+        nRec = nOfs + 0x6B0;
+        ppOwner = (void **)(nRec + (int)pBase);
+        if (*ppOwner == 0) {
+            int nScript = _nowScript;
+            int nEvent = _nowEvent;
+
+            /* Steering: gcc lifts these two loop-invariant gp loads into
+             * the loop preheader; retail reads them here, in the block
+             * that claims the slot. Emits no code. */
+            LAUNDER2(nScript, nEvent);
+            nHdr = nOfs + 0xA90;
+            q = (SEF_SCHED_SLOT_HDR *)(nHdr + (int)pBase);
+            *ppOwner = pOwner;
+            q->f0A96 = -1;
+            q->f0A92 = nScript;
+            q->f0A94 = nEvent;
+            _schridx = (i + 1) % 128;
+            q->f0A90 = 0;
+            return i;
+        }
+        i++;
+    }
+    return -1;
+}
