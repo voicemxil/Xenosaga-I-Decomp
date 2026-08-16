@@ -434,8 +434,8 @@ void _updateTempTackData(MPEGSTREAM *pStream, int nTempRef)
     /* The original keeps the stream pointer in $a2 and the base in $a0;
      * gcc leaves the pointer in $a0 and never makes the copy at all. */
     PIN(MPEGSTREAM *p, "$6");
-    int nBase;
     int bWrapped;
+    int nBase;
     int nCur;
     int nMax;
 
@@ -494,26 +494,28 @@ void _decode_motion_vector(int *pVal, int nFCode, int nDelta, int nResid,
 int _decPicture(MPEGSTREAM *pStream)
 {
     REFIMAGE *pImg;
+    int nType;
     int nRet;
 
     if (pStream->nUnk174 == 3 && pStream->nUnk120 != 0) {
         _Error(pStream, D_004D5D68);
         pStream->nUnk120 = 0;
     }
-    switch (pStream->nUnk174) {
-    case 2:
+    nType = pStream->nUnk174;
+    if (nType == 2) {
         pImg = pStream->pUnk1E0;
-        break;
-    case 1:
-        pImg = pStream->pUnk1D0;
-        break;
-    case 3:
+    } else if (nType < 3) {
+        if (nType == 1) {
+            pImg = pStream->pUnk1D0;
+        } else {
+            pImg = pStream->pUnk1C0;
+            _Error(pStream, D_004D5D88);
+        }
+    } else if (nType == 3) {
         pImg = pStream->pUnk1C0;
-        break;
-    default:
+    } else {
         pImg = pStream->pUnk1C0;
         _Error(pStream, D_004D5D88);
-        break;
     }
     nRet = _pictureData0(pStream);
     if (nRet != 0) {
