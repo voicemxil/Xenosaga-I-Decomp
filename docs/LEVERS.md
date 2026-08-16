@@ -2070,3 +2070,38 @@ value-preserving by construction. `--short-loop-pad` closed
 FileSelectListReload; `--byte-move-andi` closed xglMcSetMapName.
 Note that the same function can want the copy in one loop and the
 zero-extend in another, so the pass is site-keyed, not whole-function.
+
+## Added from the tsk/screen state machines (tskUmn)
+
+**Colour bytes patched into a string want the stores DUPLICATED in both
+arms of the `if`.** Selecting the constant into one local and storing it
+once after the merge makes gcc reach for `movz`; writing all three byte
+stores inside each arm gives the branch pair, and gcc then cross-jumps
+the arms back into retail's single store run. (Mail exwin greys its
+"Reply"/"Set" captions by overwriting the `\014rgb` escape in place.)
+
+**A run of byte stores emits as a LEFT-ROTATION BY TWO of its source
+order.** Retail's `p[0]; p[2]; p[1]` needs `p[2]; p[1]; p[0]` in the
+source. Same family as the store-group rotation already recorded, but
+the rotation distance is per-block -- measure it, do not assume three.
+
+**A local array of pointers with an INITIALISER LIST is what produces
+retail's unaligned `ldl/ldr` block copy.** Spelling the same table as a
+`static` template plus an explicit `memcpy` gives aligned `ld/sd`,
+because gcc then knows both the source and the stack slot are 8-aligned.
+The initialiser form keeps the type's own 4-byte alignment.
+
+**A held pointer to a member costs seven words when the member is
+already addressable.** Introducing `short *pX = &w->nUmlX;` so that the
+loads through it act as an alias barrier does force the store/load order
+-- but the declaration alone adds an address computation and six words
+of fallout. Measured across all 16 use combinations in
+`tskUmnDataBaseKeyWord`: every one is worse than reading the member.
+
+**Where `w->msg.pText = ...` goes decides $s2/$s3 for the whole
+function.** In `tskUmnMailInfo` the same store is shared after one
+if/else and duplicated into both arms of another; getting the pair wrong
+costs 47 words by renaming every callee-saved register from the dispatch
+onward. When a tail store appears in some arms and not others, try both
+placements per arm, not one policy for the function.
+
