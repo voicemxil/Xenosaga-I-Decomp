@@ -252,3 +252,59 @@ void MATRIX_convert4MulMatrixRev(float *pDst, float *pMat, float *pSrc)
         "sqc2 $vf29, 0x20(%0)\n sqc2 $vf30, 0x30(%0)"
         : : "r"(pDst), "r"(pMat), "r"(pSrc));
 }
+
+/* Multiply affine matrices while preserving the left matrix row scales. */
+void MATRIX_mul4sx3(float *pDst, const float *pLeft, const float *pRight)
+{
+    const float *pScale;
+    const float *pRow;
+    float *pOut;
+    float value[4];
+    float scale;
+    int i;
+
+    pScale = pLeft + 3;
+    pOut = pDst;
+    pRow = pLeft;
+    i = 2;
+    do {
+        value[0] = pRow[0];
+        i--;
+        value[1] = pRow[4];
+        value[2] = pRow[8];
+        value[3] = pRow[12];
+        pRow++;
+        pOut[0] = value[0] * pRight[0] + value[1] * pRight[1] + value[2] * pRight[2];
+        pOut[4] = value[0] * pRight[4] + value[1] * pRight[5] + value[2] * pRight[6];
+        pOut[8] = value[0] * pRight[8] + value[1] * pRight[9] + value[2] * pRight[10];
+        scale = *pScale;
+        pScale += 4;
+        pOut[12] = value[0] * scale * pRight[12]
+                 + value[1] * scale * pRight[13]
+                 + value[2] * scale * pRight[14]
+                 + value[3];
+        pOut++;
+    } while (i >= 0);
+
+    pDst[3] = pLeft[3];
+    pDst[7] = pLeft[7];
+    pDst[11] = pLeft[11];
+    pDst[15] = 1.0f;
+}
+
+/* Translate a matrix whose first three rows carry scale in w. */
+void MATRIX_translate4s(float *pMat, float x, float y, float z)
+{
+    pMat[12] = pMat[0] * pMat[3] * x
+             + pMat[4] * pMat[7] * y
+             + pMat[8] * pMat[11] * z
+             + pMat[12];
+    pMat[13] = pMat[1] * pMat[3] * x
+             + pMat[5] * pMat[7] * y
+             + pMat[9] * pMat[11] * z
+             + pMat[13];
+    pMat[14] = pMat[2] * pMat[3] * x
+             + pMat[6] * pMat[7] * y
+             + pMat[10] * pMat[11] * z
+             + pMat[14];
+}
