@@ -1176,3 +1176,78 @@ void sefFreeSchedulerCf(void *pArg)
     p->nScriptA = -1;
     p->nScriptB = -1;
 }
+
+/* --- line-data slot allocation ------------------------------------- */
+
+/* One line-data record: 65 * 32 bytes. */
+typedef struct
+{
+    char pad0000[0x812];
+    short nAlive;            /* 0x812 */
+    char pad0814[65 * 32 - 0x814];
+} SEF_LINEDATA;
+
+extern SEF_LINEDATA _lineDataTbl[] __asm__("_lineData");
+extern void sefDestroyLocalData(void *p);
+
+/* Release a line slot. The `nLine >= 0` arm is dead given the unsigned
+ * bound above it, but the original really does test twice -- it is the
+ * sefGetLineAdr null convention written out inline. */
+void sefFreeLineData(int nLine)
+{
+    void *p;
+
+    if ((unsigned int)nLine < 128) {
+        if (nLine < 0) {
+            p = 0;
+        } else {
+            p = &_lineDataTbl[nLine];
+        }
+        sefDestroyLocalData(p);
+        _lineDataTbl[nLine].nAlive = 0;
+    }
+}
+
+/* --- sefAllocEffectData: hand out the next free line handle slot in an
+ * effect-data block and return the line record it names. --- */
+typedef struct
+{
+    signed char aHandle[32];  /* 0x00 */
+    char pad20[0x28 - 0x20];
+    short nCount;             /* 0x28 */
+    short nDirty;             /* 0x2A */
+} SEF_EFFBLOCK;
+
+extern int sefAllocLineData(void);
+
+/* NEAR-MISS (35/35 words, 3 differing). The original fills the bound
+ * test's delay slot with the shared `move v0,zero` return value and
+ * emits the slot-address addu BEFORE the sltiu; gcc hoists the zero to
+ * function entry instead and sinks the addu into the slot. Swept: early
+ * returns vs a single accumulator (the accumulator costs an extra
+ * callee-saved register and a 36th word), the address computed before
+ * and after the bound test, and both declaration orders of the two
+ * `p->nCount` reads. Pure delay-slot/scheduling tie-break. */
+void *sefAllocEffectData(SEF_EFFBLOCK *p)
+{
+    int nSlot;
+    signed char *pSlot;
+    int nLine;
+
+    nSlot = p->nCount;
+    pSlot = (signed char *)p + nSlot;
+    if ((unsigned int)nSlot >= 32) {
+        return 0;
+    }
+    if (*pSlot >= 0) {
+        return 0;
+    }
+    nLine = sefAllocLineData();
+    if (nLine < 0) {
+        return 0;
+    }
+    *pSlot = nLine;
+    p->nDirty = 1;
+    p->nCount = (unsigned short)p->nCount + 1;
+    return &_lineDataTbl[nLine];
+}
