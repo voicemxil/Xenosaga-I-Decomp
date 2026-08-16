@@ -2656,3 +2656,4 @@ sdvScheduleSound = 0x002EC798, 0x90; // sdv.c
 updateCursorMode2 = 0x002671D0, 0x298; // update.c
 ACT_setDrawEnv = 0x00307360, 0xC0; // ACT.c
 sceMcGetEntSpace = 0x00210088, 0x118; // sceMc.c
+sceMcSync = 0x0020F3E8, 0xE0; // sceMc.c

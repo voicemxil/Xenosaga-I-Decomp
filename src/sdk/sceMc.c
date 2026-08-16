@@ -250,3 +250,79 @@ void mceGetInfoApdx(void *info)
     if (formAddr != 0)
         *formAddr = p[36];
 }
+
+/* ------------------------------------------------------------------
+ * sceMcSync: collect the result of whatever command is in flight.
+ *
+ * mode 0 blocks (polling every 60us) and mode 1 is a one-shot test.
+ * The return value is "the command has finished" -- the `sltiu s0,s0,1`
+ * that turns the busy flag into a done flag sits in the *cmd store's
+ * branch delay slot, so it is written before that store in the source.
+ * Only a finished command releases the semaphore taken by the call that
+ * started it.
+ * ------------------------------------------------------------------ */
+
+extern int sceSifCheckStatRpc(void *cd);
+extern void mcDelayThread(unsigned short usec);
+
+int sceMcSync(int mode, int *cmd, int *result)
+{
+    int done;
+
+    if (mcRunCmdNo == 0)
+        return -1;
+    done = sceSifCheckStatRpc(mcClientID);
+    if (mode == 0 && done != 0) {
+        while (sceSifCheckStatRpc(mcClientID) != 0)
+            mcDelayThread(60);
+        done = 0;
+    }
+    done = (done == 0);
+    if (cmd != 0)
+        *cmd = mcRunCmdNo;
+    if (done != 0) {
+        mcRunCmdNo = 0;
+        if (result != 0)
+            *result = retval;
+        SignalSema(semaidRegFunc);
+    }
+    return done;
+}
+
+/* ------------------------------------------------------------------
+ * sceMcGetEntSpace: the long-payload variant of the module template.
+ * The pathname goes into the 1044-byte `sifParamFname` block (port and
+ * slot at +0/+4, the name strncpy'd into +20 and hard-terminated), and
+ * an empty or absent name is rejected with -210 before the block is
+ * touched at all.
+ * ------------------------------------------------------------------ */
+
+extern int sifParamFname[261];      /* 0x00996FF0, 1044 bytes */
+extern char *strncpy(char *dst, const char *src, int n);
+
+int sceMcGetEntSpace(int port, int slot, const char *name)
+{
+    int rc;
+
+    if (PollSema(semaidRegFunc) < 0)
+        return -200;
+    if (mcClientID[9] == 0) {
+        SignalSema(semaidRegFunc);
+        return -100;
+    }
+    if (name == 0 || *name == 0) {
+        SignalSema(semaidRegFunc);
+        return -210;
+    }
+    sifParamFname[0] = port;
+    sifParamFname[1] = slot;
+    strncpy((char *)sifParamFname + 20, name, 1023);
+    *((char *)sifParamFname + 1043) = 0;
+    rc = sceSifCallRpc(mcClientID, 18, 1, sifParamFname, 1044,
+                       &retval, 4, 0, 0);
+    if (rc == 0)
+        mcRunCmdNo = 18;
+    else
+        SignalSema(semaidRegFunc);
+    return rc;
+}
