@@ -65,6 +65,14 @@ typedef struct {
     short nParts;           /* 0x02 */
 } PIXEL_ALPHA;
 
+/* One entry of the stealth-filter list sorted at s_inLayout+0x280 */
+typedef struct {
+    char pad00[0xC];
+    float fDepth;           /* 0x0C */
+    char pad10[0x10];
+    float fRange;           /* 0x20 */
+} STEALTH;
+
 typedef struct {
     VEC4 aLightP[4];        /* 0x000 */
     VEC4 aLightC[4];        /* 0x040 */
@@ -98,14 +106,16 @@ typedef struct {
     float fTexMapZ;         /* 0x274 */
     char pad278[0x4];
     int nWindow;            /* 0x27C */
-    char pad280[0x28];
+    STEALTH *aStealth[10];  /* 0x280 */
     int nShadowHeightOn;    /* 0x2A8 */
     float fShadowHeight;    /* 0x2AC */
     int nStatus2;           /* 0x2B0 */
     int nPartsPixelAlphaNum;/* 0x2B4 */
     char pad2B8[0x8];
     float fTransparency;    /* 0x2C0 */
-    char pad2C4[0xC];
+    int pad2C4;
+    int nStealthNum;        /* 0x2C8 */
+    int pad2CC;
     union {
         PIXEL_ALPHA aParts[4];
         int aInt[4];
@@ -2009,5 +2019,91 @@ void nmlModelCalcDropShadow(void)
             -s_inLayout.fShadowHeight * s_inLayout.aShadowMtx[1].f[0];
         s_inLayout.aShadowMtx[3].f[2] =
             -s_inLayout.fShadowHeight * s_inLayout.aShadowMtx[1].f[2];
+    }
+}
+
+void _CurSetViewScaleTrans(void *pScale, void *pTrans);
+void _CurRotTransPersClip(void *pOut, float *pClip);
+void nmlFilterStealthMake(float fSize, int nIndex, void *pCamera, LAYOUT *pLayout);
+float tanf(float);
+
+float s_fStealthScale;
+float s_fStealthMinRange;
+float s_fStealthBias;
+
+/* TODO: near-miss, 32 diffs, NOT registered. Right length (93 words),
+ * right instructions, right control flow -- only 2 words differ in
+ * OPCODE (the outer sort loop comes out `bnezl` where the original has
+ * a plain `bnez`, and the original reuses its layout pointer where we
+ * rematerialise `lui %hi`). Everything else is register naming: the
+ * original keeps pCamera in $s2 and &s_inLayout in $s1 (we have them the
+ * other way round), and the whole bubble-sort body lands on
+ * $s0/$v1/$a3/$a0/$t0 where we get $a1/$a0/$v1/$v0/$a2.
+ * Swept and REJECTED: block-scoping the sort temporaries (no change);
+ * a function-scope `LAYOUT *pL = &s_inLayout` (91 words); the same
+ * pointer scoped to the if-arm (96 words); the sort as
+ * `do { nSwap = 0; ... } while (nSwap)` instead of
+ * `nSwap = 1; while (nSwap) { nSwap = 0; ... }` (92 words -- the while
+ * form is the one that gives the right length, and gcc folds the
+ * initial 1 away by itself).
+ * The layout base is what to attack next: the original hoists the FULL
+ * address out of the outer loop (`move $a2,$s1`), we hoist only the
+ * `lui %hi` -- so in the original the sort's base is derived from a
+ * POINTER pseudo, not from the symbol_ref that `&s_inLayout.aStealth[1]`
+ * gives us.
+ *
+ * Also names LAYOUT+0x280 as aStealth[10] and +0x2C8 as nStealthNum.
+ */
+
+/* Queue the stealth (heat-haze) filter entries for this model. When the
+ * model wants per-studio entries all ten slots are built and then bubble
+ * sorted back to front by depth; otherwise a single entry is made. */
+void nmlModelStealthEntry(void *pModel, void *pCamera)
+{
+    int aClip[4];
+    float fSize;
+    int i;
+
+    _CurSetMatrix((char *)pCamera + 0x470);
+    _CurSetViewScaleTrans((char *)pCamera + 0x80, (char *)pCamera + 0x70);
+    _CurRotTransPersClip(aClip, &s_inLayout.aFogDist[8]);
+    fSize = (float)aClip[2] * s_fStealthScale
+            / tanf(*(float *)((char *)pCamera + 0x94) * 0.5f);
+    if (*(int *)((char *)pModel + 0x48) != 0) {
+        for (i = 0; i < 10; i++) {
+            nmlFilterStealthMake(fSize, i, pCamera, &s_inLayout);
+            s_inLayout.nStealthNum++;
+        }
+        {
+            int nSwap;
+
+            nSwap = 1;
+            while (nSwap != 0) {
+                STEALTH **pp;
+                int n;
+
+                nSwap = 0;
+                pp = &s_inLayout.aStealth[1];
+                for (n = 8; n >= 0; n--) {
+                    STEALTH *pA;
+
+                    pA = pp[-1];
+                    if (s_fStealthMinRange < pA->fRange) {
+                        STEALTH *pB;
+
+                        pB = pp[0];
+                        if (pA->fDepth + s_fStealthBias < pB->fDepth) {
+                            pp[-1] = pB;
+                            nSwap = 1;
+                            pp[0] = pA;
+                        }
+                    }
+                    pp++;
+                }
+            }
+        }
+    } else {
+        nmlFilterStealthMake(fSize, 0, pCamera, &s_inLayout);
+        s_inLayout.nStealthNum++;
     }
 }
