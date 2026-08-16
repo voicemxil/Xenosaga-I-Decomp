@@ -1057,3 +1057,48 @@ void sefDestroyScriptScheduler2(int nScript, int nEntry)
         }
     }
 }
+
+/* --- sefGetNullPosition / sefGetWeaponPosition: fetch the world matrix
+ * translation of an actor's accessory joint. Same body; the null variant
+ * biases the joint index by 8 and allows 16 of them, the weapon variant
+ * passes the index through and allows 8. The accessory table pointer is
+ * read in the bltz delay slot, i.e. unconditionally, so it has to be
+ * loaded before the "no such joint" test in the C too. The quadword copy
+ * out of the matrix is an lq/sq pair -- hardware asm. --- */
+extern int ACT_jointGetAccessories(void *pAct, int nJoint);
+
+void sefGetNullPosition(SEF_VEC4 *pDst, char *pAct, int nIdx)
+{
+    if (pAct != 0 && (unsigned int)nIdx < 16) {
+        int n = ACT_jointGetAccessories(pAct, nIdx + 8);
+        char *pTbl = *(char **)(pAct + 2084);
+
+        if (n < 0 || pTbl == 0) {
+            pDst->y = 20.0f;
+        } else {
+            char *pMtx = (char *)((n << 6) + (int)pTbl) + 48;
+            __asm__ __volatile__(".set noreorder\n"
+                "lq $8, 0x0(%1)\n"
+                "sq $8, 0x0(%0)\n"
+                ".set reorder" : : "r"(pDst), "r"(pMtx) : "$8", "memory");
+        }
+    }
+}
+
+void sefGetWeaponPosition(SEF_VEC4 *pDst, char *pAct, int nIdx)
+{
+    if (pAct != 0 && (unsigned int)nIdx < 8) {
+        int n = ACT_jointGetAccessories(pAct, nIdx);
+        char *pTbl = *(char **)(pAct + 2084);
+
+        if (n < 0 || pTbl == 0) {
+            pDst->y = 20.0f;
+        } else {
+            char *pMtx = (char *)((n << 6) + (int)pTbl) + 48;
+            __asm__ __volatile__(".set noreorder\n"
+                "lq $8, 0x0(%1)\n"
+                "sq $8, 0x0(%0)\n"
+                ".set reorder" : : "r"(pDst), "r"(pMtx) : "$8", "memory");
+        }
+    }
+}
