@@ -2509,3 +2509,7 @@ sceSifSendCmd = 0x00202C18, 0x3C; // sceSif.c
 sceSifRpcLoop = 0x00203D90, 0x40; // sceSif.c
 Check_EnemyFound = 0x002D0B68, 0xA4; // Check.c
 MenuShopEx2 = 0x002A79E8, 0x194; // Menu.c
+sdvSaveAmbient = 0x002EC320, 0x54; // sdv.c
+svInitRefImage = 0x002DE6F0, 0x3C; // sv.c
+GameDefocusCheck = 0x0024FE70, 0x68; // Game.c
+tskFileEx = 0x002869D0, 0x16C; // tskFile.c
