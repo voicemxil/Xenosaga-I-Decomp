@@ -2527,3 +2527,6 @@ TCAMERA_transCNS = 0x00308DC8, 0x64; // TCAMERA.c
 xheap_push = 0x002F1BA0, 0x24; // JavaClass.c
 UmnChangeTopLevel = 0x00A024D8, 0x54; // Umn.c
 UmnEventEndMailCheck = 0x00A0F068, 0x6C; // Umn.c
+sefProgressKey5 = 0x002E1740, 0x88; // sefLerp.c
+sefProgressInt = 0x002E1DA0, 0x4C; // sefLerp.c
+JNT_getStaticVal = 0x0030EDC8, 0x164; // JNT.c

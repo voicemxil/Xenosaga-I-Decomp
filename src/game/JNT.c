@@ -29,6 +29,29 @@ typedef struct {
     char pad034[0xC];           /* 0x34 */
 } JNT_ELEMENT;
 
+/* One entry of the work area's OWN element table (pWork->pElement, which
+ * points at pWork->aElement).  A model element record is the input side
+ * of the skeleton walk; this is the output side -- the decoded scale,
+ * rotate and translate rows for one joint, plus the attribute record the
+ * matrix builder reads back.  Same 0x40 stride, so the two are indexed
+ * interchangeably. */
+typedef struct {
+    float aScale[4];            /* 0x00 */
+    float aRotate[4];           /* 0x10 */
+    float aTranslate[4];        /* 0x20 */
+    short nUnk30;               /* 0x30 */
+    short nInterrupt;           /* 0x32 */
+    void *pAttribute;           /* 0x34 */
+    char pad038[0x8];           /* 0x38 */
+} JNT_JOINT;
+
+/* A row of the optional curve capture buffer: the same translate and
+ * rotate the joint got, each with w forced to 1. */
+typedef struct {
+    float aTranslate[4];        /* 0x00 */
+    float aRotate[4];           /* 0x10 */
+} JNT_CURVE_ROW;
+
 /* Fixed-width animated element consumed by JNT_getVal2. Every successful
  * evaluation advances by one 0x40-byte record. */
 typedef struct {
@@ -113,11 +136,11 @@ typedef struct {
     char *pName;                /* 0x80C */
     int nAnimFlags;             /* 0x810 */
     float fClipR;               /* 0x814 */
-    JNT_ELEMENT *pElement;      /* 0x818 */
+    JNT_JOINT *pElement;        /* 0x818 */
     int nInterrupt;             /* 0x81C */
     void *pUnit;                /* 0x820 */
     char pad824[0xC];           /* 0x824 */
-    JNT_ELEMENT aElement[1];    /* 0x830 */
+    JNT_JOINT aElement[1];      /* 0x830 */
 } JNT_WORK;
 
 /* The work area is pinned to the head of the EE scratchpad. */
@@ -390,6 +413,93 @@ transform:
 common:
     pWork->nIndex++;
     return pNext;
+}
+
+extern char dummyAttr[];
+
+/* Copy one model element's static T/R rows into the work area's own
+ * element table and advance the cursor.  Types 1-4 also reset the joint's
+ * scale row to unity; type 5 leaves the scale alone (its owner already
+ * wrote it); type 0 -- and anything above 5 -- only advances.  When a
+ * curve capture buffer is armed the same two rows are mirrored into it
+ * with w forced to 1. */
+JNT_ELEMENT *JNT_getStaticVal(JNT_WORK *pWork, JNT_ELEMENT *pElement)
+{
+    int nType;
+    int nIndex;
+    int nNext;
+    JNT_JOINT *pJoint;
+    JNT_ELEMENT *pRet;
+
+    nIndex = pWork->nIndex;
+    pRet = pElement + 1;
+    nType = pElement->nType;
+    pJoint = &pWork->pElement[nIndex];
+    nNext = nIndex + 1;
+
+    if (nType < 5) {
+        if (nType == 0) {
+            goto common;
+        }
+        goto unity;
+    } else if (nType == 5) {
+        float *pSrcT = (float *)((char *)pElement + 0x10);
+        float *pDstT = pJoint->aTranslate;
+        float *pSrcR = (float *)((char *)pElement + 0x20);
+        float *pDstR = pJoint->aRotate;
+
+        pDstT[0] = pSrcT[0];
+        pDstT[1] = pSrcT[1];
+        pDstT[2] = pSrcT[2];
+        pDstR[0] = pSrcR[0];
+        pDstR[1] = pSrcR[1];
+        pDstR[2] = pSrcR[2];
+    }
+    goto common;
+
+unity:
+    {
+        float *pSrcT = (float *)((char *)pElement + 0x10);
+        float *pDstT = pJoint->aTranslate;
+        float *pSrcR = (float *)((char *)pElement + 0x20);
+        float *pDstR = pJoint->aRotate;
+
+        pDstT[0] = pSrcT[0];
+        pDstT[1] = pSrcT[1];
+        pDstT[2] = pSrcT[2];
+        pDstR[0] = pSrcR[0];
+        pDstR[1] = pSrcR[1];
+        pDstR[2] = pSrcR[2];
+        pJoint->aScale[0] = pJoint->aScale[1] = pJoint->aScale[2] = 1.0f;
+    }
+
+common:
+    if (pWork->pCurve2 != 0) {
+        JNT_CURVE_ROW *pCurve = (JNT_CURVE_ROW *)pWork->pCurve;
+
+        if (pCurve != 0) {
+            float *pSrcT = (float *)((char *)pElement + 0x10);
+            /* Integer-first: C pointer arithmetic always normalises to
+             * base + offset, and the original encodes offset + base. */
+            float *pRowT = (float *)((nIndex << 5) + (int)pCurve);
+            float *pSrcR = (float *)((char *)pElement + 0x20);
+            float *pRowR = pRowT + 4;
+
+            pRowT[0] = pSrcT[0];
+            pRowT[1] = pSrcT[1];
+            pRowT[2] = pSrcT[2];
+            pRowR[0] = pSrcR[0];
+            pRowR[1] = pSrcR[1];
+            pRowR[2] = pSrcR[2];
+            pRowT[3] = 1.0f;
+            pRowR[3] = 1.0f;
+        }
+    }
+    pWork->nIndex = nNext;
+    pJoint->nUnk30 = 0;
+    pJoint->pAttribute = dummyAttr;
+    pJoint->nInterrupt = 0;
+    return pRet;
 }
 
 /* Arm the curve pack for a single-curve animation */
