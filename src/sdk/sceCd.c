@@ -243,3 +243,43 @@ int sceCdSyncS(int mode)
     }
     return sceSifCheckStatRpc(&_sceCd_cd_scmd);
 }
+
+/* sceCdStPause / sceCdStResume / sceCdStStat: three more members of the
+ * sceCdSt* dispatcher family above (opcodes 7, 8 and 6), differing only
+ * in whether they touch `stm_status` first.  Unlike the earlier five
+ * these carry a debug trace, gated on SCE_CD_debug the same way
+ * sceCdSyncS gates "S cmd wait\n". */
+
+extern int SCE_CD_debug;
+
+int sceCdStPause(void)
+{
+    int mode;
+
+    stm_status = 0;
+    if (SCE_CD_debug > 0)
+        scePrintf("sceCdStPause call\n");
+    mode = (int)&dum_mode;
+    return sceCdStream(0, 0, 0, 7, mode);
+}
+
+int sceCdStResume(void)
+{
+    int mode;
+
+    stm_status = 1;
+    if (SCE_CD_debug > 0)
+        scePrintf("sceCdStResume call\n");
+    mode = (int)&dum_mode;
+    return sceCdStream(0, 0, 0, 8, mode);
+}
+
+int sceCdStStat(void)
+{
+    int mode;
+
+    if (SCE_CD_debug > 0)
+        scePrintf("sceCdStStat call\n");
+    mode = (int)&dum_mode;
+    return sceCdStream(0, 0, 0, 6, mode);
+}
