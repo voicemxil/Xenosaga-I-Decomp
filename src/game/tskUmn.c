@@ -1273,35 +1273,32 @@ typedef struct {
 
 extern void MenuSelectWindow(void);
 
-/* TODO: PARKED at 29 diffs of 190 words -- the length, every opcode but
- * two, and the whole control-flow shape are correct.  What is left is one
- * register ROTATION and the two window-pointer instructions:
+/* TODO: PARKED at 25 diffs of 190 words -- right length, right opcodes
+ * bar two, right control flow.  What is left is ONE register rotation:
+ * the row loop's three address givs are a 3-cycle away from the original
+ * (orig $a0 = the stride-1 giv at +1956, $a2 = the stride-12 giv at
+ * +1956, $a1 = the stride-12 giv at +1948; we get $a1/$a0/$a2), and the
+ * same one-slot shift swaps $t0/$t2 between the UmnWork base and the
+ * `w+12' base -- which is also why our `w->bVisible = 1' stores as
+ * `sw $s0,12($s1)' where the original reuses the loop base, `sw $s0,0($t0)'.
  *
- *  - the loop's three address givs are a 3-cycle away from the original
- *    (orig a0 = the stride-1 giv at +1956, a2 = the stride-12 giv at
- *    +1956, a1 = the stride-12 giv at +1948; we get a1/a0/a2), and the
- *    same one-slot rotation swaps t0/t1 between the UmnWork base and the
- *    `w+12' base.  Every other loop instruction is identical.
- *  - the original keeps &w->win in a CALLEE-SAVED $s2 shared by states 20
- *    and 21, yet still stores win.nState through $s1 in state 20.  A
- *    pointer local reproduces the shared $s2 only if state 20 uses it
- *    TWICE; with a single use gcc propagates it and the block falls back
- *    to `addiu a0,s1,16' (189 words, the sd/ld $s2 pair vanishes).  So
- *    `pWin->nState = 3' buys the register at the cost of that one store's
- *    base, and the state-21 `lh' pair schedules the other way round.
+ * Confirmed correct from the jump table at 0x00A13030: entry[0] is three
+ * instructions before entry[10] (bReady, nState, fall through), and
+ * state 20 falls through into state 21 (its `b' lands one instruction
+ * past entry[21], skipping the `addiu $s2,$s1,16' that the table edge
+ * needs).
  *
- * Swept without closing it: all six orders of the pRows/nSel/nState=1
- * stores in state 20 (the 4th, nSel-first, order is worth 14 diffs and is
- * the one kept); bVisible=1 before the loop, after the row terminator,
- * and stored by name rather than through pVis; the row stores written as
- * `w->row[i].X' throughout (191 words), all through one SPROW pointer
- * (185), and every 2-of-3 split of pText/bGray between a pointer and the
- * indexed form -- only "bGray=1 through the pointer, pText and the two
- * bGray=0 by index" reaches this length; `if (i != 0)' first instead of
- * `if (i == 0)'; both polarities of the nHi test; pGray assigned per-arm
- * instead of at the top of the loop body (192 words); pVis block-scoped;
- * and `int i' declared before and after pWin.  The permuter cannot be
- * used here -- permute_setup.py cannot assemble overlay functions.
+ * Swept without closing it: all 24 orders of the four constant-store
+ * groups in state 20's tail plus 11 of the 120 five-group orders (the
+ * order kept is the best found); both polarities of the nHi test and of
+ * the `i == 0' test; every 2-of-3 split of pText/bGray between an
+ * indexed reference and a block-local pointer (all through one SPROW
+ * pointer collapses to 185 words); bVisible stored by name and through
+ * an `int *' aimed at &w->bVisible; a callee-saved `SELWIN *' shared by
+ * states 20 and 21 (buys $s2 but costs the win.nState store its base);
+ * and `int i' declared before and after the other locals.  The permuter
+ * cannot be used here -- permute_setup.py cannot assemble overlay
+ * functions.
  *
  * Database screen: the three-row "Menu" window (Gnosis / Keywords /
  * Cancel) that slides in from the right once the screen reaches page 17.
@@ -1316,12 +1313,6 @@ void tskUmnDataBaseMenu(TSK_TASK *pTask, UMN_MENU *w)
     short nTarget;
     short nTargetOut;
     int i;
-    /* One pointer shared by states 20 and 21: the original keeps it in a
-     * callee-saved register across both arms (see LEVERS.md). */
-    SELWIN *pWin;
-    /* The original addresses the row terminator off &bVisible; naming the
-     * flag through a pointer is what shares that base. */
-    int *pVis;
 
     if (UmnWork.nScene != 2) {
         pTask->nState = -1;
@@ -1371,25 +1362,22 @@ void tskUmnDataBaseMenu(TSK_TASK *pTask, UMN_MENU *w)
                     w->row[i].bGray = 0;
                 }
             }
-            pVis = &w->bVisible;
-            *pVis = 1;
+            w->bVisible = 1;
             w->row[i].pText = 0;
             w->win.nX = 528;
             w->win.nY = 176;
             w->sel.nSel = UmnWork.nDataBaseSel;
             w->sel.pRows = w->row;
-            pWin = &w->win;
             w->win.nState = 1;
-            WindowDXMain((WINDOWDX *)pWin);
-            pWin->nState = 3;
+            WindowDXMain((WINDOWDX *)&w->win);
+            w->win.nState = 3;
             w->bReady = 1;
             w->nState = 21;
             /* fallthrough: state 21 runs on the same frame */
         case 21:
             nTarget = 192;
-            pWin = &w->win;
-            MoveSlide(&pWin->nX, &nTarget, 3.0f);
-            if (pWin->nX == nTarget) {
+            MoveSlide(&w->win.nX, &nTarget, 3.0f);
+            if (w->win.nX == nTarget) {
                 w->nState = 30;
             }
             break;
