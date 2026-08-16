@@ -69,31 +69,19 @@ void _ipuSetMPEG1(int flag)
 /* Post a command word and latch the result register it reports into. */
 void _sendIpuCommand(MPEGSTREAM *pStream, u_int nCmd)
 {
-    /* $a2 for the table index: gcc otherwise recycles $a1 (nCmd is dead
-     * after the command store) and sinks the shift below it. */
-    PIN(u_int nIdx, "$6");
-    u_int *pTbl;
-
-    nIdx = nCmd >> 28;
-    pTbl = D_004AD680;
     IPU_CMD = nCmd;
-    pStream->nUnk818 = pTbl[nIdx];
+    pStream->nUnk818 = D_004AD680[nCmd >> 28];
 }
 
 /* Spin until the IPU is idle, pumping the no-data callback if it stalls. */
 void _waitIpuIdle(MPEGSTREAM *pStream)
 {
-    /* $s2 for the stream pointer: gcc gives it $s0 and pushes the three
-     * hoisted loop-invariant constants up the callee-saved order. */
-    PIN(MPEGSTREAM *p, "$18");
-    /* and $a0 for the stall counter, which frees $a1 for the prologue mask */
-    PIN(int i, "$4");
+    int i;
 
-    PASSTHRU(p, pStream);
     i = 0;
     while ((IPU_CTRL & 0x80004000) == 0x80000000) {
         if (i++ > 5000) {
-            _dispatchMpegCbNodata(p->pUnk858);
+            _dispatchMpegCbNodata(pStream->pUnk858);
             i = 0;
         }
     }
