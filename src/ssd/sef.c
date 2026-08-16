@@ -75,9 +75,12 @@ void *sefGetEffectName(int idx) {
 
 typedef struct { char pad[0xA8C]; int flags; } SEF_SCHED2;
 extern int _nowScheduler;
+/* File scope, not block scope: gcc 2.9x keeps a block-scope extern's
+ * name on the function obstack and frees it, so the .extern it emits
+ * under -G8 later prints garbage and gas rejects the file. */
+extern SEF_SCHED2 *_nowSchedulerPtr __asm__("_nowScheduler");
 /* a0 is dead: only a1's high bit is examined */
 void sefCheckFinish(int a0, int a1) {
-    extern SEF_SCHED2 *_nowSchedulerPtr __asm__("_nowScheduler");
     if (a1 & 0x4000) {
         _nowSchedulerPtr->flags |= 0x40;
     }
@@ -438,6 +441,9 @@ void sefGetVecMatrix(void *pObj, SEF_VEC4 *pA, SEF_VEC4 *pB)
 }
 
 extern void sefLerpVectorSC(void *a, void *b);
+/* Defined below with its real types; unprototyped here so the callers
+ * in this file keep passing raw pointers. */
+extern void sefLerpIVector();
 extern void sefProgressInt(void *a, void *b);
 /* c is dead: only b's null-ness is examined. The call is unconditional --
  * the null test only picks the table, it does not skip the lookup -- which
@@ -2306,4 +2312,65 @@ void sefLerpIVector(SEF_KEY *pTbl, SEF_LERP *pKey)
     /* Outside the else, as the function's last statement: gcc only turns
      * this into retail's `j sefLerpIVectorA` sibling jump there. */
     sefLerpIVectorA(&p->x, pDst);
+}
+
+/* SWEPT, 72 words vs retail's 70 in this steering-free form. Retail
+ * computes and stores the four components strictly one at a time; gcc
+ * software-pipelines them, hoisting each component's `lh` above the
+ * previous `sw`, because type-based aliasing says a short load cannot
+ * conflict with an int store. Six `asm("":::"memory")` barriers -- one
+ * after each of the first three stores in BOTH arms -- do reproduce
+ * retail's order and take it to 33 diffs, 4 of them opcodes, the rest a
+ * $a0/$a1 and $s0/$s1 swap; that is far too much steering to carry for
+ * 280 bytes in a tree headed for a portable build, so it is recorded
+ * rather than committed. Also swept: volatile destination (74 words),
+ * one shared local pair for the component values (helped, kept), the
+ * goto to a shared negate-and-store tail (helped, kept, and it is what
+ * retail's branch into the middle of the degenerate block is), and both
+ * operand orders on the final add.
+ *
+ * Fixed-point twin of sefLerpIVector: no VU0 at all, a 16.16 fraction
+ * from an integer divide, and the w component comes out negated. Both
+ * degenerate exits (end-of-table, and a zero-length span) fall into the
+ * same straight copy; gcc cross-jumps the shared negate-and-store tail,
+ * which is what retail's branch into the middle of that block is. */
+void sefLerpIVector2(SEF_KEY *pTbl, SEF_LERP *pKey)
+{
+    SEF_KEY *p;
+    int *pDst = (int *)pKey->aVec;
+    int t0;
+    int t1;
+    int f;
+    int a;
+    int b;
+    int n;
+
+    p = &pTbl[pKey->nIdx];
+    if (p[1].t != 1024) {
+        p = sefProgressKey5(pTbl, pKey);
+        t0 = p->t;
+        t1 = p[1].t;
+        if (t0 != t1) {
+            f = ((pKey->nTime - t0) << 16) / (t1 - t0);
+            a = p->x;
+            b = p[1].x;
+            pDst[0] = (((b - a) * f) >> 16) + a;
+            a = p->y;
+            b = p[1].y;
+            pDst[1] = (((b - a) * f) >> 16) + a;
+            a = p->z;
+            b = p[1].z;
+            pDst[2] = (((b - a) * f) >> 16) + a;
+            a = p->w;
+            b = p[1].w;
+            n = (((b - a) * f) >> 16) + a;
+            goto store;
+        }
+    }
+    pDst[0] = p->x;
+    pDst[1] = p->y;
+    pDst[2] = p->z;
+    n = p->w;
+store:
+    pDst[3] = -n;
 }
