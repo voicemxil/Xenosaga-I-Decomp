@@ -2798,3 +2798,46 @@ void plane_from_points(float *pP0, float *pP1, float *pP2, float *pPlane)
     pPlane[2] = vN.f[2];
     pPlane[3] = -(vN.f[0] * pP0[0] + vN.f[1] * pP0[1] + vN.f[2] * pP0[2]);
 }
+
+
+#define VEC_SUB(d, a, b)                                        \
+    PS2_ASM(".set noreorder\n"                                  \
+            "lqc2 $vf3, 0x0(%2)\n"                              \
+            "lqc2 $vf2, 0x0(%1)\n"                              \
+            "vsub.xyz $vf2, $vf2, $vf3\n"                       \
+            "sqc2 $vf2, 0x0(%0)\n"                              \
+            ".set reorder"                                      \
+            : : "r"(d), "r"(a), "r"(b) : "memory")
+
+#define VEC_ADD(d, a, b)                                        \
+    PS2_ASM(".set noreorder\n"                                  \
+            "lqc2 $vf3, 0x0(%2)\n"                              \
+            "lqc2 $vf2, 0x0(%1)\n"                              \
+            "vadd.xyz $vf2, $vf2, $vf3\n"                       \
+            "sqc2 $vf2, 0x0(%0)\n"                              \
+            ".set reorder"                                      \
+            : : "r"(d), "r"(a), "r"(b) : "memory")
+
+/* Dot product of the two edge vectors of the swept-sphere segment
+ * pP0->pP1 shortened by the two radii; negative when the segment points
+ * away from pSphere. */
+float _CheckLine(float *pV0, float *pV1, float *pP0, float *pP1,
+                 float *pSphere, float *pDir)
+{
+    VEC4 vA;
+    VEC4 vB;
+    VEC4 vC;
+    VEC4 vD;
+    VEC4 vE;
+
+    xglVectorScaleXYZ(&vE, pDir, pDir[3] * pSphere[3] * 0.5f);
+    xglVectorScaleXYZ(&vA, pV0, pSphere[3] * 0.5f);
+    xglVectorScaleXYZ(&vB, pV1, pSphere[3] * 0.5f);
+    VEC_SUB(&vA, pP0, &vA);
+    VEC_SUB(&vB, pP1, &vB);
+    VEC_ADD(&vA, &vA, &vE);
+    VEC_ADD(&vB, &vB, &vE);
+    VEC_SUB(&vC, &vB, &vA);
+    VEC_SUB(&vD, pSphere, &vA);
+    return vC.f[0] * vD.f[0] + vC.f[1] * vD.f[1] + vC.f[2] * vD.f[2];
+}

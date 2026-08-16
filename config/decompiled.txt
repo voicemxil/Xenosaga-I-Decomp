@@ -2827,3 +2827,4 @@ plane_from_points = 0x0023E480, 0xF0; // nmlModel.c
 smInitMemInfo = 0x002EEC50, 0x2C; // sdv.c
 smInitilize = 0x002EEC80, 0x44; // sdv.c
 SEQ_scale = 0x00309610, 0x2A0; // SEQ.c
+_CheckLine = 0x0023E338, 0x148; // nmlModel.c
