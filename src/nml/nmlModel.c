@@ -152,6 +152,7 @@ float s_fSortOffsetEntry;
 int s_nParent;
 int s_nClip;
 int s_nShapeNum;
+int s_nDispVisible;
 int s_nMapClip;
 int s_nPacketSignal;
 int s_nUseBackBuffer;
@@ -193,7 +194,29 @@ void CLEAR_MAP_HANDLE(void *pMapHandle)
 {
     *(int *)pMapHandle = 0;
 }
-void CLEAR_MODEL_ENTRY(void);
+extern char s_aMatName[];
+extern char s_aTexName[];
+
+/* TODO: near-miss, 2 diffs, NOT registered.  Identical instruction
+ * multiset; only the two `lui %hi` halves for s_aMatName and s_aTexName
+ * are issued in the opposite order (the sb's, and every register, are
+ * right).  Swapping the two source statements does not move them.
+ */
+/* Reset the per-frame model entry state. */
+void CLEAR_MODEL_ENTRY(void)
+{
+    s_nDispVisible = -1;
+    s_aMatName[0] = 0;
+    s_aTexName[0] = 0;
+    s_nMapShadowParts = 0;
+    s_nShadowVec = 0;
+    s_nToumeiNum = 0;
+    s_fSortOffsetEntry = 0.0f;
+    s_nParent = 0;
+    s_nClip = 0;
+    s_nShapeNum = 0;
+    s_nMapClip = 0;
+}
 void FLUSH_MODELSYSTEM(void);
 void FLUSH_ALPHA_GROUP(void)
 {
@@ -2245,4 +2268,58 @@ void _CurMatrixMul(void *pMtx)
             "vmulw.xyzw $vf28, $vf3, $vf0w\n"
             "vmulw.xyzw $vf29, $vf4, $vf0w\n"
             ".set reorder" : : "r"(pMtx));
+}
+
+/* Multiply the 3x3 part of pMtx by the current matrix and renormalise
+ * each resulting column; result written to pDst as three quadwords. */
+void _CurMatrixMul33norm(void *pDst, void *pMtx)
+{
+    PS2_ASM(".set noreorder\n"
+            "lqc2 $vf20, 0x0(%1)\n"
+            "lqc2 $vf21, 0x10(%1)\n"
+            "lqc2 $vf22, 0x20(%1)\n"
+            "vmulax.xyz $ACC, $vf27, $vf20x\n"
+            "vmadday.xyz $ACC, $vf28, $vf20y\n"
+            "vmaddz.xyz $vf20, $vf29, $vf20z\n"
+            "vmulax.xyz $ACC, $vf27, $vf21x\n"
+            "vmadday.xyz $ACC, $vf28, $vf21y\n"
+            "vmaddz.xyz $vf21, $vf29, $vf21z\n"
+            "vmulax.xyz $ACC, $vf27, $vf22x\n"
+            "vmadday.xyz $ACC, $vf28, $vf22y\n"
+            "vmaddz.xyz $vf22, $vf29, $vf22z\n"
+            "vaddz.x $vf25, $vf0, $vf20\n"
+            "vaddy.x $vf24, $vf0, $vf20\n"
+            "vaddx.x $vf23, $vf0, $vf20\n"
+            "vaddz.y $vf25, $vf0, $vf21\n"
+            "vaddy.y $vf24, $vf0, $vf21\n"
+            "vaddx.y $vf23, $vf0, $vf21\n"
+            "vaddz.z $vf25, $vf0, $vf22\n"
+            "vaddy.z $vf24, $vf0, $vf22\n"
+            "vaddx.z $vf23, $vf0, $vf22\n"
+            "vmula.xyz $ACC, $vf23, $vf23\n"
+            "vmadda.xyz $ACC, $vf24, $vf24\n"
+            "vmadd.xyz $vf10, $vf25, $vf25\n"
+            "vrsqrt $Q, $vf0w, $vf10x\n"
+            "vwaitq\n"
+            "vmulq.x $vf23, $vf23, $Q\n"
+            "vmulq.x $vf24, $vf24, $Q\n"
+            "vmulq.x $vf25, $vf25, $Q\n"
+            "vnop\n"
+            "vnop\n"
+            "vrsqrt $Q, $vf0w, $vf10y\n"
+            "vwaitq\n"
+            "vmulq.y $vf23, $vf23, $Q\n"
+            "vmulq.y $vf24, $vf24, $Q\n"
+            "vmulq.y $vf25, $vf25, $Q\n"
+            "vnop\n"
+            "vnop\n"
+            "vrsqrt $Q, $vf0w, $vf10z\n"
+            "vwaitq\n"
+            "vmulq.z $vf23, $vf23, $Q\n"
+            "vmulq.z $vf24, $vf24, $Q\n"
+            "vmulq.z $vf25, $vf25, $Q\n"
+            "sqc2 $vf23, 0x0(%0)\n"
+            "sqc2 $vf24, 0x10(%0)\n"
+            "sqc2 $vf25, 0x20(%0)\n"
+            ".set reorder" : : "r"(pDst), "r"(pMtx) : "memory");
 }
