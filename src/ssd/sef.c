@@ -1813,3 +1813,46 @@ void sefCreateEffect(SEF_EFT_HDR *p)
         scCreateScript(_battleData);
     }
 }
+
+/* Wipe the whole scheduler pool and hand every one of its 128 slots a
+ * fresh set of 32 effect-data records. Two views of the slot as usual:
+ * the three -1 stores walk a pointer based at the slot's 0xA90 tail,
+ * while the inner loop starts from the record array at +176 reached
+ * through a byte offset off the pool base. */
+typedef struct {
+    short pad0A90;
+    short f0A92;
+    short f0A94;
+    short f0A96;
+    char  pad0A98[0xAB0 - 8];
+} SEF_SCHED_TAIL;
+
+extern void sefMemZero(void *p, int size);
+
+void sefInitScheduler(void)
+{
+    SEF_SCHED_TAIL *q;
+    char *pData;
+    char *p;
+    int i;
+    int j;
+    /* Steering: gcc gives the hoisted -1 the earlier callee-saved
+     * register and the byte offset the later one; retail is the other
+     * way round. Emits no code. */
+    PIN(int nOfs, "$19");
+
+    sefMemZero(_scheduler, 0x55800);
+    pData = (char *)_scheduler + 176;
+    q = (SEF_SCHED_TAIL *)((char *)_scheduler + 2704);
+    for (i = 0, nOfs = 0; i < 128; i++, nOfs += 0xAB0) {
+        q->f0A92 = -1;
+        q->f0A94 = -1;
+        q->f0A96 = -1;
+        p = (char *)(nOfs + (int)pData);
+        for (j = 31; j >= 0; j--) {
+            sefInitEffectData(p, 0, -1, 0);
+            p += 48;
+        }
+        q++;
+    }
+}
