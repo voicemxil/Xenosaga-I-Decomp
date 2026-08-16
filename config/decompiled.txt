@@ -2830,3 +2830,4 @@ SEQ_scale = 0x00309610, 0x2A0; // SEQ.c
 _CheckLine = 0x0023E338, 0x148; // nmlModel.c
 xglCdDiskCheck = 0x0021D548, 0x144; // xglCd.c
 SEQ_scaleUnit = 0x0031FCE0, 0x2A0; // SEQ.c
+smAlloc = 0x002EECC8, 0x124; // sdv.c

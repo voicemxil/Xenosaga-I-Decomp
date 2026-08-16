@@ -395,3 +395,165 @@ int sdvCreateAlter(SDV_ALTER_COPY *pSrc)
     }
     return -1;
 }
+
+/* --- sm*: a first-header doubly-linked best-fit heap over 16-byte cells.
+ * Every cell header carries a magic word, 0x1234 free / 0x5678 in use;
+ * nSize counts the 16-byte cells that FOLLOW the header. --- */
+
+typedef struct SM_BLK
+{
+    int            nMagic;   /* 0x00 */
+    unsigned int   nSize;    /* 0x04 */
+    struct SM_BLK *pPrev;    /* 0x08 */
+    struct SM_BLK *pNext;    /* 0x0C */
+} SM_BLK;
+
+typedef struct
+{
+    void        *pHeap;      /* 0x00 */
+    unsigned int nCells;     /* 0x04 */
+    int          nUsed;      /* 0x08 */
+    int          nFree;      /* 0x0C */
+    int          nUsedMax;   /* 0x10 */
+    int          nTotal;     /* 0x14 */
+} SM_MEMINFO;
+
+extern SM_MEMINFO stMemInfo;
+extern SM_BLK *pmcHead;
+extern unsigned int nMemCell;
+
+void smInitMemInfo(SM_MEMINFO *p)
+{
+    unsigned int n = nMemCell;
+    int nBytes = (n << 4) + 16;
+
+    p->nCells = n;
+    p->pHeap = pmcHead;
+    p->nFree = nBytes;
+    p->nUsedMax = 0;
+    p->nTotal = nBytes;
+    p->nUsed = 0;
+}
+
+void smInitilize(void *pMem, unsigned int nSize)
+{
+    SM_BLK *p = (SM_BLK *)pMem;
+    unsigned int n = nSize >> 4;
+
+    nMemCell = n;
+    pmcHead = p;
+    p->nMagic = 0x1234;
+    p->nSize = n - 1;
+    p->pPrev = 0;
+    p->pNext = 0;
+    smInitMemInfo(&stMemInfo);
+}
+
+void smPrintInfo(void)
+{
+    SM_BLK *p = pmcHead;
+
+    while (p != 0) {
+        int nMagic = p->nMagic;
+
+        if (nMagic != 0x1234 && nMagic != 0x5678) {
+            return;
+        }
+        p = p->pNext;
+    }
+}
+
+void *smAlloc(unsigned int nBytes)
+{
+    SM_BLK *p;
+    SM_BLK *pBest;
+    unsigned int nNeed;
+    unsigned int nBest;
+    unsigned int n;
+
+    nNeed = ((nBytes + 2047) & ~2047) >> 4;
+    p = pmcHead;
+    pBest = 0;
+    nBest = nMemCell;
+    while (p != 0) {
+        /* ONE local for the magic word and the size: retail keeps both in
+         * $v1, and splitting them costs the whole register assignment. */
+        n = p->nMagic;
+        if (n == 0x1234) {
+            n = p->nSize;
+            if (n >= nNeed && n < nBest) {
+                /* PASSTHRU, not `nBest = n`: the two are equal here, so CSE
+                 * hands the exact-fit test n's register, where retail tests
+                 * nBest's. Costs no instruction. */
+                PASSTHRU(nBest, n);
+                pBest = p;
+                if (nBest == nNeed) {
+                    break;
+                }
+            }
+        }
+        p = p->pNext;
+    }
+    if (pBest == 0) {
+        smPrintInfo();
+        return 0;
+    }
+    n = pBest->nSize;
+    pBest->nMagic = 0x5678;
+    if (n != nNeed) {
+        /* The dead search cursor carries the split block: retail reuses
+         * its register rather than taking a fresh one. */
+        p = (SM_BLK *)((char *)pBest + (nNeed << 4) + 16);
+        p->nMagic = 0x1234;
+        p->pPrev = pBest;
+        p->pNext = pBest->pNext;
+        p->nSize = pBest->nSize - nNeed - 1;
+        if (p->pNext != 0) {
+            p->pNext->pPrev = p;
+        }
+        pBest->nSize = nNeed;
+        pBest->pNext = p;
+    }
+    return (char *)pBest + 16;
+}
+
+void smFree(void *pMem)
+{
+    SM_BLK *p;
+    SM_BLK *q;
+    SM_BLK *r;
+
+    if (pMem == 0) {
+        return;
+    }
+    p = (SM_BLK *)((char *)pMem - 16);
+    p->nMagic = 0x1234;
+    q = p->pNext;
+    if (q != 0 && q->nMagic == 0x1234) {
+        unsigned int n = p->nSize + q->nSize + 1;
+
+        r = q->pNext;
+        p->pNext = r;
+        p->nSize = n;
+        if (r != 0) {
+            r->pPrev = p;
+        }
+    }
+    q = p->pPrev;
+    if (q == 0) {
+        return;
+    }
+    if (q->nMagic != 0x1234) {
+        return;
+    }
+    {
+        unsigned int n = q->nSize + p->nSize + 1;
+
+        r = p->pNext;
+        q->pNext = r;
+        q->nSize = n;
+        if (r != 0) {
+            r->pPrev = q;
+        }
+    }
+}
