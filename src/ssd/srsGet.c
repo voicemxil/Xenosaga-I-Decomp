@@ -354,3 +354,45 @@ int srsEffectNameToID(char *pName)
 done:
     return nRet;
 }
+
+/* --- effect id -> table index bias --------------------------------- */
+
+extern signed char _srsEffect2IndexTbl[];
+
+/* NEAR-MISS (34 or 35 words vs 37, depending on arm shape). The
+ * original returns through an accumulator parked in $a1 with three
+ * separate `move v0,a1` return sites (one per arm shape: the table arm,
+ * the first range arm, and the shared tail). Every source shape tried
+ * either coalesces the accumulator into $v1 and returns directly (34
+ * words, all arms `goto done`) or splits the returns but keeps the
+ * value in $v0 (35 words, first two arms `return nIdx`). Swept: one
+ * accumulator vs accumulator-plus-temp (gcc coalesces the copy away);
+ * all-goto, all-return, and every mixed split of the six arms; the
+ * final movz written as ?: and as if/else. A register-home tie-break.
+ *
+ * Maps an effect number onto the "second effect" index used to pick the
+ * esd record: a byte table for the 601..717 band, and a set of small
+ * offset bands above 2600. Single exit through one accumulator -- the
+ * original's last two arms are a movz, which only forms while both
+ * candidate values are live in the same block. */
+int srsGetEffect2Idx(int nEftNo)
+{
+    int nIdx;
+
+    if ((unsigned int)(nEftNo - 601) < 117) {
+        return _srsEffect2IndexTbl[nEftNo - 601];
+    }
+    nIdx = nEftNo - 2600;
+    if ((unsigned int)nIdx < 12) goto done;
+    nIdx = nEftNo - 2612;
+    if ((unsigned int)nIdx < 9) goto done;
+    nIdx = nEftNo - 2651;
+    if ((unsigned int)nIdx < 10) goto done;
+    nIdx = nEftNo - 2626;
+    if ((unsigned int)nIdx < 4) goto done;
+    nIdx = nEftNo - 2630;
+    if ((unsigned int)nIdx < 7) goto done;
+    nIdx = ((unsigned int)(nEftNo - 2900) < 99) ? 100 : 0;
+done:
+    return nIdx;
+}
