@@ -462,11 +462,26 @@ int srsGetFileLen(int nFileNo)
 
 typedef struct
 {
-    void *pCommon;          /* 0x00 */
-    char  pad0004[0x38];
-    void *pCf;              /* 0x3C */
-    char  pad0040[0x160];
-} SRS_MEMRES;
+    void *pImage;           /* 0x00 */
+    int   f0004;            /* 0x04 */
+    int   f0008;            /* 0x08 */
+} SRS_RELOAD;               /* 12 bytes */
+
+typedef struct
+{
+    void       *pCommon;        /* 0x000 */
+    int         f0004;          /* 0x004 */
+    SRS_RELOAD  aReload[3];     /* 0x008 */
+    void       *aBattle[3];     /* 0x02C */
+    void       *pEvent;         /* 0x038 */
+    void       *pCf;            /* 0x03C */
+    void       *aMap[24];       /* 0x040 */
+    char        pad00A0[0x54];  /* 0x0A0 */
+    short       aReloadNo[9];   /* 0x0F4 */
+    char        pad0106[0xA];   /* 0x106 */
+    short       aMapNo[24];     /* 0x110 */
+    void       *aMap2[24];      /* 0x140 */
+} SRS_MEMRES;                   /* 0x1A0 */
 
 extern SRS_MEMRES _srsMemRes;
 extern char D_004CC6F0[];
@@ -482,6 +497,43 @@ extern void sresFreeReloaderMemory(int n);
 void sresInitMemoryRes(void)
 {
     memset(&_srsMemRes, 0, sizeof(SRS_MEMRES));
+}
+
+/* SWEPT, 30 diffs, correct length (46): everything matches except how
+ * gcc decomposes the in-range arm's address. Retail holds base+8 in $s2
+ * and the element address in $s0, so the two follow-up zero stores CSE
+ * to plain `move` copies of $s0 at offsets 4 and 8; gcc holds the bare
+ * base in $s2 and CSEs `base + nNo*12` instead, so the same stores come
+ * out at offsets 12 and 16 off a recomputed sum. A `q = &p->aReload[nNo]`
+ * local removes the two moves entirely (44 words); decaying the array to
+ * a `SRS_RELOAD *` folds the +8 into the relocation (40 words); the bare
+ * symbol in both arms folds both (41 words). */
+void sresFreeReloaderMemoryNo(int nNo)
+{
+    if (nNo < 3) {
+        /* Through a pointer local (so the +8 stays a separate addiu off
+         * the bare symbol) and naming the element on every store (so the
+         * three zeroes go through CSE copies of the address, as retail's
+         * move/move pair does). */
+        SRS_MEMRES *p = &_srsMemRes;
+
+        if (p->aReload[nNo].pImage != 0) {
+            svDeleteImageMapper(nNo * 3 + 2);
+            smFree(p->aReload[nNo].pImage);
+            p->aReload[nNo].pImage = 0;
+            p->aReload[nNo].f0004 = 0;
+            p->aReload[nNo].f0008 = 0;
+        }
+    } else {
+        /* The bare symbol here: retail folds +0x20 into the relocation. */
+        void **pp = &_srsMemRes.aBattle[nNo - 3];
+
+        if (*pp != 0) {
+            svDeleteImageMapper(nNo + 8);
+            smFree(*pp);
+            *pp = 0;
+        }
+    }
 }
 
 void sresLoadCommonMemory(void)
