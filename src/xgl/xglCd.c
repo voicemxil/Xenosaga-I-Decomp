@@ -5,6 +5,15 @@
 typedef unsigned int u_int;
 typedef unsigned char u_char;
 
+/* File-select list context: a directory name and the buffer the list is
+ * read into */
+typedef struct {
+    char aPad00[0x10];
+    char aDir[0x100];    /* 0x10 */
+    char *pBuf;          /* 0x110 */
+    u_int nSize;         /* 0x114 */
+} XGLCDFSEL;
+
 /* One pending read request in LW's 32-entry ring */
 typedef struct {
     u_int nAddr;         /* 0x00 */
@@ -350,6 +359,72 @@ void xglCdLoadOverlay(int nNo)
 
 
 int StreamReadRingCoreSub(XGLCDSTREAM *pStr, char *pBuf, int nSectors);
+
+int sceOpen(char *pName, int nFlags);
+
+/* TODO: near-miss -- 70 of 72 words, and every one of those 70 is
+ * byte-identical (register allocation, both string loops, the
+ * beqzl/beql annul bits and the sceOpen/sceRead/sceClose sequence all
+ * line up).  The whole residue is the SHORT-LOOP PAD in the final
+ * newline-stripping loop: this ee-gcc 2.96 pads a branch-likely loop
+ * out to 8 instructions (3 nops), the original build padded the same
+ * loop to 10 (5 nops).  Verified it is a fixed total, not a fixed nop
+ * count -- adding real instructions to the body drops the pad to 0 at
+ * 8 total.  Swept: while/do-while/for/goto loop shapes, char vs
+ * u_char pointer, named-temp vs direct `*r` compare (all 3 nops);
+ * SCHED_NOP() padding lands BEFORE the closing lbu, not between the
+ * lbu and the branch where the original's nops are, and 5 of them
+ * rewrite the exit branch to bnel.  There is no fix_cc_asm pass for
+ * loop padding; adding an opt-in one is the way in.
+ * Do not re-sweep the C -- sweep the pad. */
+/* Re-read the file list for pFS's directory into its buffer, turning every
+ * newline into a terminator */
+void FileSelectListReload(XGLCDFSEL *pFS)
+{
+    static char listname[] = ".filelist";
+    char aPath[0x100];
+    char *pSrc;
+    char *pDst;
+    char *q;
+    u_char *r;
+    u_int i;
+    int nFd;
+
+    i = 0;
+    q = pFS->pBuf;
+    if (pFS->nSize != 0) {
+        do {
+            *q = 0;
+            i++;
+            q++;
+        } while (i < pFS->nSize);
+    }
+    pSrc = pFS->aDir;
+    pDst = aPath;
+    while (*pSrc != 0) {
+        *pDst = *pSrc;
+        pDst++;
+        pSrc++;
+    }
+    pSrc = listname;
+    while (*pSrc != 0) {
+        *pDst = *pSrc;
+        pDst++;
+        pSrc++;
+    }
+    *pDst = 0;
+    nFd = sceOpen(aPath, 1);
+    sceRead(nFd, pFS->pBuf, pFS->nSize);
+    sceClose(nFd);
+    r = (u_char *)pFS->pBuf;
+    while (*r != 0) {
+        if (*r == 10) {
+            *r = 0;
+        }
+        r++;
+    }
+}
+
 
 /* Blocking stream read: pull whole sectors through the ring core, track
  * the bytes remaining, and zero-pad the tail up to the ring granule */
