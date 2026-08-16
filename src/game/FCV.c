@@ -235,3 +235,51 @@ void FCV2_dump(FCV2_ATTRIBUTE *pAttr)
         i++;
     } while (i < nNum);
 }
+
+/* One key of an FCV2 key list: a { type, time } header with the payload
+ * following. Type 1 carries a tangent pair and is 16 bytes; types 0, 2
+ * and 3 are 8; anything else has no payload at all. */
+typedef struct {
+    unsigned short nType;       /* 0x00 */
+    unsigned short nTime;       /* 0x02 */
+} FCV2_KEY;
+
+/* First key of an attribute's key list at or after fTime. Returns null
+ * if the attribute is not a key list, and the last key if fTime is past
+ * the end.
+ *
+ * NEAR MISS (4 diffs, 46 orig vs 44 built): the body is right; the
+ * original ends with two return sites -- a duplicated `jr ra` whose
+ * delay slot holds the fallthrough's `move v0,a0`, then an alignment nop
+ * and a bare `jr ra` shared by the two jumps -- where gcc emits the move
+ * ahead of a single shared return. */
+FCV2_KEY *FCV2_getKey(FCV2_ATTRIBUTE *pAttr, float fTime)
+{
+    FCV2_KEY *pKey;
+    int nNum;
+    int i;
+
+    if ((pAttr->nType & 0xF) != 3) {
+        return 0;
+    }
+    nNum = pAttr->nSize - 1;
+    pKey = (FCV2_KEY *)(pAttr + 1);
+    for (i = 0; i < nNum; i++) {
+        if (fTime <= pKey->nTime * fcv2Step) {
+            return pKey;
+        }
+        switch (pKey->nType) {
+        case 0:
+        case 2:
+        case 3:
+            pKey = (FCV2_KEY *)((char *)pKey + 8);
+            break;
+        case 1:
+            pKey = (FCV2_KEY *)((char *)pKey + 16);
+            break;
+        default:
+            break;
+        }
+    }
+    return pKey;
+}
