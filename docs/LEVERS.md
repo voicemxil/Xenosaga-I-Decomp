@@ -951,7 +951,17 @@ an argument (`w->rib.nY = 48; eRibbonMain(&w->rib, 48);`), or for a field
 it stores into another struct and also passes, naming it once is what
 merges them; repeated literals and repeated field reads each get their
 own materialisation for the argument. Six differing words in
-`tskUmnDataBaseKeyWord` were exactly this.
+`tskUmnDataBaseKeyWord` were exactly this. Naming is necessary but not
+always sufficient: gcc will happily park the pseudo in a `$t` register
+and copy it into the argument register at the call, one word per value.
+When it does, a `PIN` to the argument register is the honest fix -- it
+emits nothing, it degrades to a plain declaration in a portable build,
+and it encodes a real fact about the original (that one register served
+both roles). Watch the type while you are there: an `unsigned short`
+local needs an `andi 0xffff` to promote for the argument, so if the
+original has no `andi`, declare the local `int`. The same function can
+want it both ways -- `tskUmnDataBaseExWin` needs the cast, its neighbour
+`tskUmnDataBaseKeyWord` needs it gone. Read the original.
 
 **Write the POSITIVE form when the original merges the two negative
 arms.** `if (a == 0) x = 1; else if (b == 0) x = 1; else x = 0;` makes
