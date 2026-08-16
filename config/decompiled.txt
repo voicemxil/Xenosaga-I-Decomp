@@ -2709,3 +2709,4 @@ sefIsFinishEffect = 0x002E7A18, 0x90; // sef.c
 CheckWallAttr = 0x00322840, 0xD4; // Undu.c
 sceReadlink = 0x002072A0, 0x1C8; // sceFs.c
 sceSymlink = 0x002070C0, 0x1E0; // sceFs.c
+xglPadInitial = 0x0021BA68, 0x118; // xglPad.c
