@@ -221,3 +221,61 @@ char *RES_getScenePath(char *pDst, int nScene)
     pDst[2] = c;
     return pDst + 7;
 }
+
+extern unsigned char ModelPath;
+extern void RES_GetMdlFileNameSub(char *pDst);
+
+/* TODO: near-miss, 26 diffs at the right 46 words. `int c` read through an
+   `unsigned char *`, with every use spelled `(char)c`, is what produces
+   the original's lbu + sll 24 (+ sra 24) shapes and the `move v0,v1` that
+   copies the entry byte into the loop variable -- `char c` gives lb and 41
+   words, `unsigned char c` with a cast only on the comparison gives 43.
+   Residue: gcc CSEs the two `(char)c` sign-extensions across the loop back
+   edge and carries the shifted value in a second register, where the
+   original recomputes the shift at the loop top and uses a throwaway temp
+   for the exit test. Swept: LAUNDER / LAUNDER_V on c in three positions,
+   and goto (35), for(;;)+break (26) and while (32) loop forms. */
+/* Build the model file name. With ModelPath set, the name is built into a
+   scratch buffer and a "test\" directory is spliced in after the first
+   backslash on the way out. */
+void RES_GetMdlFileName(char *pDst)
+{
+    char szName[256];
+    unsigned char *p;
+    char *q;
+    int c;
+    int nDone;
+
+    if (ModelPath == 0) {
+        RES_GetMdlFileNameSub(pDst);
+        return;
+    }
+    RES_GetMdlFileNameSub(szName);
+    q = pDst;
+    p = (unsigned char *)szName;
+    nDone = 0;
+    c = *p;
+    if ((char)c == 0) {
+        return;
+    }
+    *q = c;
+    do {
+        /* the source pointer is unsigned char * and c is char: the lbu
+           plus the sll/sra sign-extension pair, and the `move` that
+           copies the loaded byte into the loop variable, are both that
+           type mismatch */
+        if ((char)c == '\\' && nDone == 0) {
+            q[5] = c;
+            nDone = 1;
+            q[1] = 't';
+            q[2] = 'e';
+            q[3] = 's';
+            q[4] = 't';
+            q += 5;
+        }
+        p++;
+        q++;
+        c = *p;
+        *q = c;
+    } while ((char)c != 0);
+}
