@@ -739,43 +739,6 @@ extern void GameResourceDump(int nFlag);
  * differently from source here (register alloc + block-duplication shape),
  * not just a scheduling tie-break. Parked per budget rule after 1 triage
  * pass; logic/results are believed correct. */
-/* Reset resource slot nNo: sum the still-referenced data sizes of every
- * slot from nNo on into it, clear the rest of the table past it, and
- * reset the cinematic sound-effect channel array */
-void GameResourceReset(int nNo)
-{
-    GAME_RESOURCE *p;
-    int i;
-    int sum;
-
-    sum = 0;
-    if (nNo < 0x80) {
-        for (i = nNo; i < 0x80; i++) {
-            sum += GameResource[i].nUnk04;
-        }
-    }
-    p = &GameResource[nNo];
-    p->nUnk04 = sum;
-    p->nUnk0C = -1;
-    p->nUnk08 = 0;
-    if (nNo + 1 < 0x80) {
-        for (i = nNo + 1; i < 0x80; i++) {
-            GameResource[i].nId = 0;
-            GameResource[i].nUnk04 = 0;
-            GameResource[i].nUnk08 = 0;
-            GameResource[i].nUnk0C = -1;
-        }
-    }
-    for (i = 0; i < 8; i++) {
-        D_004DCB40[i].nUnk00 = 0;
-        D_004DCB40[i].nUnk02 = 0;
-        xglSoundSendEffect(0, 0, i + 4);
-        D_004DCB40[i].nUnk04 = 0;
-    }
-    GameResourceDump(0);
-    arcfilepreload = 0;
-}
-
 extern int arcfilepreload;
 extern char scene_txt_buffer[];
 extern char *RES_getScenePath(char *pPath, int nScene);
