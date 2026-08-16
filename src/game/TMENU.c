@@ -694,6 +694,51 @@ extern void TW_setPos(TMENU *t);
  * ee-as pads two slots after the last mtc1 of each float-constant pair
  * before the first COP1 compute and this toolchain emits only the first
  * hazard nop.
+ *
+ * SECOND SWEEP (30 further variants, all measured, NONE below 26):
+ *
+ *  - Clusters 3 and 4 are INERT to source form.  Every one of these
+ *    emits BYTE-IDENTICAL code to the current spelling: both nFlags
+ *    stores volatile; the volatile store with the mask folded in;
+ *    `nFlags &= ~2` as its own statement; the dead pText148 read moved
+ *    between the two stores; the dead read spelled
+ *    `*(volatile int *)&t->pText148`; dropping the `n` local so both
+ *    fade tests read t->h30; `if (t->h30 >= 8)` instead of
+ *    `if (nPhase >= 8)`; and the fade arm rotation p/nPhase/u14/h30
+ *    (A,C,B,D,E and the decl-then-assign forms of the open arm too).
+ *    gcc normalises all of them before scheduling, so no amount of
+ *    respelling moves the $v0/$a0 and $v0/$v1 rotations.
+ *
+ *  - Things that are strictly WORSE, do not retry: putting the volatile
+ *    store's mask on a reload of t->nFlags (35); `int nPhase` (27);
+ *    `short nB` (35); `(nA << 8) | (nB << 16)` operand order (33);
+ *    reusing `n` as the phase variable, `n = n + 1` (39) or
+ *    `n = t->h30 + 1` (33); `nPhase = n + 1` (32); the read-modify-write
+ *    `t->h30 = t->h30 + 1` with `if (t->h30 >= 8)` (36 -- the compare
+ *    reloads with `lh`, it does NOT CSE back to the stored register);
+ *    the nB test reading `n` while the nA test reads `n` (179);
+ *    open-arm orders A,B,D,E,C (32) / A,C,D,E,B (35) / A,B,D,C,E (28);
+ *    fade-arm order p,u14,nPhase (83).
+ *
+ *  - Two spellings that LOSE the store (length blows up to ~205), i.e.
+ *    the volatile must be on the STORE and on the POINTER OBJECT:
+ *    `*(volatile unsigned char **)&t->pText148` (volatile on the
+ *    pointee, so the read is dead and deleted) and a volatile LOAD with
+ *    plain stores.  `*(unsigned char *volatile *)&t->pText148` is the
+ *    only spelling of the dead read that survives, along with the
+ *    equivalent `*(volatile int *)&t->pText148`.
+ *
+ *  - The open arm (cluster 1) IS source-order sensitive -- four of the
+ *    seven orders tried move the diff count -- but no order reaches
+ *    below 26, so it really is the --rotate site described above.
+ *
+ * CONCLUSION: clusters 1 and 2 (5 words) are fixer-flag sites and
+ * clusters 3 and 4 (21 words) are pure register naming that this
+ * toolchain will not produce from any C spelling found so far.  The
+ * next thing to try is NOT another respelling -- it is either a
+ * --swap-regs site (which would mask, so only after clusters 1/2 are
+ * flagged and the residue is provably nothing but naming) or a
+ * different steering device for the double nFlags store entirely.
  */
 /* Per-frame state machine for a default text menu.  h14 is the mode and
  * h30 the phase counter; the mode is dispatched twice, once for the
@@ -924,27 +969,3 @@ void TMENU_updateDefault(TMENU *t)
     }
 }
 
-/* TMENU_updateDefault @ 0x0025F410, 0x734 bytes (461 instructions) -- NOT
- * WRITTEN.  Notes for whoever picks it up:
- *
- * m2c refuses it ("two delay slot instructions in a row", the
- * beql/bgezl pair at +0x318), so it has to be read from disasm.py.
- *
- * It is a state machine with THREE computed-goto dispatches, all keyed
- * on 16-entry tables in .rodata.  Dumped from the ROM image:
- *
- *   switch (t->h14 - 1)          table 0x004C1C80, targets (fn+):
- *     0 ->0x0b8  1 ->0x160  2..11 ->end  12 ->0x150  13,14 ->0x140
- *     15 ->0x088
- *   switch (t->h30)              table 0x004C1CC0, targets (fn+):
- *     0 ->0x438  1 ->0x410  2..11 ->0x710  12 ->0x3e0  13 ->0x1f0
- *     14 ->0x1c0  15 ->0x4a8
- *   switch (t->queue.h0A - 128)  table 0x004C1D00, six live entries
- *
- * So h14 is a top-level mode (2..11 idle) and h30 (a new short at
- * offset 0x30, cleared by several arms) is the per-mode phase counter.
- * It calls xglSoundEffectNormalID, MSG_queueGetInfo, MSG_queuePop,
- * MSG_queueReset, TW_setPos and TMENU_dispose, and it reads the pad
- * through the global at 0x00490D90 (+0x32 and +0x34 bit tests).
- * Offsets touched that this file does not name yet: 0x30 (short),
- * 0x68 (byte), 0xE0/0xE2/0xE8/0xEA/0xF4 inside the queue block. */
