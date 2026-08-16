@@ -194,7 +194,6 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
-    "update.c": " --swap-into-slot updateCursor:10,updateCursor:15,updateCursor:11,updateCursor:16",
     "tskUmnBgCube.c": " --as-g0 --fp-pair-hazard tskUmnBgCubeMain",
     "sdv.c": "--branch-unlikely sdvScheduleSound:1",
     "File.c": "--branch-unlikely FileObjectJpegDecChange:1 --swap-adjacent FileObjectJpegDecChange:3",

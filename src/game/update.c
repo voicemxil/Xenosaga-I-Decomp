@@ -10,7 +10,7 @@
 typedef int TI __attribute__((mode(TI)));
 
 typedef struct {
-    u8 pad000[0x2];                 /* 0x00 */
+    u16 nKey;                       /* 0x00 */
     u16 nTrigger;                   /* 0x02 */
     u8 pad004[0x4];                 /* 0x04 */
     s8 nX;                          /* 0x08 */
@@ -36,16 +36,18 @@ typedef struct UPDACTOR {
 } UPDACTOR;
 
 typedef struct {
-    u8 pad000[0x4];                 /* 0x00 */
+    int nSel;                       /* 0x00 */
     int nMode;                      /* 0x04 */
     int nActor;                     /* 0x08 */
-    u8 pad00C[0x4];                 /* 0x0C */
+    int nSpeed;                     /* 0x0C */
     float fPos[4];                  /* 0x10 */
     u8 pad020[0x30 - 0x20];         /* 0x20 */
     int nHold;                      /* 0x30 */
     UPDACTOR *pSel;                 /* 0x34 */
     u8 pad038[0x40 - 0x38];         /* 0x38 */
     float fOfs[4];                  /* 0x40 */
+    void (*pFunc)(int);             /* 0x50 */
+    int nFuncArg;                   /* 0x54 */
 } CURSOR;
 
 typedef struct {
@@ -65,7 +67,9 @@ float ball2point(float *pPos, float *pBall, float fRadius);
 void ACT_updateSequence(UPDACTOR *pActor);
 
 typedef struct {
-    u8 pad000[0x170];               /* 0x000 */
+    u8 pad000[0xD0];                /* 0x000 */
+    float fRot[3];                  /* 0x0D0 */
+    u8 pad0DC[0x170 - 0xDC];        /* 0x0DC */
     float fMatrix[16];              /* 0x170 */
 } UPDCAMERA;
 
@@ -272,5 +276,200 @@ void updateCursorMode2(void)
                 pAct++;
             }
         }
+    }
+}
+
+extern int cursorMode;
+extern int toolFlags;
+extern char *cursorModeName[];
+
+void PAD_getKey(KEYDATA *pKey, int nPad, int nMask);
+void changeCameraMode(void);
+void updateCursorMode0(void);
+void updateCursorModePlane(void);
+int fptodp(float f);
+int sprintf(char *pBuf, const char *pFmt, ...);
+void xglFontDebugPrintf(int nX, int nY, const char *pFmt, ...);
+
+/* TODO: near-miss (244/244 words, 27 diffs, all schedule/tie-break).
+ * Three clusters remain:
+ *   1. `cursorMode = -1' after changeCameraMode lands in $v0 where the
+ *      original uses $v1 -- gcc reuses the register the dead cursorMode
+ *      load was in.
+ *   2. The `nTrigger & 0x400' test: the original hoists its `andi' into
+ *      the preceding `beqz' delay slot, ours puts the cursor.fPos
+ *      address materialisation there instead, because gcc splits that
+ *      address as %hi(cursor) + (%lo(cursor) + 16) rather than folding
+ *      the +16 into one %hi/%lo pair the way the original does.
+ *   3. Both sprintf call sites set up the same five argument registers in
+ *      a different order: the original leaves `move $a0,$sp' for the
+ *      call's delay slot, gcc emits it second and puts $t0 (or $a2) there.
+ *
+ * Swept: nX/nY/nZ camera-reset store order (all six -- (0,1,2) is best);
+ * pRot at function scope vs inside the print block; one shared format
+ * pointer vs two (TWO is worth 16 diffs -- one variable reused for both
+ * strings gets $s4 and pushes every other callee-saved assignment along);
+ * the format strings inline at the call (three words short); and the
+ * fptodp results as named locals vs nested directly in the sprintf call
+ * (identical output).  --swap-into-slot on the third fptodp of each block
+ * (jal sites 10 and 15) is worth 4 and on the sprintfs (11, 16) another 2,
+ * getting to 21, but they do not finish it, so no flags are registered --
+ * the a0/t0 cluster needs a three-way rotate across the jal that
+ * --swap-into-slot cannot express.
+ *
+ * Top of the debug free-cursor: read the pad with whichever button mask
+ * this tool mode wants, let L1/R1 walk the camera mode while SELECT or
+ * START is held (and the camera-move speed otherwise), then dispatch to
+ * the per-mode handler and print the cursor and camera positions.
+ *
+ * The three &cursor materialisations in the camera-speed arm each come
+ * from their own block-local pointer, but the whole run of tests after
+ * xglStudioGetCamera shares ONE -- which is the shape the original has,
+ * and the two are not interchangeable. */
+void updateCursor(int nTool)
+{
+    char szBuf[256];
+    UPDCAMERA *pCamera;
+    KEYDATA *pKey;
+    float *pPos;
+    float *pRot;
+    int n;
+    void (*pFunc)(int);
+
+    pKey = &keyData;
+    switch (nTool) {
+    case 0:
+        toolFlags = 0;
+        PAD_getKey(pKey, 0, 0xF7FF);
+        break;
+    case 1:
+        toolFlags = 1;
+        PAD_getKey(pKey, 0, 0x600);
+        break;
+    case 2:
+        toolFlags = 1;
+        PAD_getKey(pKey, 0, 0x400);
+        break;
+    case 3:
+        toolFlags = 0;
+        PAD_getKey(pKey, 0, 0x57BF);
+        break;
+    }
+    if (pKey->nKey & 0xA0) {
+        n = cursorMode;
+        if (n < 0) {
+            n = cursor.nSel;
+            cursorMode = n;
+        }
+        if (pKey->nTrigger & 0x1000) {
+            n++;
+            cursorMode = n;
+        }
+        if (pKey->nTrigger & 0x4000) {
+            n--;
+            cursorMode = n;
+        }
+        if (n < 0) {
+            n = 4;
+            cursorMode = n;
+        }
+        if (n >= 5) {
+            cursorMode = 0;
+        }
+    } else {
+        if (cursorMode >= 0) {
+            cursor.nSel = cursorMode;
+            changeCameraMode();
+            cursorMode = -1;
+        }
+        if (pKey->nTrigger & 0x1000) {
+            CURSOR *p = &cursor;
+
+            p->nSpeed++;
+        }
+        if (pKey->nTrigger & 0x4000) {
+            CURSOR *p = &cursor;
+
+            p->nSpeed--;
+        }
+        {
+            CURSOR *p = &cursor;
+
+            p->nSpeed &= 7;
+        }
+    }
+    xglStudioGetCamera(&pCamera, 0);
+    pPos = cursor.fPos;
+    if (pKey->nTrigger & 0x200) {
+        pPos[0] = 0.0f;
+        pPos[1] = 0.0f;
+        pPos[2] = 0.0f;
+    }
+    if (pKey->nTrigger & 0x400) {
+        UPDCAMERA *pc = pCamera;
+
+        pc->fRot[0] = 0.0f;
+        pc->fRot[1] = 0.0f;
+        pc->fRot[2] = 4.0f;
+    }
+    {
+        CURSOR *p = &cursor;
+
+        if (pKey->nTrigger & 8) {
+            p->nMode--;
+        }
+        if (pKey->nTrigger & 2) {
+            p->nMode++;
+        }
+        n = p->nMode;
+        if (n < 0) {
+            p->nMode = 2;
+            n = 2;
+        }
+        if (n >= 3) {
+            p->nMode = 0;
+        }
+        if (p->nSel != 4) {
+            switch (p->nSel) {
+            case 0:
+            case 1:
+            case 3:
+                updateCursorMode0();
+                break;
+            case 2:
+                updateCursorModePlane();
+                break;
+            }
+            updateCursorMode2();
+            if (toolFlags == 0) {
+                char *pFmt1;
+                char *pFmt2;
+
+                pFmt1 = "IX:%7.3f\nIY:%7.3f\nIZ:%7.3f";
+                pRot = pCamera->fRot;
+                sprintf(szBuf, pFmt1, fptodp(pPos[0]), fptodp(pPos[1]),
+                        fptodp(pPos[2]));
+                xglFontDebugPrintf(170, 170, szBuf);
+                pFmt2 = "PX:%7.3f\nPY:%7.3f\nPZ:%7.3f";
+                sprintf(szBuf, pFmt2, fptodp(pRot[0]), fptodp(pRot[1]),
+                        fptodp(pRot[2]));
+                xglFontDebugPrintf(170, 198, szBuf);
+            }
+        } else {
+            pFunc = p->pFunc;
+            if (pFunc != NULL) {
+                pFunc(p->nFuncArg);
+            }
+        }
+    }
+    n = cursorMode;
+    if (n < 0) {
+        n = cursor.nSel;
+    }
+    if (toolFlags == 0) {
+        CURSOR *p = &cursor;
+
+        xglFontDebugPrintf(4, 180, "%s %1d SPD:%1d", cursorModeName[n],
+                           p->nMode, p->nSpeed + 1);
     }
 }
