@@ -507,3 +507,58 @@ int HitCheckBoxUwamono(void *position, void *map_unit)
     }
     return 0;
 }
+
+extern int NyuruCircle();
+extern int NyuruMatrix();
+
+typedef struct HitNyuruProbe {
+    char pad_000[0x10];
+    HitAlignedVector position;      /* 0x10 */
+    char pad_020[0x10];
+    HitAlignedVector move;          /* 0x30 */
+    char pad_040[0x9C0];
+} HitNyuruProbe;
+
+/* Slide the probe along the unit's "nyuru" shape, restoring the probe and
+   cancelling the move when nothing was hit. */
+int HitCheckNyuru(HitNyuruProbe *probe, HitMapUnit *unit)
+{
+    HitAlignedVector savePosition;
+    HitAlignedVector saveMove;
+    int nUnit;
+    /* $v0: the call result is tested and then reused as the return value
+       0; anywhere else costs a `move` after each call and another to set
+       up the return. */
+    PIN(int nOk, "$2");
+
+    savePosition = probe->position;
+    saveMove = probe->move;
+    nUnit = -1;
+    switch (unit->shape.active) {
+    case 1:
+        nOk = NyuruCircle(probe, unit);
+        break;
+    case 2:
+        nOk = NyuruMatrix(probe, unit, 0);
+        break;
+    default:
+        goto done;
+    }
+    if (nOk == 0) {
+        return 0;
+    }
+    nUnit = HitCheckMapUnit(probe);
+done:
+    nOk = -1;
+    if (nUnit != nOk) {
+        probe->position = savePosition;
+        probe->move = saveMove;
+        probe->position.value.x = probe->position.value.x - probe->move.value.x;
+        probe->position.value.z = probe->position.value.z - probe->move.value.z;
+        /* x before z: gcc reverses this pair of independent zero stores. */
+        probe->move.value.x = 0.0f;
+        probe->move.value.z = 0.0f;
+        return 0;
+    }
+    return 1;
+}
