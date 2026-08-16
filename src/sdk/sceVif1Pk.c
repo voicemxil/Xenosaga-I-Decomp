@@ -386,70 +386,99 @@ void sceVif1PkOpenDirectHLCode(Vif1Packet *pkt, unsigned int flags)
 }
 
 /* Add N 128-bit DIRECT data units to the VIF1 packet */
+/* Append N 128-bit DIRECT data units (two 64-bit halves each) to the packet.
+   sceVif1PkAddUpkData128N below is the same loop over the same instruction
+   stream; keep the two in step.
+
+   Three shape levers, none of them cosmetic:
+
+   (1) The walking store base `d` is a SEPARATE local from `dest`, taken
+       after the ++ and written back as `dest = d + 3`.  Without it gcc 2.9's
+       loop strength reduction folds the +4 and +12 into one `addiu +16`,
+       rewrites the four store offsets to -4/0/4/8 and inits dest+1 in the
+       preheader -- a 26-word divergence.  Splitting the pointer gives loop.c
+       a giv it will not combine, and the original's `move v0,a2` copy comes
+       back with it.
+   (2) `dest = d + 3` sits BETWEEN the first and second store through d.  The
+       original updates the pointer before it has finished storing (that is
+       why the copy is needed at all); putting the update first or last moves
+       the addiu off its slot.
+   (3) `h1 = (int)(hi >> 32)` is hoisted above the first store, exactly as in
+       the sceVif1PkAddUpkData128 sibling -- that is what puts lo in $v1 and
+       hi in $a0 instead of $a0/$a1.
+
+   The two PINs are steering only: gcc hands the hoisted 0xffffffff loop bound
+   $t2 and the pkt copy $t1, and the original has them the other way round;
+   `d` wants $v0, which it only takes when it is pinned. */
 void sceVif1PkAddDirectDataN(Vif1Packet *pkt, const long *src, unsigned int count)
 {
-/* TODO: near-miss (26 words).  The original loop body keeps TWO pointer
-       increments per iteration (`addiu a2,a2,4` ... `move v0,a2` +
-       `addiu a2,v0,12`, offsets 0/0/4/8) - the body below is written in that
-       split form.  gcc 2.9's loop strength reduction instead folds the two
-       increments into one `addiu +16`, rewrites the store offsets (-4...)
-       and inits `dest+1` in the preheader.  Tried: explicit `d = ++dest`
-       intermediate (reduced to a walking giv anyway), int-casting the
-       second increment (loop.c sees through it), goto-formed loop (kills
-       the LOOP notes: loses the alignment nop and the hoisted 0xffffffff,
-       though the increment pair then survives).  Needs a lever that makes
-       the walking-giv rewrite unprofitable while keeping loop notes. */
     unsigned int i = count - 1;
+    PIN(Vif1Packet *p, "$10");
 
+    PASSTHRU(p, pkt);
     if (count != 0)
     {
-        unsigned int *dest = pkt->current;
+        unsigned int *dest = p->current;
 
         do
         {
-            long lo = src[0];
-            long hi = src[1];
+            long lo, hi;
+            PIN(unsigned int *d, "$2");
+            int h1;
+
+            lo = src[0];
+            hi = src[1];
+            h1 = (int)(hi >> 32);
             dest[0] = (int)lo;
             dest++;
-            dest[0] = (int)(lo >> 32);
-            dest[1] = (int)hi;
-            dest[2] = (int)(hi >> 32);
-            dest += 3;
+            PASSTHRU(d, dest);
+            d[0] = (int)(lo >> 32);
+            dest = d + 3;
+            d[1] = (int)hi;
+            d[2] = h1;
             src += 2;
         }
         while (--i != 0xFFFFFFFF);
 
-        pkt->current = dest;
+        p->current = dest;
     }
 }
 
 /* Add multiple 128-bit UPK data units to the VIF1 packet */
+/* Add multiple 128-bit UNPACK data units to the packet.  Byte-identical body
+   to sceVif1PkAddDirectDataN above (same original instruction stream); the
+   three shape levers and the two PINs are explained there. */
 void sceVif1PkAddUpkData128N(Vif1Packet *pkt, const long *src, unsigned int count)
 {
-/* TODO: near-miss (26 words) - identical body to sceVif1PkAddDirectDataN
-       (same original instruction stream); same induction-variable folding
-       problem, see the analysis on that function. */
     unsigned int i = count - 1;
+    PIN(Vif1Packet *p, "$10");
 
+    PASSTHRU(p, pkt);
     if (count != 0)
     {
-        unsigned int *dest = pkt->current;
+        unsigned int *dest = p->current;
 
         do
         {
-            long lo = src[0];
-            long hi = src[1];
+            long lo, hi;
+            PIN(unsigned int *d, "$2");
+            int h1;
+
+            lo = src[0];
+            hi = src[1];
+            h1 = (int)(hi >> 32);
             dest[0] = (int)lo;
             dest++;
-            dest[0] = (int)(lo >> 32);
-            dest[1] = (int)hi;
-            dest[2] = (int)(hi >> 32);
-            dest += 3;
+            PASSTHRU(d, dest);
+            d[0] = (int)(lo >> 32);
+            dest = d + 3;
+            d[1] = (int)hi;
+            d[2] = h1;
             src += 2;
         }
         while (--i != 0xFFFFFFFF);
 
-        pkt->current = dest;
+        p->current = dest;
     }
 }
 
