@@ -192,6 +192,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "kernel.c": "--swap-adjacent PatchIsNeeded:8,PatchIsNeeded:10",
     "sceMpeg.c": "--swap-adjacent sceMpegReset:3",
     "TCAMERA.c": "--unfill-gcc-slots TCAMERA_mpackGetInterest --swap-regs TCAMERA_mpackGetInterest:2-3",
     "mpeg.c": "--swap-adjacent _sequenceHeader:26 --swap-into-slot _sequenceHeader:7,_sequenceHeader:12",
@@ -369,7 +370,7 @@ FILE_FIX_FLAGS = {
     # FUNC in asm order; see flip_branch_likely in fix_cc_asm.py).
     # scalbn needs one flip in EACH direction (its likely bit sits on the
     # wrong one of two adjacent branches).
-    "libm.c": ("--barrier-return-store fabs,__ieee754_fmod --as-g0 --fp-pair-hazard --barrier-branch-move --barrier-lo-load --rotate cos:27:2,sin:28:2 --pin-slot-nop cos:8,cos:10,sin:7,sin:9 --branch-likely sinf:2,cosf:2,__ieee754_atan2:2,__ieee754_rem_pio2:5,scalbn:6,__kernel_tanf:2,__ieee754_rem_pio2f:5,cos:3,sin:3 --branch-unlikely scalbn:7"),
+    "libm.c": ("--barrier-return-store fabs,__ieee754_fmod --as-g0 --fp-pair-hazard --barrier-branch-move --barrier-lo-load --rotate cos:27:2,sin:28:2 --pin-slot-nop cos:8,cos:10,sin:7,sin:9,__kernel_rem_pio2:32,__kernel_rem_pio2:42,__kernel_rem_pio2:43 --branch-likely sinf:2,cosf:2,__ieee754_atan2:2,__ieee754_rem_pio2:5,scalbn:6,__kernel_tanf:2,__ieee754_rem_pio2f:5,cos:3,sin:3 --branch-unlikely scalbn:7"),
     # _dtoa_r: `dpcmp(d.d, 0.0)`'s `a1 = 0` argument setup is left as a
     # separate instruction (with a genuine nop in the jal delay slot) in
     # the original, but gas's reorder pass steals it into the jal's delay

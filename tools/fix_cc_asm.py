@@ -1131,8 +1131,13 @@ def main(path, omitted_hazards, barrier_return_store=None,
             # never reorders across a macro expansion, so the call kept its
             # nop. Barrier the synthesized sequence in that case. (Same
             # class as the RE_CVT-before-call rule below.) Found on
-            # _dtoa_r's `d.d *= 10.` at $L416.
-            if re.match(r'^\t(jal|j)\t[A-Za-z_]', following):
+            # _dtoa_r's `d.d *= 10.` at $L416.  The same holds for a plain
+            # `b` to a local label -- gas steals the expansion tail into a
+            # branch delay slot just as happily as into a call's, and the
+            # original's macro boundary stopped both (libm.c's
+            # __ieee754_acos, the `pi_o_2 - (x - pio2_lo)` return at
+            # $L776) -- so the barrier covers b/$L targets too.
+            if re.match(r'^\t(jal|j|b)\t[A-Za-z_$]', following):
                 synth = "\t.set push\n\t.set noreorder\n" + synth + "\n\t.set pop"
             out.append(synth)
             continue
