@@ -2063,3 +2063,103 @@ void sevFreePtAllocator(int nHandle)
     p->nFree[nWrite] = nHandle;
     p->nWrite = (nWrite + 1) & 0x3FF;
 }
+
+/* --- SGs*: a GIFtag packet builder.  The packet record holds the write
+ * cursor in qwords, the qword index of the tag currently open, that
+ * tag's NLOOP, and the packet base.  Every field write reloads nQw and
+ * pBase because a store through pBase may alias the record itself. --- */
+
+typedef int SGS_T128 __attribute__((mode(TI)));
+
+/* volatile, and not for matching's sake: the packet these describe is
+ * being written by the GIF/DMA side too, so every access re-reads the
+ * cursor and the base.  It is also what reproduces retail's reload
+ * before every single field store. */
+typedef struct
+{
+    volatile int   nQw;      /* 0x00  write cursor, in qwords */
+    volatile int   nTagQw;   /* 0x04  qword index of the open GIFtag */
+    volatile int   nNloop;   /* 0x08  that tag's NLOOP */
+    char *volatile pBase;    /* 0x0C */
+} SGS_PKT;
+
+typedef struct { volatile int x, y, z, w; } SGS_QWI;
+typedef struct { volatile unsigned long long lo, hi; } SGS_QWD;
+typedef struct { volatile float s, t, q; int pad; } SGS_QWF;
+typedef struct { volatile short u, v; } SGS_QWH;
+
+void SGsInitGifPacket(SGS_PKT *p)
+{
+    p->nNloop = 1;
+    p->pBase = (char *)0x70000000;
+    p->nQw = 0;
+    p->nTagQw = 0;
+}
+
+void SGsOpenGifPacket(SGS_PKT *p, unsigned long long nPrim,
+                      unsigned long long nRegs, unsigned long long nNReg)
+{
+    int nQw = p->nQw;
+
+    p->nNloop = 1;
+    p->nTagQw = nQw;
+    ((SGS_QWD *)(p->pBase + nQw * 16))->hi = nRegs;
+    *(volatile unsigned long long *)(p->pBase + p->nQw * 16) =
+        (nPrim << 47) | (nNReg << 60) | 0x0000400000008000ULL;
+    p->nQw = p->nQw + 1;
+}
+
+void SGsCloseGifPacket(SGS_PKT *p)
+{
+    volatile unsigned long long *q = (volatile unsigned long long *)(p->pBase + p->nTagQw * 16);
+
+    *q = *q | p->nNloop;
+}
+
+void SGsAddReg(SGS_PKT *p, unsigned long long nReg, unsigned long long nData)
+{
+    ((SGS_QWD *)(p->pBase + p->nQw * 16))->lo = nData;
+    ((SGS_QWD *)(p->pBase + p->nQw * 16))->hi = nReg;
+    p->nQw = p->nQw + 1;
+}
+
+void SGsAddGifRGBA(SGS_PKT *p, SGS_T128 v)
+{
+    *(volatile SGS_T128 *)(p->pBase + p->nQw * 16) = v;
+    p->nQw = p->nQw + 1;
+}
+
+void SGsAddGifXYZ2(SGS_PKT *p, int nX, int nY, int nZ, int nW)
+{
+    nX = (nX << 4) + 0x7000;
+    nY = (nY << 4) + 0x7200;
+    *(int *)(p->pBase + p->nQw * 16) = nX;
+    *(int *)(p->pBase + p->nQw * 16 + 4) = nY;
+    *(int *)(p->pBase + p->nQw * 16 + 8) = nZ;
+    *(int *)(p->pBase + p->nQw * 16 + 12) = nW;
+    p->nQw = p->nQw + 1;
+}
+
+void SGsAddGifData(SGS_PKT *p, SGS_T128 v)
+{
+    *(volatile SGS_T128 *)(p->pBase + p->nQw * 16) = v;
+    p->nQw = p->nQw + 1;
+}
+
+void SGsAddGifSTQ(SGS_PKT *p, float fS, float fT, float fQ)
+{
+    ((SGS_QWF *)(p->pBase + p->nQw * 16))->s = fS;
+    ((SGS_QWF *)(p->pBase + p->nQw * 16))->t = fT;
+    ((SGS_QWF *)(p->pBase + p->nQw * 16))->q = fQ;
+    ((SGS_QWF *)(p->pBase + p->nQw * 16))->pad = 0;
+    p->nQw = p->nQw + 1;
+}
+
+void SGsAddGifUV(SGS_PKT *p, int nU, int nV)
+{
+    nU = nU << 4;
+    nV = nV << 4;
+    ((SGS_QWH *)(p->pBase + p->nQw * 16))->u = nU;
+    ((SGS_QWH *)(p->pBase + p->nQw * 16))->v = nV;
+    p->nQw = p->nQw + 1;
+}
