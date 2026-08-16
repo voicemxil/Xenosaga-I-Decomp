@@ -1044,3 +1044,60 @@ void ACT_pauseUpdate(void)
         }
     }
 }
+
+/* Cold-start every actor slot and its sequence block.
+
+   PARKED at 7 diffs, all in one register tie-break. gcc hoists the 32 and
+   the ACT_updateDefault address out of the second loop into $s4/$s5 but
+   assigns them the opposite way round to the original, which drags the
+   `li 63` counter init to a different slot in the preheader. The two
+   fields' source positions swap the STORE order and the register mapping
+   together, so neither ordering reaches the original's `32 -> $s5,
+   ACT_updateDefault -> $s4` with stores at offset 0 then 4.
+
+   Swept: all eight field orders in the second loop body (VFSKUECP below
+   is the floor at 7; the next best is 8), nFlags/pUpdate adjacent swap,
+   separate loop counters for the two loops (18), declaration order of
+   p/a/i (no effect), hoisting either value into a plain local before the
+   loop (9 and 29), and pinning both to $s4/$s5 (29 -- the pins are
+   ignored on plain stores and reshape the loop instead).
+
+   Two things here ARE load-bearing and must not be "tidied": `a = actor`
+   belongs BEFORE the first loop (it is what materialises the actor base
+   in the prologue rather than in the second loop's preheader, 35 diffs ->
+   7), and the sequence loop deliberately skips f08 and f10. */
+void ACT_initSequence(void)
+{
+    ACT_SEQUENCE *p;
+    ACTOR *a;
+    int i;
+
+    a = actor;
+    p = actSequence;
+    for (i = 0x3F; i >= 0; i--, p++) {
+        p->f00 = 0;
+        p->f04 = 0;
+        p->f0C = 0;
+        p->f14 = 0;
+        p->f18 = 0;
+        p->f1C = 0;
+        p->f20 = 0;
+        p->f24 = 0;
+        p->f28 = 0;
+        p->f2C = 0;
+        p->f30 = 0;
+    }
+    for (i = 0x3F; i >= 0; i--, a++) {
+        a->nVMObject = 0;
+        a->nFlags = 32;
+        a->nSignal = 0;
+        a->nUnk088 = 0;
+        a->pUpdate = ACT_updateDefault;
+        a->nUnk008 = 0;
+        a->nChildNum = 0;
+        a->pParent = 0;
+        UnduParamInit(&a->nUndu);
+        a->nShadowType = 1;
+        a->nShadowSize = 80;
+    }
+}
