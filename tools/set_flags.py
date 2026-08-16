@@ -98,6 +98,10 @@ def main():
                     help="assembler-only flags (see configure.py asflags_for);\n`-G0' is what stops gas pooling a li.s float literal in .lit4")
     ap.add_argument("--replace", action="store_true",
                     help="allow --fix to DROP flags the entry already has")
+    ap.add_argument("--expect", metavar="VALUE",
+                    help="refuse the edit unless the entry currently holds "
+                         "VALUE (use \"\" for absent). Guards against another "
+                         "agent having changed it since you ran --show.")
     ap.add_argument("--unset-cflags", metavar="FILE.c")
     ap.add_argument("--unset-fix", metavar="FILE.c")
     ap.add_argument("--unset-asflags", metavar="FILE.c")
@@ -138,6 +142,20 @@ def main():
         # flags already there -- and a dropped flag does not fail, it just
         # un-matches functions nobody is looking at. Refuse to lose one
         # unless the caller says so.
+        # --show releases the lock before you decide, so an entry can change
+        # between reading it and acting on it. An agent lost another
+        # agent's freshly-added "sceTty.c" line to an --unset that way:
+        # the unset removed whatever was there NOW, not what had been seen.
+        # --expect closes that window.
+        if args.expect is not None:
+            for kind, key, _value in ops:
+                cur = literals(text, DICTS[kind]).get(key, "")
+                if cur != args.expect:
+                    sys.exit("REFUSED: %s[%r] is currently %r, not the %r you "
+                             "expected -- another agent changed it since your "
+                             "--show. Re-read and decide again."
+                             % (DICTS[kind], key, cur, args.expect))
+
         for kind, key, value in ops:
             if kind == "fix" and value:
                 cur = literals(text, DICTS["fix"]).get(key, "")
@@ -180,7 +198,9 @@ def main():
                         end += 1
                     if end < len(text) and text[end] == "\n":
                         end += 1
+                    removed = literals(text, dname).get(key)
                     text = text[:start] + text[end:]
+                    print("REMOVED %s[%r] (was %r)" % (dname, key, removed))
                 else:                                 # replace just the value
                     vs, ve = span(lines, vnode)
                     text = text[:vs] + q(value) + text[ve:]
