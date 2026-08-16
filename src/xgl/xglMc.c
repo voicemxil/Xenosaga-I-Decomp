@@ -191,7 +191,7 @@ int xglMcRequest(int nId, int nCmd, MCPARAM *pParam, int *pResult)
     PIN(unsigned char *pSrc, "$5");
     PIN(char *pDst, "$4");
     PIN(int i, "$6");
-    int c;
+    PIN(int c, "$2");
     int n0;
     int n1;
     unsigned int nEnd;
@@ -226,25 +226,35 @@ int xglMcRequest(int nId, int nCmd, MCPARAM *pParam, int *pResult)
         if (pName == 0) {
             *(int *)pReq->aName = 0;
         } else {
+            /* Both pointers go through the zero-code tied passthrough:
+             * pDst as a plain assignment lets sched2 hoist the first
+             * `lbu` above the destination address computation, which is
+             * the reverse of the original. */
             PASSTHRU(pSrc, pName);
-            pDst = pReq->aName;
+            PASSTHRU(pDst, pReq->aName);
             c = *pSrc;
             PASSTHRU(c, c);
+            /* The original's loop is rotated: entry jumps straight to
+             * the store/test at the bottom.  Written as a for/while,
+             * gcc 2.96 peels the first iteration instead and the
+             * function comes out two words long. */
             i = 0;
-            for (;;) {
-                *pDst = c;
-                if ((c << 24) == 0) {
-                    break;
-                }
-                i++;
-                pSrc++;
-                if (i >= 108) {
-                    break;
-                }
-                pDst++;
-                c = *pSrc;
-                PASSTHRU(c, c);
+            goto test;
+body:
+            i++;
+            pSrc++;
+            pDst++;
+            if (i >= 108) {
+                goto done;
             }
+            c = *pSrc;
+test:
+            *pDst = c;
+            if ((c << 24) != 0) {
+                goto body;
+            }
+done:
+            ;
         }
         break;
     case 1:
