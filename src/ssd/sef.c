@@ -98,9 +98,13 @@ int sefCheckLoad(void) {
 }
 
 typedef struct { float x, y; } CUBEPOS;
-extern void sefGetCubePosBtm(void *p);
+/* sefGetCubePosBtm really takes two arguments (see its definition
+ * below); this caller passes only the destination and leaves $a1 as it
+ * found it, so call it through a one-argument pointer type rather than
+ * declaring a conflicting prototype. */
+extern void sefGetCubePosBtm(void *pDst, void *pSize);
 void sefGetCubePosTop(CUBEPOS *p) {
-    sefGetCubePosBtm(p);
+    ((void (*)(void *)) sefGetCubePosBtm)(p);
     p->y = -p->y;
 }
 
@@ -1600,4 +1604,51 @@ void sefGetSpherePos(SEF_VEC4 *pDst, float fRadius)
         "sqc2 $vf2, 0(%0)\n"
         ".set reorder"
         : : "r"(pDst), "m"(aRnd[0]), "f"(fHalf), "f"(fRadius) : "$2", "memory");
+}
+
+/* --- VU0 macro-mode vector helpers used by the cube/range samplers.
+ * All four are genuine hardware: the quadword moves and the .xyz-masked
+ * ops have no C equivalent. --- */
+#define VU_ITOF(d, s) \
+    PS2_ASM(".set noreorder\n lqc2 $vf1, 0(%1)\n" \
+            "vitof0.xyzw $vf1, $vf1\n sqc2 $vf1, 0(%0)\n" \
+            ".set reorder" : : "r"(d), "r"(s) : "memory")
+#define VU_MUL(d, a, b) \
+    PS2_ASM(".set noreorder\n lqc2 $vf1, 0(%1)\n lqc2 $vf2, 0(%2)\n" \
+            "vmul.xyz $vf1, $vf1, $vf2\n sqc2 $vf1, 0(%0)\n" \
+            ".set reorder" : : "r"(d), "r"(a), "r"(b) : "memory")
+#define VU_SUB(d, a, b) \
+    PS2_ASM(".set noreorder\n lqc2 $vf1, 0(%1)\n lqc2 $vf2, 0(%2)\n" \
+            "vsub.xyz $vf1, $vf1, $vf2\n sqc2 $vf1, 0(%0)\n" \
+            ".set reorder" : : "r"(d), "r"(a), "r"(b) : "memory")
+#define VU_SCALE(d, a, f) \
+    PS2_ASM(".set noreorder\n lqc2 $vf1, 0(%1)\n mfc1 $8, %2\n" \
+            "qmtc2 $8, $vf2\n vmulx.xyz $vf1, $vf1, $vf2x\n" \
+            "sqc2 $vf1, 0(%0)\n .set reorder" \
+            : : "r"(d), "r"(a), "f"(f) : "$8", "memory")
+
+/* A random point on the bottom face of a box of integer half-extents
+ * pSize, scaled to world units. */
+void sefGetCubePosBtm(void *pDst, void *pSize)
+{
+    SEF_VEC4 vSize;
+    SEF_VEC4 vRnd;
+    unsigned int nA;
+    unsigned int nB;
+    unsigned int nC;
+
+    VU_ITOF(&vSize, pSize);
+    vRnd.w = 0.0f;
+    nA = sefRandSeed * 1103515245 + 12345;
+    vRnd.x = (float) (int) ((nA >> 16) & 0x7FFF) * (1.0f / 32767.0f);
+    nB = nA * 1103515245 + 12345;
+    vRnd.y = (float) (int) ((nB >> 16) & 0x7FFF) * (1.0f / 32767.0f);
+    nC = nB * 1103515245 + 12345;
+    vRnd.z = (float) (int) ((nC >> 16) & 0x7FFF) * (1.0f / 32767.0f);
+    sefRandSeed = nC;
+    VU_MUL(&vRnd, &vRnd, &vSize);
+    vSize.y = 0.0f;
+    VU_SCALE(&vSize, &vSize, 0.5f);
+    VU_SUB(&vRnd, &vRnd, &vSize);
+    VU_SCALE(pDst, &vRnd, 0.1f);
 }
