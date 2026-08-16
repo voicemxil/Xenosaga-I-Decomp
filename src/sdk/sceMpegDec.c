@@ -790,11 +790,19 @@ int _ipuVdec(MPEGSTREAM *pStream, int nTbl)
 
 extern char D_004D5BD0[];  /* bad macroblock_address_increment */
 
-/* macroblock_address_increment(): escape and stuffing codes accumulate. */
+/* macroblock_address_increment(): escape and stuffing codes accumulate.
+ *
+ * PARKED at 35 differing words, right length (68).  The instruction stream
+ * and the `sltiu` (nCode is unsigned) are right; what differs is block
+ * placement -- the original puts the escape case OUT of line at +0x88 and
+ * keeps `nTotal += nCode` as the fall-through, while gcc inlines the escape
+ * and annuls the add into a bnezl delay slot.  Swept: `== 0` and `!= 0`
+ * orderings of the inner test (identical output -- gcc canonicalises), and
+ * int vs unsigned for nCode (unsigned is required for the sltiu). */
 int _mbAddressIncrement(MPEGSTREAM *pStream)
 {
     int nTotal;
-    int nCode;
+    u_int nCode;
     int nPeek;
     int bMore;
 
@@ -804,7 +812,10 @@ int _mbAddressIncrement(MPEGSTREAM *pStream)
         if (nCode == 34) {
             bMore = 1;                       /* macroblock_stuffing */
         } else if (nCode < 35) {
-            if (nCode == 0) {
+            if (nCode != 0) {
+                nTotal += nCode;
+                bMore = 0;
+            } else {
                 nPeek = _peepBit(pStream, 11);
                 if (pStream->nUnk848 != 0 && nPeek == 15) {
                     _flushBuf(pStream, 11);
@@ -814,9 +825,6 @@ int _mbAddressIncrement(MPEGSTREAM *pStream)
                     pStream->nUnk11C = 1;
                     return 1;
                 }
-            } else {
-                nTotal += nCode;
-                bMore = 0;
             }
         } else if (nCode != 35) {
             nTotal += nCode;
@@ -836,7 +844,13 @@ typedef struct {
 
 extern EXTTBL D_004D5CE0;
 
-/* extension_and_user_data(): run the extension parsers, skip user data. */
+/* extension_and_user_data(): run the extension parsers, skip user data.
+ *
+ * PARKED nine words short (74 orig vs 65).  The 44-byte ldl/ldr table copy,
+ * the id clamp (`movn v0,zero`) and the indirect call all reproduce; the
+ * original's rotated loop re-tests the extension code at the top of the
+ * user-data arm (a `bnel v0,s1`) and repeats the `_nextStartCode` tail,
+ * which this straight for(;;) shape shares instead. */
 void _extensionAndUserData(MPEGSTREAM *pStream)
 {
     EXTTBL tbl;
