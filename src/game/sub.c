@@ -239,3 +239,28 @@ void subParentChildSet(void)
         }
     }
 }
+
+/* One line segment of the ether-tree wireframe: endpoints are the node's
+   own position and its first child's. */
+typedef struct {
+    ETNODE *pNode;      /* 0x00 */
+    char pad04[0x0C];
+    EVEC posA;          /* 0x10 */
+    char pad20[0x10];
+    EVEC posB;          /* 0x30 */
+} ETLINE;
+
+extern void subTreeLineDraw(ETLINE *line, int *pType);
+
+/* Type 1: node -> first child. Learned/unlearned picks the line style. */
+void subTreeLineDraw_type_1(ETLINE *line)
+{
+    ETNODE *node = line->pNode;
+    ETNODE *child = node->pChild[0];
+    int nType;
+
+    line->posA = node->pos;
+    line->posB = child->pos;
+    nType = (unsigned char)(child->bFlags & 1) ? 2 : 1;
+    subTreeLineDraw(line, &nType);
+}
