@@ -2105,3 +2105,66 @@ costs 47 words by renaming every callee-saved register from the dispatch
 onward. When a tail store appears in some arms and not others, try both
 placements per arm, not one policy for the function.
 
+
+---
+
+## From the character/collision sweep (Char, Hit, Undu, sub)
+
+**Assign a built vector's X before its Y, even though the stores come out
+Y-first.** Four corner points built as `c.y = ...; c.x = ...; c.z = ...`
+compiled 15 words worse EACH than `c.x; c.y; c.z`, though gcc emits the Y
+store first in both. Writing the source in the order the assembly shows is
+exactly wrong here: 84 diffs to 5 in `HitCheckCorner`.
+
+**A pointer read placed BETWEEN two struct copies decides whether its `lw`
+lands before or after the copies' stores.** `pos = u->position; axis =
+u->direction; bounds = u->bounds;` puts the `lw axis` in the middle of the
+`ld`/`sd` block, where reading `axis` after both copies leaves it after the
+last `sd`. Worth 4 words, and the last one fell to
+`--rotate FUNC:N:5` -- a window rotation over four independent stores and
+one independent load, which is the shape `--swap-adjacent` cannot express.
+
+**Do NOT hoist a struct field into a local across a call.** `radius =
+bounds.value.radius` before four calls makes gcc keep it in callee-saved
+`$f20/$f21` and grows the frame 16 bytes; naming `bounds.value.radius` at
+every use re-reads it from the local stack copy, which is what retail does.
+
+**Declare a struct copy first but ASSIGN it later.** Declaration order picks
+the stack SLOT, assignment order picks the COPY order, and retail wants them
+opposite in this family: `HitAlignedBounds bounds;` declared before the
+position (so it owns sp+0) and assigned after it (so the position is copied
+first).
+
+**Three separate `return 0` statements beat one wrapping `if`.** An early
+`if (count == 0) return 0;` materialises the zero in the branch's delay slot
+(`beqz s4,ret; move v0,zero`); wrapping the body in `if (count != 0) { ... }`
+sends that case to the shared exit and costs 2 words. The same pattern --
+retail materialising the return-0 at the TOP of the function and both early
+exits sharing it -- shows up in `HitCheckBoxCorner` and
+`UnduCheckSubHeightCheck`; a `result` local returned from every exit does
+NOT reproduce it, it only adds a `move v0,result` at the tail.
+
+**An unsigned switch index gives `sltiu` for the decision tree's range
+test**, a signed one gives `slti`. One word, and it is a type fix, not a
+tie-break.
+
+**Compute a multi-term test into LOCALS when retail evaluates all the terms
+before branching.** Three edge determinants written as the arms of a
+short-circuit `&&` chain are each recomputed after the previous branch;
+naming them `d1/d2/d3` first reproduces retail's one big FP block followed
+by three compares.
+
+### Axes that DON'T work (measured here)
+
+- **The switch decision tree's PIVOT is not source-controllable.** ee-gcc
+  balances a three-case tree at the MIDDLE case; retail's tree for the same
+  three cases is rooted at the FIRST. Swept: splitting a merged range test,
+  `LAUNDER_V` on per-store copies of the constant that shares the case
+  label's register, a redundant extra empty case, and a nested
+  `default: switch`. An if/else-if chain changes the arm LAYOUT (inline
+  fallthrough instead of arms after the join) without touching the pivot.
+- **A local array that never escapes will have its two loads CSEd.** Retail
+  loads `*p` again at the top of a slide loop where gcc reuses the value the
+  loop-bottom test loaded. `do/while` with an explicit guard, a plain
+  `while`, and reading the index into a local before advancing the pointer
+  all CSE identically.
