@@ -217,21 +217,18 @@ int ACT_jointGetMoveElementID(ACTOR *a)
 /* Look up an accessory bone id, caching the joint accessory table */
 int ACT_jointGetAccessories(ACTOR *a, unsigned int nJoint)
 {
-    /* TODO: near-miss (4/28 words) - the accessory-table store lands in the
-       branch delay slot instead of the sltiu. Tried: chained assignment
-       `pAcc = a->pAccessories = JNT_getAccessories(...)` (no change), a
-       memory barrier between the store and the reload (regressed to 16
-       diffs), register-pinning a fresh pAcc2 to $5 (no change), swapping
-       local-then-field-store order (no change, but source register for the
-       store flips v0->a1). Pure scheduler tie-break, not reachable from C
-       so far. */
+    /* The local is read back out of the field AFTER the if, not assigned
+       inside it. Assigning the local inside makes gcc store from the local's
+       register instead of the call result, and lets it thread the second
+       (redundant) null test away, which loses both the store's operand and
+       the delay-slot pick. */
     int nResult = -1;
-    int *pAcc = a->pAccessories;
+    int *pAcc;
 
-    if (pAcc == 0) {
-        pAcc = JNT_getAccessories(a->pJoint);
-        a->pAccessories = pAcc;
+    if (a->pAccessories == 0) {
+        a->pAccessories = JNT_getAccessories(a->pJoint);
     }
+    pAcc = a->pAccessories;
     if (pAcc != 0) {
         if (nJoint < 0x29) {
             nResult = pAcc[nJoint + 8];
@@ -315,10 +312,9 @@ void ACT_updateMotionCore(ACTOR *a, int nPause)
        counter or pp -- pinning the counter to $s2 (which is where it lands
        anyway) costs an extra instruction (55 words, 35 diffs), and pinning
        pp to $v0 or $s0 wrecks the frame layout (49 diffs).
-       What is left: the &p->pChild base lives in $a0 for us and $v0 in the
-       original, so the two `move` copies out of it differ. Tried PASSTHRU
-       into a $v0-pinned alias (12 diffs), the reverse PASSTHRU (49),
-       declaring pp pinned to $v0 (49), and LAUNDER on pp (9). */
+       The child base is taken inside each arm rather than once above the
+       flag test: hoisting it makes the pseudo live across the test, so gcc
+       gives it $a0 instead of reusing the $v0 the flag word just freed. */
     PIN(ACTOR *p, "$17");
     ACTOR **pp;
     int i;
@@ -329,12 +325,13 @@ void ACT_updateMotionCore(ACTOR *a, int nPause)
     }
     ACT_updateMotionSub(p, nPause);
     if (p->nChildNum > 0) {
-        pp = p->pChild;
         if ((p->nFlags & 0x1000) == 0) {
+            pp = p->pChild;
             for (i = 0; i < p->nChildNum; i++) {
                 ACT_updateMotionSub(pp[i], nPause);
             }
         } else {
+            pp = p->pChild;
             for (i = 0; i < p->nChildNum; i++) {
                 pp[i]->nFlags |= 0x1000;
             }
