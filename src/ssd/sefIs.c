@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* Battle scene effect/scheduler predicates (sefIs* family) */
 
 /* Whether an actor id falls in the boss-actor id range */
@@ -47,7 +49,8 @@ typedef struct
 {
     char pad000[0x80];
     int nID;            /* 0x80 */
-    char pad084[0x88 - 0x84];
+    char pad084[0x86 - 0x84];
+    short nLightOn;     /* 0x86 */
     short nHit;         /* 0x88 */
     short pad08A;
     short nSeSignal;    /* 0x8C */
@@ -144,5 +147,38 @@ void sefSetSeSignal(int nID)
             p->nSeSignal++;
             break;
         }
+    }
+}
+
+/* Push each battle actor's light-on state into bit 15 of the first word
+ * of the object it owns. The slot's 0x80 field doubles as that object
+ * pointer (it is what sefIsHitActor matches on), hence the cast. Note
+ * the original really does dereference it on the else path without a
+ * null check -- the guard is part of the condition, not of the store. */
+void sefSetLightFlag(void)
+{
+    BATTLE_ACTOR_TBL *t;
+    BATTLE_ACTOR *p;
+    int *pFlags;
+    int i;
+    int n;
+
+    t = &_battleActor;
+    i = 0;
+    if (t->nActors > 0) {
+        p = t->aActor;
+        do {
+            pFlags = (int *) p->nID;
+            *pFlags = (pFlags != 0 && p->nLightOn > 0)
+                          ? (*pFlags | 0x8000)
+                          : (*pFlags & ~0x8000);
+            n = t->nActors;
+            /* Steering: without the fence the EE scheduler issues the
+             * loop-counter increment before this reload of the actor
+             * count; the original issues the load first. */
+            LAUNDER_V(n);
+            p++;
+            i++;
+        } while (i < n);
     }
 }
