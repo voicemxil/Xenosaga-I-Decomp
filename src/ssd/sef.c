@@ -1354,3 +1354,31 @@ void sefCnvWaitEffectNo(SEF_WAITLINE *p)
         p->nEffectNo = 0;
     }
 }
+
+/* --- sefMemZero: zero a buffer, quadwords first and then a word tail.
+ * The 128-bit store is a TImode zero assignment (gcc materialises the
+ * zero into a register with `por`, which is what the original does
+ * here); both loops are counted down by their own counter, so the byte
+ * counts are computed up front. --- */
+typedef int SEF_T128 __attribute__((mode(TI)));
+
+void sefMemZero(void *pDst, int nSize)
+{
+    SEF_T128 *pQ;
+    int *pW;
+    int nQuads;
+    int nWords;
+    int i;
+
+    nQuads = nSize >> 4;
+    nWords = (nSize & 15) >> 2;
+    pQ = (SEF_T128 *)pDst;
+    pW = (int *)((char *)pDst + (nQuads << 4));
+    for (i = 0; i < nQuads; i++) {
+        *pQ = 0;
+        pQ++;
+    }
+    for (i = 0; i < nWords; i++) {
+        pW[i] = 0;
+    }
+}
