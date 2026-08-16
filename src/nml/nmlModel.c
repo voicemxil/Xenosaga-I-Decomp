@@ -120,7 +120,8 @@ typedef struct {
         PIXEL_ALPHA aParts[4];
         int aInt[4];
     } uPartsPixelAlpha;     /* 0x2D0 */
-    char pad2E0[0x10];
+    char pad2E0[0x30];
+    int aClip[4];           /* 0x310 */
 } LAYOUT;
 
 LAYOUT s_inLayout;
@@ -2106,4 +2107,75 @@ void nmlModelStealthEntry(void *pModel, void *pCamera)
         nmlFilterStealthMake(fSize, 0, pCamera, &s_inLayout);
         s_inLayout.nStealthNum++;
     }
+}
+
+float s_fClipScale = 1.3f;
+
+/* Clip-test the model's entry position against every enabled sub-window
+ * camera.  When only window 0 is in use a single test is made; otherwise
+ * each enabled window's result is recorded in aClip[] and the model is
+ * marked fully clipped (0x20000) only when every tested window clipped
+ * it. */
+/* TODO: near-miss, 17 diffs of 85 words, NOT registered.  Right length,
+ * right control flow, both loops and the whole tail are word-for-word
+ * correct; the ONLY problem is the entry block's schedule, and every
+ * later diff is that shift cascading.
+ *   orig: addiu sp / li v1,1 / 6x sd / lw v0,s_nClip(gp) / beq
+ *   ours: lw v1,s_nClip(gp) / addiu sp / li v0,1 / 5x sd / beq / sd ra
+ * i.e. the original has the constant ready first and the gp load late,
+ * and does not fill the beq slot with `sd ra`.  Downstream that also
+ * costs `lw v0,72(a0)` vs `lw a0,72(a0)` (gcc reuses the dying argument
+ * register only because it schedules that load early) and swaps the two
+ * lwc1's.
+ * Swept and REJECTED: a named local for s_nClip; `if (s_nClip == 1) goto
+ * done;` (both exactly 17); four spellings of the qword source address
+ * (&aFogDist[8], (char *)&s_inLayout + 0x1F0, a VEC4 * local, the
+ * aFogDist+8 pointer form -- all 17, the addiu is a masked %lo reloc and
+ * was never a diff); `vPos = *(VEC4 *)...` as a struct assign (87 words,
+ * much worse).
+ * Note LAYOUT really is 0x320 bytes (from the ELF symbol table), with an
+ * int aClip[4] at 0x310, and the entry position is the VEC4 overlaying
+ * aFogDist[8..11] at 0x1F0.
+ */
+int nmlModelCalcEntryClip(void *pModel)
+{
+    VEC4 vPos;
+    int i;
+    int nUse;
+    int nSum;
+    int nCount;
+
+    if (s_nClip != 1) {
+        vPos.q = *(TI *)&s_inLayout.aFogDist[8];
+        vPos.f[3] *= s_fClipScale;
+        if (*(int *)((char *)pModel + 0x48) != 0) {
+            nUse = 0;
+            for (i = 1; i < 4; i++) {
+                if (g_aSubWindow[i] != 0) {
+                    nUse = 1;
+                }
+            }
+            if (nUse != 0) {
+                nSum = 0;
+                nCount = 0;
+                for (i = 0; i < 4; i++) {
+                    if (g_aSubWindow[i] != 0) {
+                        int n;
+
+                        n = nmlModelCalcClipStudio(&vPos, i);
+                        nCount++;
+                        s_inLayout.aClip[i] = n;
+                        nSum += n;
+                    }
+                }
+                if (nSum == nCount) {
+                    s_inLayout.nStatus |= 0x20000;
+                }
+            } else if (nmlModelCalcClipStudio(&vPos, 0) != 0) {
+                s_inLayout.aClip[0] = 1;
+                s_inLayout.nStatus |= 0x20000;
+            }
+        }
+    }
+    return 0;
 }
