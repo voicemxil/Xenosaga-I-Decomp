@@ -1531,3 +1531,26 @@ local took it 90 diffs -> 16.
 is address 0x36B248, not 0x37B248 -- the `addiu` immediate is signed and
 the `lui` carries the compensation. Chasing the un-compensated address
 finds no symbol. (RSRC_info.)
+
+**Retail clears and copies quadwords with bare `sq $0` / `lq $2`+`sq $2`
+asm, not with C.** Any C spelling of a zero TImode store (`v.q = 0`,
+`*(TI *)p = 0`, a `TI` local assigned 0) goes through `por rd,$0,$0`
+followed by `sq rd` at a frame-pointer offset. The retail form is a
+one-instruction `sq $0, 0x0(%0)` asm macro -- which ALSO forces the
+destination address into its own register, reproducing the held-address
+form that the offset spelling loses. Same for a 16-byte copy: an asm
+`lq $2,0x0(%1)` / `sq $2,0x0(%0)` pair puts BOTH addresses in registers,
+where a C struct assignment reaches the source with an `lq off(base)`.
+Three nml functions needed this. A four-quadword clear is one macro with
+0x0/0x10/0x20/0x30 offsets, not four single-quadword macros -- four
+separate `"r"` operands become four separate `addiu`s.
+
+**A one-instruction asm block still gets stolen for the `jr ra` delay
+slot.** Wrap even a single `sq $0` in `.set noreorder` / `.set reorder`
+when it is the last thing in a function, or the trailing `.p2align` pad
+nop disappears and the function comes out one word short.
+
+**The original ELF keeps every static symbol name, including
+gp-relative small data.** `_gp` plus the symbol table turns a wall of
+`sw zero,-14140(gp)` into named globals in one pass -- worth doing before
+writing any global-heavy initialiser.
