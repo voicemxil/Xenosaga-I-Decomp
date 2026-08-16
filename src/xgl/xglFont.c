@@ -555,3 +555,100 @@ u_int xglFontGetKanjiClutUV(u_short nCode, u_int *pClut)
     }
     return (((nRow & 0x1F) * 3) << 23) + ((nCol * 5) << 6);
 }
+
+typedef unsigned long u_long;
+
+void xglFontFlushCore(void *pPk, u_char *pData);
+void xglFontReloadTexture(void *pPk, u_int nArg);
+void *xglPacketGetCurrent(void);
+void sceVif1PkAddDirectDataN(void *pPk, u_int nAddr, int nQwc);
+void sceVif1PkCloseDirectHLCode(void *pPk);
+
+/* TODO: near-miss (34 words, 123 built vs 125). Levers that got here:
+ * the scratchpad draw-state fields really are PLAIN literal casts
+ * (`*(char *)0x70000021 = 1;`) -- the `lui at` absolute-MEM expansion in
+ * the second block IS what the original has, unlike the volatile
+ * pointer form the DMA packet builders need -- but the FIRST four
+ * stores go through a `char *pDraw` so they share one base register the
+ * way the original does; the three 127 stores in DESCENDING offset
+ * order (0x16, 0x15, 0x14).
+ * Residue, both worth ~2 words each: (a) gcc CSEs the constant
+ * 0x70000000 of the three `*(void **)0x70000000` packet-pointer reads
+ * into a callee-saved register, where the original re-materialises
+ * `lui a0,0x7000` at each of the three sites -- that alone is the whole
+ * length difference; (b) the two function-static tables get addressed
+ * as one symbol + 96 instead of two %hi/%lo pairs (the same folding
+ * xglCameraTravelInit hit).
+ * Swept: volatile-qualified packet-pointer reads (35), both byte orders
+ * for the link `(pBase[1] << 8) + pBase[0]` (no change), ascending
+ * order for the three 127 stores (36). */
+/* Flush every ordering-table bucket into the current VIF packet: reset
+ * the scratchpad draw state, reload the font texture, walk the 16
+ * buckets' link chains, and in debug mode append the z-buffer and test
+ * register blocks before closing the packet */
+void xglFontFlush(void)
+{
+    static u_long zbuf[12] = {
+        0x1000000000008005UL, 0xEUL,
+        0x0000720000007000UL, 0x18UL,
+        0x01BF000001FF0000UL, 0x40UL,
+        0x0000000031000000UL, 0x4EUL,
+        0x0000000000070000UL, 0x47UL,
+        0x0000000000080070UL, 0x4CUL,
+    };
+    static u_long test[4] = {
+        0x1000000000008001UL, 0xEUL,
+        0x0UL, 0x3FUL,
+    };
+    char *pDraw;
+    u_short *pOT;
+    u_char *pBase;
+    u_int nOfs;
+    int i;
+
+    pDraw = (char *)0x70000000;
+    *FS.pStream = 0;
+    *(int *)(pDraw + 0x0C) = -1;
+    pDraw[0x16] = 127;
+    pDraw[0x15] = 127;
+    pDraw[0x14] = 127;
+    if (FS.nDebugMode != 0) {
+        *(short *)0x70000010 = 0;
+        *(short *)0x70000012 = 0;
+    } else {
+        *(short *)0x70000010 = 1792;
+        *(short *)0x70000012 = 1824;
+    }
+    *(char *)0x70000018 = 0;
+    *(char *)0x70000019 = 1;
+    *(char *)0x7000001A = -1;
+    *(char *)0x7000001B = 0;
+    *(char *)0x70000020 = 1;
+    *(char *)0x70000021 = 1;
+    *(char *)0x70000024 = 0;
+    *(char *)0x70000025 = 0;
+    *(char *)0x70000026 = 0;
+    *(char *)0x70000028 = 68;
+    *(char *)0x70000029 = 0;
+    *(char *)0x7000002A = -128;
+    *(short *)0x7000002C = 16;
+    *(short *)0x7000002E = 16;
+    *(void **)0x70000000 = xglPacketGetCurrent();
+    xglFontReloadTexture((void *)0x70000000, 0x80000001);
+    pOT = (u_short *)FS.aOT;
+    for (i = 15; i >= 0; i--) {
+        nOfs = *pOT;
+        while (nOfs != 0) {
+            pBase = (u_char *)FS.aOT + nOfs;
+            xglFontFlushCore((void *)0x70000000, pBase + 2);
+            nOfs = (pBase[0] + (pBase[1] << 8)) & 0xFFFF;
+        }
+        pOT += 2;
+    }
+    if (FS.nDebugMode != 0) {
+        sceVif1PkAddDirectDataN(*(void **)0x70000000, (u_int)zbuf, 6);
+        sceVif1PkAddDirectDataN(*(void **)0x70000000, (u_int)test, 2);
+    }
+    sceVif1PkCloseDirectHLCode(*(void **)0x70000000);
+    buffer_reset();
+}
