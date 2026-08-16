@@ -574,7 +574,7 @@ int scONGOSUBScript(SCTASK *o)
 }
 
 extern int _nowEvent;
-extern short _scMslCate[];
+extern short _scMslCate[4];
 extern void srsAnalyzeEftNo(short no, void *out, short *cate);
 
 int scMISSILEScript(SCTASK *o)
@@ -704,17 +704,21 @@ int scRRNDScript(SCOBJ *o)
     int reg = scGetCmdScript(o);
     int x = scGetNumScript(o);
     int y = scGetNumScript(o);
-    short range;
     int v;
     if (y < x) {
-        int t = y;
+        /* v does double duty: the swap temporary here and the random
+           value below, so both land in the same register. */
+        v = y;
         y = x;
-        x = t;
+        x = v;
     }
-    range = y - x;
+    /* y is reused as the range: one C local is one pseudo, so the range
+       inherits the upper bound's callee-saved register instead of needing
+       a fourth one (and a copy for the divide-by-zero trap check). */
+    y = (short)(y - x);
     v = 0;
-    if (range != 0) {
-        v = (short)(rand() % range);
+    if (y != 0) {
+        v = (short)(rand() % y);
     }
     scSetReg(reg, v + x);
     return 1;

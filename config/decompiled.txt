@@ -2623,3 +2623,5 @@ sceCdNcmdDiskReady = 0x0020D3B0, 0x98; // sceCd.c
 sceCdStatus = 0x0020E058, 0xB8; // sceCd.c
 sefKillEffect = 0x002E7B80, 0x78; // sef.c
 subMoveSlide = 0x002BA9F0, 0x8C; // sub.c
+scMISSILEScript = 0x002EB8E0, 0x6C; // sc.c
+scRRNDScript = 0x002EB1F0, 0xA8; // sc.c
