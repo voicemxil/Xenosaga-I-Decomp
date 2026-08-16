@@ -1,3 +1,4 @@
+#include "matching.h"
 /* Battle scene ambient/alter-state functions (sdv* family) */
 
 extern int _sdvAmbFrame;
@@ -51,6 +52,19 @@ typedef struct
     short nSerial;           /* 0x127C */
     short pad127E;
 } SDV_ALTER;
+
+/* A second view of the same record, based 0x60 in: the draw loop walks
+ * this one (stride is still the full record) while the calls take
+ * &_sdvAlter[i], which is what gives the loop its two induction
+ * variables and the +0x60 bias on every field load. */
+typedef struct
+{
+    char pad0060[0x0E];
+    short nOwner;            /* 0x6E */
+    char pad0070[0x1208];
+    unsigned short nUsed;    /* 0x1278 */
+    char pad127A[0x66];
+} SDV_ALTER_BODY;
 
 extern SDV_ALTER _sdvAlter[];
 
@@ -282,5 +296,39 @@ void sdvSetAmbStateSub(int nState, int nEffect, int bForce)
     bInside = nDelta < 0xB6U;
     if (eftCate == 14 || nEffect == 0xB25) {
         _sdvAmbState = (bInside == 0) ? nState : _sdvAmbState;
+    }
+}
+
+/* Draw every active alter that belongs to nOwner. The GS environment is
+ * set up once, on the first one actually drawn. */
+extern int _packet[];
+extern void SGsInitEnv(void);
+extern void sdvDrawAlter(void *p, void *pPacket);
+
+void sdvDrawAlters(int nOwner)
+{
+    SDV_ALTER_BODY *q;
+    int i;
+    int nDraw;
+    /* Steering: gcc gives the loop-invariant base the earlier
+     * callee-saved register and the byte offset the later one; retail
+     * has it the other way round. Emits no code. */
+    PIN(int nOfs, "$18");
+    char *pBase;
+
+    pBase = (char *)_sdvAlter;
+    q = (SDV_ALTER_BODY *)(pBase + 0x60);
+    nDraw = 0;
+    for (i = 0, nOfs = 0; i < 16; i++, nOfs += 0x1280) {
+        if (q->nUsed != 0 && q->nOwner == nOwner) {
+            nDraw++;
+            if (nDraw == 1) {
+                SGsInitEnv();
+            }
+            /* Integer-first addition: retail's addu has the byte offset as
+             * rs and the base as rt. */
+            sdvDrawAlter((char *)(nOfs + (int)pBase), _packet);
+        }
+        q++;
     }
 }
