@@ -457,7 +457,21 @@ void *UnduDataGetHeader(unsigned int key, unsigned int id)
     return 0;
 }
 
-/* Score one list entry's height against the best hit so far: 0 rejects it,
+/* PARKED 10 words out of 105 -- same length, same instruction order, and
+   the only difference is an $f2/$f3 rotation: retail gives the `fBase`
+   pseudo $f2 and the `fBase + fRange` sum (and the `fBest` read that
+   shares its register in the other arm) $f3, ee-gcc does the opposite.
+   Swept: locals for base/range vs naming the members inline at every use,
+   declaring `best` first, and 100 permuter iterations (base score 50, no
+   improvement). local_alloc priority tie-break.
+
+   Solved and not to be re-swept: the tail must be ONE return of a
+   `result` local (retail's `move v0,v1` in the jr delay slot), and the
+   two stores go pBest-first with `result = 2` between them -- writing
+   `chk->pBest` before `chk->fBest` puts the float store in the beql delay
+   slot, which is retail's order reversed.
+
+   Score one list entry's height against the best hit so far: 0 rejects it,
    1 accepts it without replacing the best, 2 makes it the new best. The
    attribute word's 0x1F00 field can substitute a fixed height from the
    table for the measured one. */
