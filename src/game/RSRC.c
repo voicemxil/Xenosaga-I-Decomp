@@ -370,3 +370,69 @@ u_int RSRC_loadFileSub(RSRC *pResource, char *pPath, char *pFile)
     pResource->nItemCount = pResource->nItemCount + 1;
     return pTop;
 }
+
+extern int isLeave(RSRCITEM *pItem, u_int pSource);
+extern void *memcpy(void *pDest, const void *pSrc, u_int nSize);
+
+/* Garbage-collect the heap: slide every item still owned by a source other
+   than pSource down against pBase, dropping the rest, then close the gaps
+   the drops left in the item table. */
+void RSRC_dispose(RSRC *pResource, u_int pSource)
+{
+    RSRCITEM *pItem;
+    RSRCITEM *pFree;
+    int nItemCount;
+    int i;
+    int j;
+    int nLive;
+    u_int pDst;
+
+    pItem = pResource->pItems;
+    nItemCount = pResource->nItemCount;
+    pDst = pResource->pBase;
+    for (i = 0; i < nItemCount; i++) {
+        if (isLeave(pItem, pSource) != 0) {
+            u_int pSrc = pItem->pData;
+
+            if (pDst != pSrc) {
+                memcpy((void *)pDst, (void *)pSrc, pItem->nSize);
+                if (pItem->nType == 1) {
+                    u_int pName = pItem->pName;
+                    u_int pOld = pItem->pData;
+
+                    pItem->pData = pDst;
+                    pItem->pName = pDst + (pName - pOld);
+                }
+            }
+            pDst += pItem->nSize;
+        } else {
+            pItem->pData = 0;
+        }
+        pItem++;
+    }
+    pResource->pCurrent = pDst;
+    pItem = pResource->pItems;
+    nLive = 0;
+    for (i = 0; i < nItemCount; i++) {
+        if (pItem->pData != 0) {
+            pFree = pResource->pItems;
+            for (j = 0; j < nItemCount; j++) {
+                if (pFree->pData == 0) {
+                    break;
+                }
+                pFree++;
+            }
+            if (j < i) {
+                memcpy(pFree, pItem, 16);
+                memset(pItem, 0, 16);
+                pFree->nState = 0;
+            }
+            pItem->nState = 0;
+            nLive++;
+        } else {
+            pItem->nState = 0;
+        }
+        pItem++;
+    }
+    pResource->nItemCount = nLive;
+}

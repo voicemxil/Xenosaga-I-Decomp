@@ -2809,3 +2809,4 @@ queue_next = 0x0021CF98, 0x94; // xglCd.c
 GameResourceReset = 0x0024D8E8, 0x11C; // GameResource.c
 set_xyz = 0x00218BC0, 0x100; // xglFont.c
 sefFreeScheduler = 0x002E51A8, 0x110; // sef.c
+RSRC_dispose = 0x0026D970, 0x188; // RSRC.c
