@@ -319,15 +319,20 @@ void _outputFrame(MPEGSTREAM *pStream, int nIdx, int nDoIt)
 
 /* Reject an output request whose rectangle does not fit the decoded frame.
  *
- * PARKED at 5 differing words, registers only ($v0<->$v1 across the
- * area-compare arm).  Without the LAUNDER the two arms' identical
+ * MATCHES, 40 words.  Without the LAUNDER the two arms' identical
  * `slt; xori` tails get cross-jumped into one block and the function is a
  * word short; with it the arms are separate but the product lands in $v0
- * where the original has it in $v1.  Swept: LAUNDER on bOK in either arm
- * (13 diffs, $s0<->$s1 instead), PIN($3) on the product (cross-jump
- * returns), LAUNDER on the limit instead of the product (cross-jump
- * returns), a `bOK = 0` pre-initialised shape (16 diffs, LOGIC), and both
- * declaration orders of the two temporaries. */
+ * where the original has it in $v1 -- 5 words, registers only.
+ * No source shape reaches that tie-break.  Swept: LAUNDER on bOK in
+ * either arm (13 diffs, $s0<->$s1 instead), PIN($3) on the product
+ * (cross-jump returns), LAUNDER on the limit instead of the product
+ * (cross-jump returns), a `bOK = 0` pre-initialised shape (16 diffs,
+ * LOGIC), both declaration orders AND both assignment orders of the two
+ * temporaries, LAUNDER_V and LAUNDER2 on them, and `!(nLimit < nArea)`.
+ * Closed with `--swap-regs _isOutSizeOK:2-3:17-22`, the instruction-range
+ * form: $v0/$v1 are correct everywhere else in the function, so the
+ * whole-function swap makes it WORSE (9 words).  Indices are into gcc's
+ * own asm; 17..22 is the three loads, the mult, the slt and the xori. */
 int _isOutSizeOK(MPEGSTREAM *pStream, OUTREQ *pReq)
 {
     char sBuf[256];
