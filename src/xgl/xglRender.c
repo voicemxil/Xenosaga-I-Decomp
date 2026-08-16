@@ -654,3 +654,61 @@ void xglRenderDrawFlipPk(void *pPk)
     sceVif1PkAddDirectDataN(pPk, 0x70000000, 6);
     sceVif1PkCloseDirectHLCode(pPk);
 }
+
+
+extern int FrameCount;
+extern int LoopCount;
+extern int ScanLineInterpolate;
+
+void sefDrawEffect3D(void);
+void nmlModelFlush(void);
+void nmlModelFlushClear(void);
+void xglFontFlush(void);
+void xglRenderGlobalFade(void);
+void xglPacketInterpolate(void);
+void xglPacketMove(void);
+void xglPacketSend(void);
+void xglRenderDispEnvMove(void);
+void sceGsSyncPath(int nMode, u_short nTimeout);
+void nmlModelSendPacketChangeSignal(void);
+
+/* One frame of rendering: flush the model/font packets, advance the
+ * frame counters and swap the draw environment */
+void xglRenderMove(void)
+{
+    if (s_nClearFrame == 1 && sRender.nUnk58 == 0) {
+        xglRenderClear();
+    } else if (s_nClearFrame >= 2) {
+        s_nClearFrame = s_nClearFrame - 1;
+    }
+    if (sRender.nUnk58 == 0) {
+        sefDrawEffect3D();
+    }
+    if (sRender.nUnk58 == 0) {
+        nmlModelFlush();
+    } else {
+        nmlModelFlushClear();
+    }
+    if (sRender.nUnk58 == 0) {
+        xglRenderFinalPacket();
+    }
+    xglFontFlush();
+    if (sRender.nUnk58 == 0) {
+        xglRenderGlobalFade();
+    }
+    if (ScanLineInterpolate == 2 && sRender.nUnk58 == 0) {
+        xglPacketInterpolate();
+    }
+    xglPacketMove();
+    xglRenderSyncMove();
+    FrameCount++;
+    LoopCount++;
+    sceGsSyncPath(0, 0);
+    sceGsResetGraph(1, 0, 0, 0);
+    xglRenderSwapBase();
+    xglRenderDrawEnvMove();
+    xglRenderDispEnvMove();
+    xglRenderClearEnvMove();
+    xglPacketSend();
+    nmlModelSendPacketChangeSignal();
+}
