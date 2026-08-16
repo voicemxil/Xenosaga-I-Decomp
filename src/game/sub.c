@@ -249,11 +249,16 @@ void subParentChildSet(void)
 /* One line segment of the ether-tree wireframe: endpoints are the node's
    own position and its first child's. */
 typedef struct {
+    EVEC posA;          /* 0x00 */
+    char pad10[0x10];
+    EVEC posB;          /* 0x20 */
+    char pad30[0x10];
+} ETSEG;
+
+typedef struct {
     ETNODE *pNode;      /* 0x00 */
     char pad04[0x0C];
-    EVEC posA;          /* 0x10 */
-    char pad20[0x10];
-    EVEC posB;          /* 0x30 */
+    ETSEG seg[6];       /* 0x10, stride 0x40 */
 } ETLINE;
 
 extern void subTreeLineDraw(ETLINE *line, int *pType);
@@ -265,10 +270,126 @@ void subTreeLineDraw_type_1(ETLINE *line)
     ETNODE *child = node->pChild[0];
     int nType;
 
-    line->posA = node->pos;
-    line->posB = child->pos;
+    line->seg[0].posA = node->pos;
+    line->seg[0].posB = child->pos;
     nType = (unsigned char)(child->bFlags & 1) ? 2 : 1;
     subTreeLineDraw(line, &nType);
+}
+
+/* Type 2: a two-child node. One elbow per child -- a vertical stub out of
+   the node (segment 0, pushed 28.5 to the right), then for each child a
+   riser to the child's height and a run out to the child. The style array
+   is one entry for the stub plus two per child. */
+void subTreeLineDraw_type_2(ETLINE *line)
+{
+    int nType[7];
+    ETNODE *node;
+    ETNODE *c;
+    ETNODE **pc;
+    int i;
+    int j;
+
+    node = line->pNode;
+    /* Nested, not `||`: the original materialises `li 2` twice, once in
+       each branch's delay slot. */
+    if ((unsigned char)(node->pChild[0]->bFlags & 1)) {
+        nType[0] = 2;
+    } else if ((unsigned char)(node->pChild[1]->bFlags & 1)) {
+        nType[0] = 2;
+    } else {
+        nType[0] = 1;
+    }
+    /* Indexed, not walked: both loops want their own LSR-built giv over
+       pChild, and a hand-walked pointer CSEs the two bases together. */
+    for (j = 0; j < 2; j++) {
+        c = node->pChild[j];
+        if ((unsigned char)(c->bFlags & 1)) {
+            nType[j * 2 + 2] = 2;
+            nType[j * 2 + 1] = 2;
+        } else {
+            nType[j * 2 + 2] = 1;
+            nType[j * 2 + 1] = 1;
+        }
+    }
+
+    /* Chained, not two copies from node->pos: the second copy's source is
+       the first copy's destination, so CSE forwards the just-stored value
+       and the whole pair is two ld and four sd. Copying node->pos twice
+       reloads it -- the store to seg[0] is in the same alias set. */
+    line->seg[0].posB = node->pos;
+    line->seg[0].posA = line->seg[0].posB;
+    line->seg[0].posB.x = line->seg[0].posB.x + 28.5f;
+
+    pc = node->pChild;
+    for (i = 0; i < 2; i++) {
+        c = *pc++;
+        line->seg[i * 2 + 1].posB = line->seg[0].posB;
+        line->seg[i * 2 + 1].posA = line->seg[i * 2 + 1].posB;
+        line->seg[i * 2 + 1].posB.y = c->pos.y;
+        line->seg[i * 2 + 2].posA = c->pos;
+        line->seg[i * 2 + 2].posB = line->seg[i * 2 + 2].posA;
+        line->seg[i * 2 + 2].posA.x = line->seg[i * 2 + 1].posB.x;
+    }
+    subTreeLineDraw(line, nType);
+}
+
+/* Type 3: a three-child node. The elbows are drawn for the outer two
+   children and the middle child gets a single straight run in segment 5. */
+void subTreeLineDraw_type_3(ETLINE *line)
+{
+    int nType[7];
+    ETNODE *node;
+    ETNODE *c;
+    ETNODE **pc;
+    int i;
+    int j;
+
+    nType[0] = 1;
+    node = line->pNode;
+    /* The original really re-tests pChild[0] every pass -- the load is not
+       hoisted because the loop is rotated, so this reads as written. */
+    for (i = 0; i < 3; i++) {
+        if ((unsigned char)(node->pChild[0]->bFlags & 1)) {
+            nType[0] = 2;
+            break;
+        }
+    }
+    for (j = 0; j < 3; j++) {
+        c = node->pChild[j];
+        if ((unsigned char)(c->bFlags & 1)) {
+            nType[j * 2 + 2] = 2;
+            nType[j * 2 + 1] = 2;
+        } else {
+            nType[j * 2 + 2] = 1;
+            nType[j * 2 + 1] = 1;
+        }
+    }
+
+    /* Chained, not two copies from node->pos: the second copy's source is
+       the first copy's destination, so CSE forwards the just-stored value
+       and the whole pair is two ld and four sd. Copying node->pos twice
+       reloads it -- the store to seg[0] is in the same alias set. */
+    line->seg[0].posB = node->pos;
+    line->seg[0].posA = line->seg[0].posB;
+    line->seg[0].posB.x = line->seg[0].posB.x + 28.5f;
+
+    pc = node->pChild;
+    for (i = 0; i < 2; i++) {
+        c = *pc;
+        pc += 2;
+        line->seg[i * 2 + 1].posB = line->seg[0].posB;
+        line->seg[i * 2 + 1].posA = line->seg[i * 2 + 1].posB;
+        line->seg[i * 2 + 1].posB.y = c->pos.y;
+        line->seg[i * 2 + 2].posA = c->pos;
+        line->seg[i * 2 + 2].posB = line->seg[i * 2 + 2].posA;
+        line->seg[i * 2 + 2].posA.x = line->seg[i * 2 + 1].posB.x;
+    }
+
+    c = node->pChild[1];
+    line->seg[5].posB = c->pos;
+    line->seg[5].posA = line->seg[5].posB;
+    line->seg[5].posA.x = line->seg[0].posB.x;
+    subTreeLineDraw(line, nType);
 }
 
 /* Ease *pCur toward *pDst by a fraction of the remaining gap, plus a 1.0
@@ -297,16 +418,57 @@ void subMoveSlide(float *pCur, float *pDst, float fRate)
 typedef struct {
     unsigned char bFlags;       /* 0x00 */
     unsigned char nMode;        /* 0x01 */
-    char pad02[0x2E];
+    char pad02[0x0E];
+    float fX;                   /* 0x10 */
+    float fY;                   /* 0x14 */
+    char pad18[0x08];
+    ETNODE *pTarget;            /* 0x20 */
+    short nX;                   /* 0x24 */
+    short nY;                   /* 0x26 */
+    unsigned int nZ;            /* 0x28 */
+    char pad2C[0x04];
     int nWidth;                 /* 0x30 */
 } ETRIGHT;
 
 typedef struct {
     unsigned char bFlags;       /* 0x00 */
-    char pad01[0x7F];
+    char pad01[0x0F];
+    float fCenterX;             /* 0x10 */
+    float fCenterY;             /* 0x14 */
+    char pad18[0x18];
+    float fBaseX;               /* 0x30 */
+    float fBaseY;               /* 0x34 */
+    float fBaseZ;               /* 0x38 */
+    char pad3C[0x44];
 } ETSYSTEM;
 
 extern ETSYSTEM *EtherTreeSystem;
+extern float D_004D7E84;
+extern void endPrintExtFunc(int nKind, int nType, void *pData);
+
+/* Ease the right panel toward its target node, then hand the screen-space
+   position to the print list. The target pointer is re-read for the second
+   ease because the first call may have changed it. */
+void subRightDraw(ETRIGHT *p)
+{
+    float fRate;
+    ETSYSTEM *sys;
+    float *pBase;
+    float *pCenter;
+
+    fRate = D_004D7E84;
+    sys = EtherTreeSystem;
+    subMoveSlide(&p->fX, &p->pTarget->pos.x, fRate);
+    /* Held member ADDRESSES, not sys-relative offsets: the original keeps
+       both group bases in callee-saved registers across the second call. */
+    pBase = &sys->fBaseX;
+    pCenter = &sys->fCenterX;
+    subMoveSlide(&p->fY, &p->pTarget->pos.y, fRate);
+    p->nX = (short)(p->fX + pBase[0] + pCenter[0]);
+    p->nY = (short)(p->fY + pBase[1] + pCenter[1]);
+    p->nZ = (unsigned int)(pBase[2] + 4.0f);
+    endPrintExtFunc(0, 17, &p->nX);
+}
 
 /* Slide the right panel open (mode 1) and shut (mode 3) eight pixels a
    frame; mode 2 is the held-open state that mode 1 falls through into. */

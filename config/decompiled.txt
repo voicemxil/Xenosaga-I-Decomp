@@ -2818,3 +2818,4 @@ RSRC_info = 0x0026D500, 0x21C; // RSRC.c
 sevGetPtAllocator = 0x002E7E60, 0x20; // sef.c
 sevGetPtAllocator2 = 0x002E7E80, 0x20; // sef.c
 sevAllocPtAllocator = 0x002E1600, 0x58; // sef.c
+subRightDraw = 0x002BADF0, 0x114; // sub.c
