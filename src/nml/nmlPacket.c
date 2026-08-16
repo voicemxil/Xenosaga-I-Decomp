@@ -714,3 +714,40 @@ void nmlPacketAddTransMicrocodeInit(void)
     p[3].f[1] = fOne;
     p[3].f[0] = fOne;
 }
+
+/* A+D GS packet with two register writes, uploaded twice to two
+ * different VU1 addresses (0x3FA and 0x3FD) with different data each
+ * time -- the register addresses are shared, only the data words swap.
+ * The buffer is ONE struct, not two locals: the giftag and the entries
+ * must be contiguous at sp+0 for the 3-quadword unpack. */
+typedef struct {
+    u_int aTag[4];
+    GSPACKETENTRY aEntry[2];
+} GSADPACKET2;
+
+void nmlPacketAddPixelTestPacket(int nReg0, int nData0B, int nData0A,
+                                 int nReg1, int nData1B, int nData1A)
+{
+    GSADPACKET2 sBuf;
+
+    s_pPacket = xglPacketGetCurrent();
+    sceVif1PkCnt(s_pPacket, 0);
+    sBuf.aTag[0] = 0x8002;
+    sBuf.aTag[1] = 0x10000000;
+    sBuf.aTag[2] = 14;
+    sBuf.aTag[3] = 0;
+    sBuf.aEntry[0].nData = nData0A;
+    sBuf.aEntry[0].nReg = nReg0;
+    sBuf.aEntry[1].nData = nData1A;
+    sBuf.aEntry[1].nReg = nReg1;
+    sceVif1PkOpenUpkCode(s_pPacket, 0x3FA, 0x6C, 1, 1);
+    sceVif1PkAddUpkData128N(s_pPacket, (u_int *)&sBuf, 3);
+    sceVif1PkCloseUpkCode(s_pPacket);
+    sBuf.aEntry[0].nReg = nReg0;
+    sBuf.aEntry[0].nData = nData0B;
+    sBuf.aEntry[1].nReg = nReg1;
+    sBuf.aEntry[1].nData = nData1B;
+    sceVif1PkOpenUpkCode(s_pPacket, 0x3FD, 0x6C, 1, 1);
+    sceVif1PkAddUpkData128N(s_pPacket, (u_int *)&sBuf, 3);
+    sceVif1PkCloseUpkCode(s_pPacket);
+}

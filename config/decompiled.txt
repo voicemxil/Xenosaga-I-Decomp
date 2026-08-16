@@ -2722,3 +2722,4 @@ GameModeEvtDebug = 0x00244F60, 0x100; // Game.c
 sceFormat = 0x00205B00, 0x26C; // sceFs.c
 xglCdSifLoadModule = 0x0021F480, 0x120; // xglCd.c
 GameModePause = 0x00244E28, 0x138; // Game.c
+nmlPacketAddPixelTestPacket = 0x00237030, 0x10C; // nmlPacket.c
