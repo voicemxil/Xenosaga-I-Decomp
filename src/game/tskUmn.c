@@ -1742,6 +1742,7 @@ void tskUmnMailMenu(TSK_TASK *pTask, UMN_MAILMENU *w)
     short nTargetOut2;
     int i;
     int nOn;
+    int nCol;
 
     if (UmnWork.nScene != 1) {
         pTask->nState = -1;
@@ -1754,13 +1755,14 @@ void tskUmnMailMenu(TSK_TASK *pTask, UMN_MAILMENU *w)
         w->nColor = 0x00FFFFF0;
         w->bVisible = 0;
         WindowDXSet((WINDOWDX *)&w->win);
+        nCol = w->nColor;
         w->win.pTitle = "Select";
         w->win.nH = 86;
         w->sel.pChoices = msg00[1];
         w->win.pMsg = &w->sel;
         w->sel.nColumns = 3;
         w->sel.pPrompt = msg00[0];
-        w->win.nColor = w->nColor;
+        w->win.nColor = nCol;
         w->win.nW = 169;
         w->win.pFunc = MenuSelectWindow;
         w->bVisible2 = 0;
