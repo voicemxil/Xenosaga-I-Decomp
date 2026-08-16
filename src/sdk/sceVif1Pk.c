@@ -274,48 +274,50 @@ void sceVif1PkEnd(Vif1Packet *pkt, unsigned int flags)
 /* Align the packet current pointer to a 16-byte (quadword) boundary */
 void sceVif1PkAlign(Vif1Packet *pkt, unsigned int padding, unsigned int boundary)
 {
-/* TODO: near-miss (8 words, was 21).  Three levers found and kept below:
-       (1) the zero-fill store is written through `unsigned int **` so that
-       under gcc 2.9's type-based aliasing it MAY alias pkt->current - a plain
-       int store lets the compiler prove the in-loop `pkt->current = ...` dead
-       and sink it out of the loop; (2) the loop is a do-while entered by a
-       goto into its middle, reproducing the original's peeled entry (the
-       plain while gets either cross-jumped or left in jump-to-test form);
+    /* Shape levers (all plain C, no code emitted for them):
+       (1) the zero-fill store goes through `unsigned int **` so that gcc
+       2.9's type-based aliasing cannot prove the in-loop
+       `pkt->current = next` dead and sink it out of the loop;
+       (2) the loop is a do-while entered by a goto into its middle, which
+       reproduces the original's peeled first iteration -- a plain while
+       gets cross-jumped or left in jump-to-test form;
        (3) `t1 = target + 1` in its own statement stops the reassociation
-       into target + (mask + 1); (4) the mask-setup $v0/$v1 allocation tie
-       -- called permuter-exhausted -- is fixed by PINning amt to $3 and a
-       0xFFFFFFFF temp to $2 and assigning both through PASSTHRU, and the
-       loop-body cse that rewrote `next = cur + 1` into `addiu v1,v1,4` is
-       fixed by pinning cur to $5 and next to $3, so the addiu now reads
-       cur exactly as the original does.  8 -> 4 words.
-       Remaining: with --swap-adjacent sceVif1PkAlign:6 this reaches TWO
-       words (not wired, since the convention is to flag only functions
-       that actually match -- add it the moment the last pair falls).
-       Those last two are the loop-body pair at words 23/24: the peeled
-       entry and the loop body each emit the store BEFORE the pointer
-       increment where the original emits it after.  Ruled out: LAUNDER
-       and LAUNDER_V on either cur or next at that point (all regress to
-       4), every --swap-adjacent site 14..33 with and without the force
-       suffix (best 4), and all six orderings of the trailing statements.
-       This is gcc sched2 hoisting a ready store over an independent
-       addiu; no source lever found. */
+       into target + (mask + 1).
+       Register ties (steering only): amt/all1 settle the $v0/$v1 mask
+       setup; `mask` in $a3 keeps the nor/and pair reading it directly;
+       `m2` in $v0 makes the `and` reuse the register the `nor` just wrote
+       instead of taking a fresh $v1; and naming the `target < cur` test in
+       its own pinned local puts the sltu in $v1.  m2 and lt are a 3-cycle
+       in local-alloc -- pinning either one alone just rotates the cycle.
+       The last two pairs are pure post-reload-scheduler transposes (sched2
+       issues the srlv before the lw, and hoists the ready store over the
+       independent addiu in the loop body); no statement order reproduces
+       either, so they are FILE_FIX_FLAGS --swap-adjacent sites 6 and 22. */
     unsigned int p = (padding + 2) & 0x1F;
     PIN(unsigned int amt, "$3");
     PIN(unsigned int all1, "$2");
-    unsigned int mask;
+    PIN(unsigned int mask, "$7");
     PIN(unsigned int *cur, "$5");
+    PIN(unsigned int m2, "$2");
     unsigned int target;
 
     PASSTHRU(amt, 32 - p);
     PASSTHRU(all1, 0xFFFFFFFFu);
     mask = all1 >> amt;
     cur = pkt->current;
-    target = ((unsigned int)cur & ~mask) + (boundary << 2);
+    PASSTHRU(m2, ~mask);
+    m2 = (unsigned int)cur & m2;
+    target = m2 + (boundary << 2);
 
-    if (target < (unsigned int)cur)
     {
-        unsigned int t1 = target + 1;
-        target = t1 + mask;
+        PIN(unsigned int lt, "$3");
+
+        lt = (target < (unsigned int)cur);
+        if (lt)
+        {
+            unsigned int t1 = target + 1;
+            target = t1 + mask;
+        }
     }
 
     if ((unsigned int)cur < target)

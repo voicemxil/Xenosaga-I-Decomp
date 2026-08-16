@@ -186,6 +186,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "xglFont.c": "",
     # JS_classLight_setDirection2: the li/lw pair is a scheduling
     # tie-break, and the $f0/$f1 assignment across the three
     # load-store pairs is an allocator naming tie-break -- the loads and
@@ -212,8 +213,7 @@ FILE_FIX_FLAGS = {
     # swap flag", which --swap-adjacent now is. NOTE all sites for one
     # pass must be a single comma-separated value (argparse stores, not
     # appends; fix_cc_asm.py rejects duplicates).
-    "sceVif1Pk.c": ("--swap-adjacent sceVif1PkCnt:9,sceVif1PkEnd:9,"
-                    "sceVif1PkAddUpkData128:10,sceVif1PkAddUpkData128:15!"),
+    "sceVif1Pk.c": ("--swap-adjacent sceVif1PkCnt:9,sceVif1PkEnd:9,sceVif1PkAddUpkData128:10,sceVif1PkAddUpkData128:15!,sceVif1PkAlign:6,sceVif1PkAlign:22"),
     # an lwc1 in a jal delay slot followed by mov.s trips a bogus hazard nop
     "MAP.c": "--omit-hazard mov.s",
     # ACT_setArms: gcc annuls the arm-slot compare's branch because it
@@ -280,11 +280,7 @@ FILE_FIX_FLAGS = {
     "tskUmn.c": "--rotate tskUmnSimulationInfo:100",
     # JNT root accessors: TI-mode quadword copies whose allocator
     # tie-break lands the pair backwards (JVM subagent, verified).
-    "JNT.c": ("--hoist-return-store JNT_getRootTrans,JNT_getRootRotate,"
-              "JNT_getRootScale "
-              "--swap-regs JNT_getRootTrans:2-3 "
-              "--swap-regs JNT_getRootRotate:2-3 "
-              "--swap-regs JNT_getRootScale:2-3"),
+    "JNT.c": ("--hoist-return-store JNT_getRootTrans,JNT_getRootRotate,JNT_getRootScale --swap-regs JNT_getRootTrans:2-3 --swap-regs JNT_getRootRotate:2-3 --swap-regs JNT_getRootScale:2-3 --branch-unlikely JNT_setModel:1"),
     # Each flag may appear ONCE per entry: argparse stores rather than
     # appends, so a repeated flag silently drops the earlier sites --
     # that regressed three matched functions before fix_cc_asm.py
