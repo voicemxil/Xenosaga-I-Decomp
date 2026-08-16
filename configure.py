@@ -91,7 +91,6 @@ def cc_for(name):
 # stride stays 8 bytes/reg (2.96), ruling out the SDK 2.9-ee compiler --
 # this is a lone -G threshold difference, not a compiler-family swap.
 FILE_CFLAGS_OVERRIDE = {
-    "xglFont.c": "",
     # These SDK translation units were built WITHOUT -fno-schedule-insns:
     # the original pairs independent multiplies onto the R5900's two
     # multiplier units (mult1 + mult), which only the first scheduling
