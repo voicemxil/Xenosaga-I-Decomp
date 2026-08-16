@@ -193,6 +193,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "xglRender.c": "--fp-pair-hazard xglRenderGlobalFadeSet",
     "Calc.c": "--mtc1-nop CalcNearCrossPointCircle:0",
     "kernel.c": "--swap-adjacent PatchIsNeeded:8,PatchIsNeeded:10",
     "sceMpeg.c": "--swap-adjacent sceMpegReset:3",

@@ -137,6 +137,23 @@ typedef struct {
     /* 0x10 */ float world[4];
 } TCAMERA_CNS;
 
+/* The two VU0 macro-mode vector helpers this file is built on. Both take
+ * three pointers to quadword-aligned float[4]; only xyz is touched, so
+ * the destination's w survives. */
+#define VU0_ADD_XYZ(d, a, b)                    \
+    PS2_ASM("lqc2 $vf3, 0(%2)\n"                \
+            "lqc2 $vf2, 0(%1)\n"                \
+            "vadd.xyz $vf2, $vf2, $vf3\n"       \
+            "sqc2 $vf2, 0(%0)"                  \
+            : : "r"(d), "r"(a), "r"(b) : "memory")
+
+#define VU0_SUB_XYZ(d, a, b)                    \
+    PS2_ASM("lqc2 $vf3, 0(%2)\n"                \
+            "lqc2 $vf2, 0(%1)\n"                \
+            "vsub.xyz $vf2, $vf2, $vf3\n"       \
+            "sqc2 $vf2, 0(%0)"                  \
+            : : "r"(d), "r"(a), "r"(b) : "memory")
+
 /* Place the camera at the attached CNS node plus a constant offset.
  * nMode 1 takes the node's own translation, every other mode the solved
  * world one (0 and the default share a body, which is why gcc tests for
@@ -167,9 +184,78 @@ void TCAMERA_transCNS(TCAMERA_XGL_CAMERA *pCamera, TCAMERA_CNS **ppCns,
         aPos[2] = (*ppCns)->world[2];
         break;
     }
-    PS2_ASM("lqc2 $vf3, 0(%1)\n"
-            "lqc2 $vf2, %2\n"
-            "vadd.xyz $vf2, $vf2, $vf3\n"
-            "sqc2 $vf2, 0(%0)"
-            : : "r"(pTranslate), "r"(pOffset), "m"(aPos[0]) : "memory");
+    VU0_ADD_XYZ(pTranslate, aPos, pOffset);
+}
+
+extern float xglSin(float fRad);
+extern float xglCos(float fRad);
+extern float xglAtan2(float y, float x);
+
+/* Aim the camera at a target point. Yaw is the atan2 of the horizontal
+ * offset; pitch is the atan2 of the vertical offset against the
+ * horizontal distance rotated into that new yaw. The reload of
+ * pRotate[1] for the cosine is the compiler's, not a second read in the
+ * source -- the call to xglSin clobbers memory, so the value just stored
+ * cannot be reused.
+ *
+ * Written out in both callers rather than factored into a helper: a
+ * static function is not inlined at -O2, and an inline one copies its
+ * pointer argument into a fresh pseudo, which leaves the caller's
+ * `pCamera->rotate` with a single use -- update_equiv_regs then sinks
+ * that addiu past the call and the callee-saved register disappears.
+ *
+ * DECLARATION ORDER IS LOAD-BEARING for the two field pointers. Of two
+ * `p = pCamera->field` initialisers, gcc emits the SECOND one where it
+ * stands and sinks the FIRST to its use, so `translate` must be declared
+ * first for `rotate` to be the one computed early. In viewSPL that
+ * decides which pointer gets the callee-saved register kept across
+ * SPL_getValueXYZ; in viewCNS, which one gets to reuse the dying a0.
+ * Getting it backwards costs five words in each. */
+
+/* Aim the camera at the spline's current point. */
+void TCAMERA_viewSPL(TCAMERA_XGL_CAMERA *pCamera)
+{
+    float aTarget[4];
+    float aDelta[4];
+    float *pTranslate = pCamera->translate;
+    float *pRotate = pCamera->rotate;
+
+    SPL_getValueXYZ(aTarget);
+    VU0_SUB_XYZ(aDelta, pTranslate, aTarget);
+    pRotate[1] = xglAtan2(aDelta[0], aDelta[2]);
+    pRotate[0] = -xglAtan2(aDelta[1],
+                           aDelta[0] * xglSin(pRotate[1]) +
+                           aDelta[2] * xglCos(pRotate[1]));
+}
+
+/* Aim the camera at the attached CNS node plus a constant offset -- the
+ * same gather TCAMERA_transCNS does, but the result becomes a look-at
+ * target rather than the camera position. */
+void TCAMERA_viewCNS(TCAMERA_XGL_CAMERA *pCamera, TCAMERA_CNS **ppCns,
+                     float *pOffset, int nMode)
+{
+    float aTarget[4];
+    float aDelta[4];
+    float *pTranslate = pCamera->translate;
+    float *pRotate = pCamera->rotate;
+
+    switch (nMode) {
+    case 1:
+        aTarget[0] = (*ppCns)->local[0];
+        aTarget[1] = (*ppCns)->local[1];
+        aTarget[2] = (*ppCns)->local[2];
+        break;
+    case 0:
+    default:
+        aTarget[0] = (*ppCns)->world[0];
+        aTarget[1] = (*ppCns)->world[1];
+        aTarget[2] = (*ppCns)->world[2];
+        break;
+    }
+    VU0_ADD_XYZ(aTarget, aTarget, pOffset);
+    VU0_SUB_XYZ(aDelta, pTranslate, aTarget);
+    pRotate[1] = xglAtan2(aDelta[0], aDelta[2]);
+    pRotate[0] = -xglAtan2(aDelta[1],
+                           aDelta[0] * xglSin(pRotate[1]) +
+                           aDelta[2] * xglCos(pRotate[1]));
 }

@@ -2548,3 +2548,5 @@ srsChangeSeparator = 0x002E8658, 0x54; // srsGet.c
 xglRenderGlobalFadeSet = 0x0022D958, 0x104; // xglRender.c
 xheap_init = 0x002F1B08, 0x50; // JavaClass.c
 tskUmnDataBaseAnalisis = 0x00A0A3F8, 0x204; // tskUmn.c
+TCAMERA_viewSPL = 0x00308D28, 0x9C; // TCAMERA.c
+TCAMERA_viewCNS = 0x00308E30, 0xDC; // TCAMERA.c

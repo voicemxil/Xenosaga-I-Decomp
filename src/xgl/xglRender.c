@@ -194,6 +194,41 @@ void xglRenderGlobalFadeInit(void)
     s_nGblFade = 0;
 }
 
+/* Set the global fade colour: four clamped [0,1] channels packed into
+ * one 0xAABBGGRR word (alpha keeps the PS2 0-128 scale, so it is scaled
+ * by 128 and not masked). */
+void xglRenderGlobalFadeSet(float fR, float fG, float fB, float fA)
+{
+    if (fR < 0.0f) {
+        fR = 0.0f;
+    }
+    if (fG < 0.0f) {
+        fG = 0.0f;
+    }
+    if (fB < 0.0f) {
+        fB = 0.0f;
+    }
+    if (fA < 0.0f) {
+        fA = 0.0f;
+    }
+    if (fR > 1.0f) {
+        fR = 1.0f;
+    }
+    if (fG > 1.0f) {
+        fG = 1.0f;
+    }
+    if (fB > 1.0f) {
+        fB = 1.0f;
+    }
+    if (fA > 1.0f) {
+        fA = 1.0f;
+    }
+    s_nGblFade = ((int)(fR * 255.0f) & 0xFF)
+               + (((int)(fG * 255.0f) & 0xFF) << 8)
+               + (((int)(fB * 255.0f) & 0xFF) << 16)
+               + ((int)(fA * 128.0f) << 24);
+}
+
 /* Enable frame clearing for the next two frames */
 void xglRenderClearOn(void)
 {
