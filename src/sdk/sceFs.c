@@ -79,7 +79,10 @@ void _sceFsSemInit(void)
     }
 }
 
-int _sceFsWaitS(void)
+/* The `code` argument is the caller's fs opcode; the routine only takes
+ * the lock, but every call site passes one (scePowerOffHandler below
+ * sets a0 = 27 before the jal), so it is part of the signature. */
+int _sceFsWaitS(int code)
 {
     _sceFsSemInit();
     WaitSema(_fs_semid);
@@ -99,6 +102,8 @@ typedef struct t_poff_cb {
     void (*func)(void *arg);
     void *arg;
 } PoffCb;
+
+extern PoffCb _sif_FsPoff_Data;
 
 void _sceFs_Poff_Intr(int cause, PoffCb *cb)
 {
@@ -124,4 +129,36 @@ void _sceFsIobSemaMK(void)
         _fs_iob_semid = CreateSema(&sema);
         _fs_fsq_semid = CreateSema(&sema);
     }
+}
+
+/* scePowerOffHandler: install the EE-side power-off callback, returning
+ * the one it replaced.  The {func, arg} pair lives in the fixed block
+ * `_sif_FsPoff_Data`, and the swap runs with interrupts disabled.
+ *
+ * The original holds &_sif_FsPoff_Data in a callee-saved register from
+ * before the lock call onwards and reaches `.arg` through it while
+ * `.func` uses the plain %hi/%lo offset form -- the "&STRUCT.member
+ * through a local pointer" lever, one pointer local assigned at the
+ * top of the function. */
+
+extern int  sceFsInit(void);
+extern int  DIntr(void);
+extern int  EIntr(void);
+
+void *scePowerOffHandler(void *func, void *arg)
+{
+    PoffCb *p;
+    void *old;
+
+    p = &_sif_FsPoff_Data;
+    _sceFsWaitS(27);
+    if (_fs_init == 0)
+        sceFsInit();
+    DIntr();
+    old = _sif_FsPoff_Data.func;
+    p->arg = arg;
+    _sif_FsPoff_Data.func = func;
+    EIntr();
+    _sceFsSigSema();
+    return old;
 }
