@@ -534,3 +534,123 @@ void xglRenderSetReso(int nReso)
     xglStudioInit();
     xglStudioMainCameraInit();
 }
+
+/* Blit the whole display buffer into the draw buffer with a GS local-to-
+ * local transfer, built as an A+D packet in scratchpad and kicked on
+ * DMA channel 2. */
+/* TODO: near-miss (28 words, pure SCHEDULING -- every register and every
+ * instruction is correct, sched2 just interleaves the packet-base
+ * lui/ori materialisations with the sRender loads differently).
+ * Levers that got here: one block-scoped `u_long *p` per 16-byte A+D
+ * pair (six function-scope pointers spill s0/s1 and cost 4 words; a
+ * plain `*(u_long *)0x700000NN` literal store folds to an absolute MEM
+ * and gives `lui at` per store); data-then-register store order inside
+ * each pair; a memory barrier after the third store to stop sched2
+ * hoisting the sRender loads above it; or-chain term order
+ * src | dst | psm<<24 | psm<<56 (this fixed ALL the register naming --
+ * putting either psm term earlier swaps the psm/dst load registers).
+ * Also note the GIF tag really is 0x1000000000008005: the original's
+ * `lui t3,0x1000; dsll32 t3,t3,0` is 0x1000_0000 << 32, not 4096 << 32.
+ * Swept: volatile vs plain pointers (same), reg-then-data store order
+ * (+4 words), hoisting p2/p3 to function scope (45), 7 or-chain
+ * orderings. Residue is a sched2 interleave only. */
+void xglRenderCopyDisp2Draw(void)
+{
+    u_long *p0 = (u_long *)0x70000000;
+    u_long nBitBltBuf;
+
+    p0[1] = 14;
+    {
+        u_long *p = (u_long *)0x70000010;
+        p[0] = 0;
+        p[1] = 63;
+    }
+    __asm__ __volatile__("" : : : "memory");
+    nBitBltBuf = (0x80000 | (sRender.nFrontFbp << 5))
+               | (((u_long)sRender.nUnk22 << 37) | 0x0008000000000000UL)
+               | ((u_long)sRender.nPsm << 24)
+               | ((u_long)sRender.nPsm << 56);
+    {
+        u_long *p = (u_long *)0x70000020;
+        p[0] = nBitBltBuf;
+        p[1] = 80;
+    }
+    {
+        u_long *p = (u_long *)0x70000030;
+        p[0] = 0;
+        p[1] = 81;
+    }
+    {
+        u_long *p = (u_long *)0x70000040;
+        p[0] = 0x000001C000000200UL;
+        p[1] = 82;
+    }
+    {
+        u_long *p = (u_long *)0x70000050;
+        p[0] = 2;
+        p[1] = 83;
+    }
+    p0[0] = 0x1000000000008005UL;
+    __asm__ __volatile__("sync" : : : "memory");
+    FlushCache(0);
+    xglDmaDirectNormal(2, 0x70000000, 6);
+}
+
+void sceVif1PkCnt(void *pPk, int nFlag);
+void sceVif1PkOpenDirectHLCode(void *pPk, int nFlag);
+void sceVif1PkAddDirectDataN(void *pPk, u_int nAddr, int nQwc);
+void sceVif1PkCloseDirectHLCode(void *pPk);
+
+/* TODO: near-miss (27 words). Identical residue to
+ * xglRenderCopyDisp2Draw above -- same packet, same shape, same sched2
+ * interleave of the six 0x7000xxxx base lui/ori pairs with the sRender
+ * loads. Every register and every instruction is right. Also swept
+ * here: six function-scope pointers instead of block-scoped ones (54).
+ * If one of the two ever falls to a source shape, the same shape should
+ * close the other. */
+/* Same local-to-local blit as xglRenderCopyDisp2Draw, but from the front
+ * buffer into the draw buffer and pushed through a VIF1 packet builder
+ * instead of a direct DMA kick. */
+void xglRenderDrawFlipPk(void *pPk)
+{
+    u_long *p0 = (u_long *)0x70000000;
+    u_long nBitBltBuf;
+
+    p0[1] = 14;
+    {
+        u_long *p = (u_long *)0x70000010;
+        p[1] = 63;
+        p[0] = 0;
+    }
+    __asm__ __volatile__("" : : : "memory");
+    nBitBltBuf = (0x80000 | (sRender.nUnk22 << 5))
+               | (((u_long)sRender.nDrawFbp << 37) | 0x0008000000000000UL)
+               | ((u_long)sRender.nPsm << 24)
+               | ((u_long)sRender.nPsm << 56);
+    {
+        u_long *p = (u_long *)0x70000020;
+        p[0] = nBitBltBuf;
+        p[1] = 80;
+    }
+    {
+        u_long *p = (u_long *)0x70000030;
+        p[0] = 0;
+        p[1] = 81;
+    }
+    {
+        u_long *p = (u_long *)0x70000040;
+        p[0] = 0x000001C000000200UL;
+        p[1] = 82;
+    }
+    {
+        u_long *p = (u_long *)0x70000050;
+        p[0] = 2;
+        p[1] = 83;
+    }
+    p0[0] = 0x1000000000008005UL;
+    __asm__ __volatile__("sync" : : : "memory");
+    sceVif1PkCnt(pPk, 0);
+    sceVif1PkOpenDirectHLCode(pPk, 0);
+    sceVif1PkAddDirectDataN(pPk, 0x70000000, 6);
+    sceVif1PkCloseDirectHLCode(pPk);
+}
