@@ -315,27 +315,36 @@ typedef struct {
 extern VECTOR D_004DC9D0;
 extern float D_00347D08;
 
-/* TODO: near-miss (LOGIC, 12 diffs) - gcc schedules the branch-taken constant
- * load with a bnezl and hoists the gp-relative float load unconditionally;
- * both if/else orderings tried give the same 12-word diff (store-group
- * reorder included). Retried this session: writing it as
- * `float extra = D_00347D08; if (hType >= 1618) extra = 3.0f;` (matching the
- * original's "unconditional default, conditional override" shape exactly)
- * turns the bnezl into a plain bnez with the default load correctly filling
- * its delay slot -- but gcc then reuses that same delay slot for the load
- * instead of the &D_004DC9D0 address computation the original puts there,
- * pushing everything downstream by one slot (still 12 diffs, 9 opcode).
- * LAUNDER_V(extra) right after the initializer to pin it out of the delay
- * slot regressed to LENGTH (28 vs 25 words) -- it also blocked the
- * address-computation code motion the original relies on.
- * Later session: 12 -> 6 by writing the w store LAST (exhaustive over all
- * 24 orderings of the four output stores; the original emits w's swc1 near
- * the end, not third). The remaining 6 are still exactly the delay-slot
- * preference described above. Also tried hoisting &D_004DC9D0 into a local
- * VECTOR * before the if, in four forms (plain, after the extra load, with
- * LAUNDER, and pinned to $v0): all regress to 22-23 diffs, because gcc then
- * keeps the base in a register across the branch instead of rematerialising
- * the lui in the delay slot, which is the whole point. */
+/* TODO: near-miss, 6 of 25 words. Everything except the first six words
+ * matches; the remaining diff is entirely WHICH instruction fills the
+ * hType branch's delay slot:
+ *
+ *   original:  lh / lwc1 $f3,gp / slti / bnez / lui %hi(D_004DC9D0)
+ *   built:     lh / slti / bnez / lwc1 $f3,gp / lui $1,0x4040 ...
+ *
+ * i.e. the retail build hoists the DEFAULT `extra` load above the compare
+ * and fills the delay slot with the first instruction of the branch's
+ * TARGET block (the %hi of D_004DC9D0, whose %lo addiu stays after the
+ * label). gcc's reorg runs fill_simple_delay_slots first, finds the l.s
+ * immediately before the branch, and never gets to the target thread.
+ *
+ * Swept and ruled out this session: hoisting p->hType into a local; the
+ * empty-then polarity `if (t < 1618) {} else extra = 3.0f;`; the ternary
+ * form; and a separate `int big = ...` condition local. Earlier sessions
+ * ruled out LAUNDER_V(extra) and four spellings of hoisting
+ * &D_004DC9D0 into a local before the if (all regress to 22-23).
+ * The 12 -> 6 step was writing the `w` store LAST of the four output
+ * stores (exhaustive over all 24 orderings).
+ *
+ * FIXER NOTE: --rotate cannot express this. Both windows that would do it
+ * (l.s up past slti, and %hi down into the slot) span the branch's
+ * `.set noreorder/.set nomacro` block, and rotate_insns requires
+ * contiguous instruction LINES -- it silently leaves such a site
+ * untouched, which is easy to mistake for "the rotation had no effect".
+ * --swap-slot-target is not valid here either: it would move the l.s to
+ * the target label, where the fall-through path would re-execute it and
+ * clobber the 3.0f. Closing this needs a pass that fills a branch slot
+ * FROM the target while pushing the old slot insn back ABOVE the branch. */
 /* Compute an object's on-screen center point, biasing Y by a type-dependent offset */
 void GetCenter(VECTOR *out, CENTEROBJ *p)
 {

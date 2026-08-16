@@ -200,20 +200,34 @@ float EXM_GetShakeRad(void)
     return wind->fShakeRad;
 }
 
-/* TODO: LENGTH 15/13: `li v0,1` for nType=1 is emitted TWICE back-to-back
- * in the original (words 11-12) -- word11 is the delay slot of the
- * unconditional `b` that skips the false-branch fallthrough, word12 is
- * that fallthrough target redoing the same li. This is the compiler
- * filling an otherwise-wasted delay slot with a redundant copy of the
- * merge-point store, not source-level duplication -- our build correctly
- * emits the store once after the if, and the delay slot is a bare nop
- * instead. Tried: literal `else { pWind->nType = 1; }` duplication
- * (regressed badly -- grew to 17 words / 14 diffs, a real branch+jump
- * appears instead of delay-slot reuse); volatile-qualified early store
- * inside the if plus the normal trailing store (10 diffs, right length
- * but wrong shape -- the early store lands at the top of the true branch
- * instead of in the jump's delay slot). Same delay-slot-fill scheduler
- * class as _ulp/_ratio in libc.c; not source-reachable so far. */
+/* TODO: near-miss, 4 of 13 words (13 built vs 15 original).
+ *
+ * ANALYSIS (this session): the retail build's two extra words are not a
+ * delay-slot artifact -- they are source-level duplication plus a
+ * cross-jump. The original is
+ *
+ *      beq  a0,0,$Lfalse        ; $Lfalse is the second `li v0,1`
+ *      ...16-byte copy...
+ *      b    $Lmerge             ; $Lmerge is `jr ra / sb`
+ *      li   v0,1                ; delay: a COPY of $Lmerge's old first insn
+ *   $Lfalse:
+ *      li   v0,1
+ *   $Lmerge:
+ *      jr   ra
+ *      sb   v0,0(v1)
+ *
+ * which is exactly what `if (p) { copy; nType = 1; } else { nType = 1; }`
+ * compiles to when the compiler cross-jumps the common tail down to
+ * `li; sb; jr` and then fills the resulting `b`'s delay slot by copying
+ * the merged block's first instruction. gcc 2.96 will not cross-jump it:
+ * given the duplicated source it DUPLICATES the whole `j $31 / sb` return
+ * in both arms instead of branching to a shared one (17 words), and given
+ * the shared source (below) it merges the store correctly but then has no
+ * `b` to fill (13 words). Swept this session: explicit else-duplication,
+ * early-return in either polarity, a merged `type` local (folded), a
+ * `goto` to the shared store, and a `type` local initialised in both
+ * arms. All 13 or 17 words, never 15. Same class as _ulp/_ratio in
+ * libc.c. EXM_SetPointWind below is the identical function with 2. */
 /* Use a fixed direction for the current wind */
 void EXM_SetDirectionalWind(EXM_VECTOR *pDir)
 {
@@ -225,8 +239,8 @@ void EXM_SetDirectionalWind(EXM_VECTOR *pDir)
     pWind->nType = 1;
 }
 
-/* TODO: LENGTH 15/13: original retains a duplicated type constant on both
- * sides of the null check; the natural shared assignment is folded. */
+/* TODO: near-miss, 4 of 13 words -- identical to EXM_SetDirectionalWind
+ * above (same cross-jump-vs-duplicate wall); see that analysis. */
 /* Use a point source for the current wind */
 void EXM_SetPointWind(EXM_VECTOR *pPos)
 {

@@ -75,10 +75,23 @@ void HddTestFormat(void)
     printf(" format __common:%d\n", r);
 }
 
-/* TODO: near-miss (35/47 words match; original callee-saved prologue
- * save order is s1,s2,s0,s3,s4,ra -- an unusual first-use order our
- * compiler doesn't reproduce via any local declaration order tried.
- * Parked per budget rule after 1 attempt. */
+/* TODO: near-miss, 12 of 47 words. The instruction MULTISET is the
+ * original's -- this is pure intra-block scheduling, not a shape or
+ * allocation difference. The whole function up to the loop is one basic
+ * block (nothing branches), and the original issues the six callee-saved
+ * stores contiguously with `i = 0` in sceOpen's delay slot and the two
+ * `lui` %hi bases for the loop's string constants AFTER the first printf;
+ * gcc interleaves `move s2,zero` and one `lui` between the stores and
+ * puts the other `lui` in sceOpen's delay slot.
+ * Ruled out this session with numbers (all on HddTestHddFull):
+ *   -O2 -G8                        12 diffs   (current)
+ *   -fno-schedule-insns            14 diffs
+ *   -fno-schedule-insns2           18 diffs
+ *   -fno-gcse / -fno-strength-reduce / -fno-expensive-optimizations /
+ *   -fno-caller-saves / -fno-peephole   all 12 diffs (no effect)
+ * So a per-file cflag will not close it; it needs either a source shape
+ * that changes the block's scheduling priorities or ~6 reordering-flag
+ * sites, which is more than this is worth. */
 /* Repeatedly write sub-partitions until the drive fills up, logging each
  * result */
 void HddTestHddFull(void)
