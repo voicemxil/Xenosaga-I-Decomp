@@ -636,3 +636,28 @@ void TMENU_drawDefault(TMENU *t)
         p->h00 |= 0x4000;
     }
 }
+
+/* TMENU_updateDefault @ 0x0025F410, 0x734 bytes (461 instructions) -- NOT
+ * WRITTEN.  Notes for whoever picks it up:
+ *
+ * m2c refuses it ("two delay slot instructions in a row", the
+ * beql/bgezl pair at +0x318), so it has to be read from disasm.py.
+ *
+ * It is a state machine with THREE computed-goto dispatches, all keyed
+ * on 16-entry tables in .rodata.  Dumped from the ROM image:
+ *
+ *   switch (t->h14 - 1)          table 0x004C1C80, targets (fn+):
+ *     0 ->0x0b8  1 ->0x160  2..11 ->end  12 ->0x150  13,14 ->0x140
+ *     15 ->0x088
+ *   switch (t->h30)              table 0x004C1CC0, targets (fn+):
+ *     0 ->0x438  1 ->0x410  2..11 ->0x710  12 ->0x3e0  13 ->0x1f0
+ *     14 ->0x1c0  15 ->0x4a8
+ *   switch (t->queue.h0A - 128)  table 0x004C1D00, six live entries
+ *
+ * So h14 is a top-level mode (2..11 idle) and h30 (a new short at
+ * offset 0x30, cleared by several arms) is the per-mode phase counter.
+ * It calls xglSoundEffectNormalID, MSG_queueGetInfo, MSG_queuePop,
+ * MSG_queueReset, TW_setPos and TMENU_dispose, and it reads the pad
+ * through the global at 0x00490D90 (+0x32 and +0x34 bit tests).
+ * Offsets touched that this file does not name yet: 0x30 (short),
+ * 0x68 (byte), 0xE0/0xE2/0xE8/0xEA/0xF4 inside the queue block. */
