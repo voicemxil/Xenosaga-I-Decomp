@@ -302,7 +302,17 @@ void _outputFrame(MPEGSTREAM *pStream, int nIdx, int nDoIt)
     }
 }
 
-/* Reject an output request whose rectangle does not fit the decoded frame. */
+/* Reject an output request whose rectangle does not fit the decoded frame.
+ *
+ * PARKED at 5 differing words, registers only ($v0<->$v1 across the
+ * area-compare arm).  Without the LAUNDER the two arms' identical
+ * `slt; xori` tails get cross-jumped into one block and the function is a
+ * word short; with it the arms are separate but the product lands in $v0
+ * where the original has it in $v1.  Swept: LAUNDER on bOK in either arm
+ * (13 diffs, $s0<->$s1 instead), PIN($3) on the product (cross-jump
+ * returns), LAUNDER on the limit instead of the product (cross-jump
+ * returns), a `bOK = 0` pre-initialised shape (16 diffs, LOGIC), and both
+ * declaration orders of the two temporaries. */
 int _isOutSizeOK(MPEGSTREAM *pStream, OUTREQ *pReq)
 {
     char sBuf[256];
@@ -313,12 +323,17 @@ int _isOutSizeOK(MPEGSTREAM *pStream, OUTREQ *pReq)
             bOK = 0;
         } else {
             bOK = pStream->nUnk0E0 >= pReq->nHeight;
-            /* Keeps this arm's slt/xori tail out of the shared block that
-             * gcc's cross-jumping otherwise folds the two arms into. */
-            LAUNDER(bOK);
         }
     } else {
-        bOK = pStream->nUnk0E4 >= pReq->nUnk0C * pReq->nUnk10;
+        int nArea;
+        int nLimit;
+
+        /* Laundering the product keeps this arm's slt/xori tail out of the
+         * shared block gcc's cross-jumping otherwise folds the arms into. */
+        nLimit = pStream->nUnk0E4;
+        nArea = pReq->nUnk0C * pReq->nUnk10;
+        LAUNDER(nArea);
+        bOK = nLimit >= nArea;
     }
     if (bOK == 0) {
         sprintf(sBuf, D_004D5DA8, pReq->nWidth, pReq->nHeight);
