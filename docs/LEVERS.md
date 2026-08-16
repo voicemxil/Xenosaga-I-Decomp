@@ -1048,6 +1048,22 @@ original merges two negative arms; the negated form makes gcc reach for
 
 ---
 
+## Narrow values and small loops
+
+**Nested `if (n >= 0) { if (n < 3) ... }` beats `&&`.** On an `lbu`
+value the `&&` form folds to one `bnez` — gcc drops the sign test when
+the comparisons are adjacent. Worth ~30 diffs each on two functions.
+
+**A tiny counted search loop needs its first iteration peeled by hand.**
+`i = 0; do { ... i++; } while (i <= 0);` has a back edge gcc 2.96 proves
+dead and deletes (~14 words). The original build kept both the peel and
+the unreachable second iteration.
+
+**A bare `extern char` scalar goes through `$gp` at -G8.** Declaring it
+`extern char X[0x10]` restores the original's absolute `lui`/`sb`.
+
+---
+
 ## Build hazards
 
 **A block-scope `extern` is a latent build bomb.** gcc 2.9x keeps such a
