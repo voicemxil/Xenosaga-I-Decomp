@@ -986,3 +986,31 @@ void nmlPacketAddGsFlushWide(void)
     }
     g_nGsEntry = 0;
 }
+
+/* Upload the two circle-shadow textures (a 64x64 PSMT8H page followed by
+ * a 16x16 CLUT 128 pages further in) and reference the caller's texture
+ * state block. */
+void nmlPacketSendCircleTexture(u_int nAddr, void *pData)
+{
+    u_long aImg[12];
+
+    s_pPacket = xglPacketGetCurrent();
+    sceVif1PkCnt(s_pPacket, 0);
+    sceVif1PkAddCode(s_pPacket, 0x11000000);
+    sceGsSetDefLoadImage(aImg, (short)(sRender.nTexBase << 5), 1, 0x13,
+                         0, 0, 64, 64);
+    aImg[0] |= 0x8000;
+    sceVif1PkOpenDirectCode(s_pPacket, 0);
+    sceVif1PkAddDirectDataN(s_pPacket, aImg, 5);
+    sceVif1PkCloseDirectCode(s_pPacket);
+    sceVif1PkRef(s_pPacket, nAddr, 0x102, 0, 0, 0);
+    sceVif1PkCnt(s_pPacket, 0);
+    sceGsSetDefLoadImage(aImg, (short)((sRender.nTexBase << 5) + 128), 1, 0,
+                         0, 0, 16, 16);
+    aImg[0] |= 0x8000;
+    sceVif1PkOpenDirectCode(s_pPacket, 0);
+    sceVif1PkAddDirectDataN(s_pPacket, aImg, 5);
+    sceVif1PkCloseDirectCode(s_pPacket);
+    sceVif1PkRef(s_pPacket, nmlPacketSetAttributeData16N(pData, 0x42), 0x42,
+                 0, 0, 0);
+}

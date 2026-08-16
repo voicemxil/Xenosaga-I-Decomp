@@ -2778,3 +2778,4 @@ tskUmnMailHensin = 0x00A07B38, 0x378; // tskUmn.c
 ACT_loadMotion = 0x00308228, 0x104; // ACT.c
 nmlPacketAddGsFlushWide = 0x002367D0, 0x17C; // nmlPacket.c
 _skipMB0 = 0x00212DF0, 0xBC; // sceMpegDec.c
+nmlPacketSendCircleTexture = 0x00237AC0, 0x178; // nmlPacket.c
