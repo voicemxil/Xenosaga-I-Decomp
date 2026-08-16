@@ -317,7 +317,7 @@ FILE_FIX_FLAGS = {
     # tskUmnSimulationInfo wants an argument-setup addu hoisted above
     # the lui/mtc1 pair for a float constant -- a 3-element rotation,
     # which --swap-adjacent structurally cannot express.
-    "tskUmn.c": "--rotate tskUmnSimulationInfo:100",
+    "tskUmn.c": "--rotate tskUmnSimulationInfo:100 --fp-pair-hazard UmnDataBaseModel",
     # JNT root accessors: TI-mode quadword copies whose allocator
     # tie-break lands the pair backwards (JVM subagent, verified).
     "JNT.c": ("--hoist-return-store JNT_getRootTrans,JNT_getRootRotate,JNT_getRootScale --swap-regs JNT_getRootTrans:2-3 --swap-regs JNT_getRootRotate:2-3 --swap-regs JNT_getRootScale:2-3 --branch-unlikely JNT_setModel:1"),

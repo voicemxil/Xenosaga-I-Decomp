@@ -2442,6 +2442,111 @@ void tskUmnDataBaseExWin(TSK_TASK *pTask, UMN_DBEX *w)
     }
 }
 
+/* --- Database screen: the rotating Gnosis model --- */
+
+/* The menu model task and the slice of its actor this screen touches.
+   Spelled out again here rather than shared with tskMenuModel.c: only
+   the three vectors and the load-progress scalar are reached. */
+typedef union {
+    float f[4];
+    long long ll[2];
+} MMQUAD;
+
+typedef struct {
+    MMQUAD v00;                         /* 0x0C0 */
+    char pad0D0[0x0E0 - 0x0D0];
+    MMQUAD v20;                         /* 0x0E0 */
+    char pad0F0[0x100 - 0x0F0];
+    MMQUAD v40;                         /* 0x100 */
+    char pad110[0x120 - 0x110];
+    float fScale;                       /* 0x120: 1.0 once loaded */
+} MMSTATE;
+
+typedef struct {
+    char pad00[0xC0];
+    MMSTATE st;                         /* 0x0C0 */
+} MMACT;
+
+typedef struct {
+    char pad00[0x10];
+    unsigned char nState;               /* 0x10 */
+    unsigned char nReady;               /* 0x11 */
+    char pad12[1];
+    unsigned char nMode;                /* 0x13 */
+    char pad14[0x20 - 0x14];
+    MMACT *pAct;                        /* 0x20 */
+} MENUMODELTSK;
+
+extern void MenuModelUnitBreak(void);
+extern void MenuModelControl(MENUMODELTSK *t);
+extern void MenuModelUnitOpen(MENUMODELTSK *t, int nMode);
+
+/* Per-frame driver for the database screen's model view.  Leaving page
+ * 49 (or any pending "busy" hand-off) rewinds the model to state 30,
+ * which closes it again; state 0 seeds the actor's rotation from its
+ * rest pose and halves its scale before opening it. */
+void UmnDataBaseModel(MENUMODELTSK *t)
+{
+    MMACT *act = t->pAct;
+    MMSTATE *p;
+
+    if (act == 0) {
+        if (UmnWork.nDataBaseBusy) {
+            MenuModelUnitBreak();
+            UmnWork.nDataBaseBusy = 0;
+        }
+    }
+    if (t->nReady == 0) {
+        return;
+    }
+    p = &act->st;
+    if (UmnWork.nPage != 49) {
+        if (t->nMode != 99) {
+            t->nMode = 30;
+        }
+    }
+    if (UmnWork.nDataBaseBusy) {
+        t->nMode = 30;
+        UmnWork.nDataBaseBusy = 0;
+    }
+    MenuModelControl(t);
+    switch (t->nMode) {
+    case 0: {
+        /* Retail holds &st.v20 in a register: the three halves are
+           stored through it, not off the state base. */
+        MMQUAD *pv = &p->v20;
+
+        p->v00.f[0] = -p->v40.f[0];
+        p->v00.f[1] = -p->v40.f[1];
+        p->v00.f[2] = -p->v40.f[2];
+        pv->f[2] = 0.5f;
+        pv->f[1] = 0.5f;
+        pv->f[0] = 0.5f;
+        t->nMode = 10;
+        }
+        /* fallthrough */
+    case 10:
+        MenuModelUnitOpen(t, 2);
+        t->nMode = 20;
+        break;
+    case 20:
+        break;
+    case 30:
+        MenuModelUnitOpen(t, 1);
+        t->nMode = 31;
+        /* fallthrough */
+    case 31:
+        if (p->fScale != 0.0f) {
+            break;
+        }
+        t->nMode = 99;
+        /* fallthrough */
+    case 99:
+        t->nState = 0xFF;
+        break;
+    }
+}
+
 /* --- Database screen: the keyword ("Index Search") viewer --- */
 
 /* The keyword viewer's work area.  The tyaUml display object at 0x7E0
