@@ -133,6 +133,13 @@ void *xglMovieMakeXtxHeader(XGLMOVIEINFO *pInfo, char *pBuf)
     q[0] = 0;
     p[5] = 0;
     p[9] = 0;
+    /* The three zero stores at +40/+48/+56 come out of gcc's sched2 as
+     * (+56, +48, +40); the original build issued (+40, +48, +56).  All
+     * 720 source orderings of this store group were compiled
+     * (tools/permute.py) and none reproduces it, so it is a pure
+     * scheduler tie-break, restored by
+     * --rotate-seq xglMovieMakeXtxHeader:28:3,xglMovieMakeXtxHeader:29:2.
+     * Safe by construction: all three store zero to distinct offsets. */
     return pBuf + 80;
 }
 

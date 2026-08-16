@@ -301,7 +301,7 @@ FILE_FIX_FLAGS = {
     # jal; gcc fills it the other way round.
     "tskMenuPause.c": ("--pin-slot-nop PauseMenu:0 "
                        "--swap-into-slot PauseMenu:3"),
-    "xglMovie.c": "--barrier-branch-move xglMovieClose",
+    "xglMovie.c": "--barrier-branch-move xglMovieClose --rotate-seq xglMovieMakeXtxHeader:28:3,xglMovieMakeXtxHeader:29:2",
     "xglMath.c": "--omit-hazard qmtc2 --lis-hazard-nop xglAtan2 --swap-adjacent xglGeometryInit:0",
     "newlib_mprec.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtod.c": "--barrier-return-store --barrier-branch-move",

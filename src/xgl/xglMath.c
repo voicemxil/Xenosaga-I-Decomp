@@ -409,13 +409,22 @@ extern void xglDmaDirectSrcChain(unsigned int nCh, unsigned int nAddr);
  * mfc1->qmtc2 hazard nop the original does not have; was 12 diffs). */
 /* Seed the VU0 R register, reset the LCG seed and upload the VU0
  * microcode overlay through a source-chain DMA */
+/* VU0's random unit is seeded from a float constant.  Naming it keeps
+ * gcc from emitting the `li.s` pseudo-op (whose gas mips1 wrapper hides
+ * the load from the scheduler-fixup passes) and emits the original's
+ * single gp-relative lwc1. */
+static const float fRinitSeed = 0.1f;
+
+/* The original's second scheduler issued this lwc1 ABOVE the prologue's
+ * stack adjust; gcc 2.96 will not move a load past an $sp write, so the
+ * pair is transposed by --swap-adjacent xglGeometryInit:0. */
 void xglGeometryInit(void)
 {
     __asm__ __volatile__(".set noreorder\n"
         "mfc1 $2, %0\n"
         "qmtc2 $2, $vf1\n"
         "vrinit $R, $vf1x\n"
-        ".set reorder" : : "f"(0.1f) : "$2");
+        ".set reorder" : : "f"(fRinitSeed) : "$2");
     iRandSeed = 0x12345678;
     xglDmaDirectSrcChain(0, (unsigned int)PacketDataVu0MicroCode);
 }
