@@ -1159,7 +1159,16 @@ void SsdInitMemoryManager(void *pAddr, int nSize)
     pBlock->nUnk09 = 0;
 }
 
-/* TODO: Match the remaining control-flow scheduling in this first-fit allocator. */
+/* TODO: near-miss, 22/56 words. The blocker is loop rotation: the original
+ * keeps the `pNext == 0` test at the TOP of the walk and closes the loop
+ * with an unconditional `b` back to it, while gcc rotates -- it peels the
+ * first pNext load, moves the test to the bottom as a `bnezl`, and
+ * duplicates the pEnd load into the annulled slot. Neither while-with-
+ * assignment-in-condition, for(;;)+break, continue-instead-of-goto,
+ * hoisting the first load above the loop, nor a SCHED_FENCE at the top of
+ * the body changes that. Second finding worth keeping: the original does
+ * NOT hold &RssdWork live across the walk -- it rematerialises the address
+ * in the loop's branch delay slot for the pMemEnd read that follows. */
 /* Allocate the first sound-heap gap large enough for one aligned block */
 void *iSsdNewMemoryPtr(int nSize, int nMagic)
 {
@@ -1202,7 +1211,8 @@ found:
     return pData;
 }
 
-/* TODO: Match the remaining control-flow scheduling in this reverse allocator. */
+/* TODO: near-miss, 40/56 words. Same loop-rotation blocker as
+ * iSsdNewMemoryPtr above -- see that comment for the sweep. */
 /* Allocate backward from the upper edge of the last fitting heap gap */
 void *iSsdNewMemoryPtr2(int nSize, int nMagic)
 {
