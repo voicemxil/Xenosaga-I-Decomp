@@ -31,7 +31,7 @@ typedef struct {
     int nVideoSize;      /* 0xA0 */
     int nVideoWrite;     /* 0xA4 */
     int nVideoRead;      /* 0xA8 */
-    char padAC[4];
+    int nVideoDone;      /* 0xAC */
     char *pAudioBuf;     /* 0xB0 */
     int nAudioSize;      /* 0xB4 */
     int nAudioWrite;     /* 0xB8 */
@@ -277,6 +277,8 @@ int fillBuff(XGLMOVIEINFO *pInfo, int nWait)
     char *pSrc;
     int nRead;
     int i;
+    int j;
+    int pBuf;
 
     if (pInfo->nLeft != 0) {
         pSrc = pInfo->pBuf - pInfo->nLeft + 0x4000;
@@ -449,6 +451,8 @@ int xglMpeg2Open(XGLMOVIEINFO *pInfo, char *pName)
 {
     int nResult;
     int i;
+    int j;
+    int pBuf;
 
     if (xglCdStreamOpen(pInfo, pName) < 0) {
         return -1;
@@ -479,4 +483,94 @@ int xglMpeg2Open(XGLMOVIEINFO *pInfo, char *pName)
     while (SsdGetResultValue(&nResult) < 0) {
     }
     return 0;
+}
+
+void FlushCache(int nMode);
+
+/* TODO: near-miss (17 words; every instruction is present, the residue
+ * is which register each 0x1000Bxxx IPU-register address lands in and
+ * whether `lui 0x1000` or the `lw nVideoBuf` goes first in the reset
+ * block). Levers that got here: a plain `for (;;)` with the recompute as
+ * the LAST statement -- gcc rotates it into the original's
+ * recompute-at-top layout AND, being a recognised loop, hoists 0xFFFFFF
+ * into $s3 (a hand-rotated `goto test` form reproduces the layout but
+ * loses the hoist and rematerialises the constant every iteration); a
+ * SEPARATE counter for the reset loop (sharing `i` pushes it into a
+ * callee-saved register); that reset loop counting BYTES (`i < 4096;
+ * i += 4`) the way the original's `li 4092 / addiu -4` does; volatile
+ * int pointers for the IPU registers (a plain `*(int *)0x1000B420`
+ * folds to an absolute MEM and gives `lui at` per store); and reading
+ * nVideoBuf into a local BEFORE the volatile stores, since a volatile
+ * store is a scheduling barrier the load cannot cross.
+ * Swept: block-scoped pointer locals for the three registers (volatile
+ * 26, plain 113 words), swapping the B420/B410 source order (22 but
+ * wrong program order), assigning through the existing nLen local. */
+/* IPU starvation callback: hand the IPU whatever whole 16-byte units the
+ * ring holds (topping it up first), or after 64 dry calls reset the ring
+ * to a stream of 0x100 words and restart the transfer */
+int nodataCallback(int nCode, void *pArg, XGLMOVIEINFO *pInfo)
+{
+    int *p;
+    int nAvail;
+    int nLen;
+    int nCount;
+    int i;
+    int j;
+    int pBuf;
+
+    nCount = pInfo->nUnk9A + 1;
+    pInfo->nUnk9A = nCount;
+    if ((unsigned char)nCount >= 65) {
+        pInfo->nErrCount = 16;
+        p = (int *)pInfo->nVideoBuf;
+        /* Counting BYTES, not elements: the original's loop counter is
+         * the byte offset (li 4092 / addiu -4), which keeps it in a
+         * caller-saved register instead of costing an extra $sN. */
+        for (j = 0; j < 4096; j += 4) {
+            *p = 256;
+            p++;
+        }
+        FlushCache(0);
+        pBuf = pInfo->nVideoBuf;
+        *(volatile int *)0x1000B420 = 4096;
+        *(volatile int *)0x1000B410 = pBuf;
+        *(volatile int *)0x1000B400 = 257;
+        return 1;
+    }
+    nAvail = pInfo->nVideoWrite - pInfo->nVideoDone;
+    pInfo->nVideoRead = pInfo->nVideoDone;
+    if (nAvail < 0) {
+        nAvail += pInfo->nVideoSize;
+    }
+    i = 0;
+    for (;;) {
+        if (i > 0xFFFFFF) {
+            break;
+        }
+        i++;
+        if (nAvail >= 4096) {
+            goto emit;
+        }
+        if (fillBuff(pInfo, 1) == 0) {
+            break;
+        }
+        nAvail = pInfo->nVideoWrite - pInfo->nVideoRead;
+        if (nAvail < 0) {
+            nAvail += pInfo->nVideoSize;
+        }
+    }
+    nAvail += 15;
+emit:
+    nLen = nAvail & -16;
+    if (nLen > 4096) {
+        nLen = 4096;
+    }
+    if (pInfo->nVideoSize < pInfo->nVideoRead + nLen) {
+        nLen = pInfo->nVideoSize - pInfo->nVideoRead;
+    }
+    *(volatile int *)0x1000B420 = nLen / 16;
+    *(volatile int *)0x1000B410 = pInfo->nVideoBuf + pInfo->nVideoRead;
+    *(volatile int *)0x1000B400 = 257;
+    pInfo->nVideoDone = (pInfo->nVideoRead + nLen) % pInfo->nVideoSize;
+    return 1;
 }
