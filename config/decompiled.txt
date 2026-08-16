@@ -2673,3 +2673,4 @@ mceStorePwd = 0x0020F800, 0x84; // sceMc.c
 mceIntrReadFixAlign = 0x0020F048, 0x90; // sceMc.c
 sefFreeSchedulerCf = 0x002E5118, 0x90; // sef.c
 DrawBack = 0x00253C70, 0x8C; // Game.c
+MenuShopLine = 0x002A7B80, 0x21C; // Menu.c

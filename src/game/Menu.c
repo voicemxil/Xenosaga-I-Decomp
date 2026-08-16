@@ -1998,6 +1998,10 @@ extern MENUTEXT dumm __asm__("dumm.9");
 extern MENUTEXT dumm2 __asm__("dumm2.10");
 extern void *func_A2C5F8(int);
 extern void *func_A2C698(int);
+/* Skill name/effect text pair; the body of the struct is filled in with
+   the rest of the skill-info layout further down. */
+typedef struct MenuSkillText MENUSKILLTEXT;
+extern MENUSKILLTEXT *func_A2C648(int nId);
 extern void *func_A2C6E8(int);
 extern void *func_A2C738(int);
 extern void *func_A2C5A8(int);
@@ -2072,7 +2076,7 @@ void *MenuTextGet(int nId)
         pRet = &dumm;
         break;
     case 8:
-        pRet = (void *)func_A2C648(nLo);
+        pRet = func_A2C648(nLo);
         break;
     case 9:
         pRet = func_A2C5A8(nLo);
@@ -3870,10 +3874,11 @@ void MenuShopLine(SHOPLINEWIN *pWin, SHOPLINE *p)
 {
     short aTarget[4];
     short nSlideY;
-    SHOPLINEVTX *v;
+    char *q;
     short *pT;
     PIN(int nY0, "$2");
     SHOPWORK *sw;
+    int nT3;
     int i;
 
     switch (pWin->nState) {
@@ -3899,11 +3904,12 @@ void MenuShopLine(SHOPLINEWIN *pWin, SHOPLINE *p)
         sw = MenuShopWork;
         LAUNDER_V(sw);
         nSlideY = nY0;
-        LAUNDER_V(sw);
+        nT3 = 512;
+        LAUNDER_V(nY0);
         aTarget[0] = sw->nSel * 21 + 294;
         aTarget[1] = sw->nSel * 21 + 298;
         aTarget[2] = sw->nSel * 21 + 302;
-        aTarget[3] = 512;
+        aTarget[3] = nT3;
         switch (sw->nPage) {
         case 0x30:
         case 0x90:
@@ -3926,12 +3932,12 @@ void MenuShopLine(SHOPLINEWIN *pWin, SHOPLINE *p)
         p->vtx[0].nX = 0;
         p->h44 = 512;
         pT = aTarget;
-        v = &p->vtx[1];
+        q = (char *)&p->vtx[0].nColor;
         for (i = 0; i < 4; i++) {
-            MoveSlide(&v->nX, pT, 3.0f);
+            MoveSlide((short *)(q + 8), pT, 3.0f);
             pT++;
-            v->a = p->nAlpha;
-            v++;
+            q[19] = p->nAlpha;
+            q += 12;
         }
         p->vtx[0].a = p->nAlpha;
         MoveSlide(&p->vtx[2].nY, &nSlideY, 8.0f);
@@ -4228,7 +4234,11 @@ void MenuAgwsListMake_Wpn(void)
     ptr = &MenuWork;
     pSort = MenuSortAddrGet(0);
     n = (int)MenuListGet(0);
-    win = (SHOPWINSP *)(AgwsList + 0x130);
+    {
+        char *pList = AgwsList;
+
+        win = (SHOPWINSP *)(pList + 0x130);
+    }
     MenuSortSet(0, 4,
         *((signed char *)ptr + ((MENUTECWORK *)ptr)->b56 + 0x10) | 0x2000);
     MenuListMake(0, 0);
@@ -4239,7 +4249,7 @@ void MenuAgwsListMake_Wpn(void)
         cnt = nCnt;
         do {
             if (MenuWeaponEquipPosCheck(w2->h64, *(short *)pSort,
-                    *((signed char *)w2 + w2->b56 + 0x10),
+                    *(signed char *)(w2->b56 + (int)w2 + 0x10),
                     w2->b54) != 0) {
                 *(unsigned char *)ptr = 0;
             } else {
@@ -4258,8 +4268,11 @@ void MenuAgwsListMake_Wpn(void)
     win->p10 = 0;
     win->p1C = MenuListGet(0);
     WindowSPItemChange(win);
-    WindowSPSetSelect(win,
-        &D_0036C200[*((signed char *)&MenuWork + MenuWork.b56 + 0x10) * 5 - 5]);
+    {
+        signed char *pw = (signed char *)&MenuWork;
+
+        WindowSPSetSelect(win, &D_0036C200[pw[pw[0x56] + 0x10] * 5 - 5]);
+    }
 }
 
 /* ================= Wave 4: mid-size Menu functions ================= */
@@ -6639,12 +6652,11 @@ typedef struct {
 } MENUSKILLREC;
 
 /* Skill name/effect text pair */
-typedef struct {
+struct MenuSkillText {
     char *pName;               /* 0x00 */
     char *pEffect;             /* 0x04 */
-} MENUSKILLTEXT;
+};
 
-extern MENUSKILLTEXT *func_A2C648(int nId);
 extern int func_A19698(int nChr, unsigned short hSkill);
 
 /* TODO: near-miss (34 diffs, length exact at 284) - every case body, the
