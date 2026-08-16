@@ -371,3 +371,91 @@ them reproduce the original.
 - **A `(short)` cast hoisted into its own local becomes a second `lh`
   load.** Left inline against a value already loaded with `lhu`, it
   stays the `sll`/`sra` pair the original has.
+
+---
+
+## From the Char/Check/ACT/sub/Hit run
+
+**Alignment variants of ONE struct tag, never two struct types.** When
+two members of the same struct must be copied with different move idioms
+(`ld/sd` from one, `ldl/ldr` to the other) the alignments have to differ.
+Spelling the 4-aligned one as a *second, identically-shaped struct* puts
+it in a different gcc alias set, and gcc will then hoist the read of a
+member above the store that fills it -- wrong code, not just a mismatch.
+Declare the record once and typedef it twice:
+
+```c
+struct EVECS { float x, y, z, w; };
+typedef struct EVECS __attribute__((aligned(8))) EVEC;  /* ld/sd   */
+typedef struct EVECS EVEC4;                             /* ldl/ldr */
+```
+
+Variants share `TYPE_MAIN_VARIANT`, so they share the alias set.
+**Corollary: member-level `__attribute__((aligned(8)))` does not work.**
+ee-gcc 2.9x takes block-move alignment from `TYPE_ALIGN`, not
+`DECL_ALIGN`; moving the attribute off the typedef onto each declaration
+silently turns every `ld/sd` vector copy in the file into `ldl/ldr`.
+
+**Switch node COUNT picks the decision-tree root.** `balance_case_nodes`
+has a special case for exactly three case nodes -- it splits at the
+middle, so `case 1/2/3` roots the tree at 2 (`beq 2`, then `slti 3`).
+A fourth node roots it at 1 (`beq 1`, `slti 2` -> default, `beq 2`,
+`beql 3`). If the original's dispatch starts at the lowest label, the
+source has a case you have not written -- usually an empty idle state
+(`case 0: break;`). This is invisible in the diff as anything but
+"the whole dispatch is shaped wrong".
+
+**Let CSE invent the FP temporaries.** Naming `cur`/`dst`/`v` as locals
+in a float easing routine rotated every FP register and made the product
+reuse the argument register `$f12`. Leaving `*pCur`/`*pDst` as memory
+reads, with only the difference in a local, made gcc create the
+temporaries in the original's order -- and the product then reused the
+dead `0.0f` register. Two locals fewer, 18 diffs to zero.
+
+**Sequence a call into its own local when its result feeds an argument
+list.** `Check_Angle(Get_Angle(a, b), c - half, c + half)` makes gcc
+compute `half` BEFORE the inner call, so `half` needs a callee-saved
+`$f20` and the frame changes. `angle = Get_Angle(a, b);` on its own line
+computes `half` after the call, in the caller-saved `$f13` that then
+becomes the argument. Worth a whole instruction and four register names.
+
+**A store of a constant next to a conditional wants a ternary.**
+`n = 2; if (!flag) n = 1;` sinks the `li 2` above the test and emits its
+own `sw`. `n = flag ? 2 : 1;` gives one `sw` fed by a `li` in the branch
+delay slot.
+
+**`^ 1`, not `!` or `== 0`.** `xori v0,v0,1` followed by a separate
+`sltu v0,zero,v0` only appears when the negation is spelled as an XOR;
+`!x` and `x == 0` both fold to one `sltiu v0,v0,1`.
+
+**Runs of same-block stores come out in REVERSE source order.** Three
+independent field stores closing a UI panel had to be written
+`nWidth / nMode / bFlags` to be emitted `nWidth`, `nMode`... no: to be
+emitted in the original's `nWidth`, `bFlags`, `nMode` order. When a short
+run of stores is the only difference, try the reversal before anything
+else, then permute exhaustively -- it is a six-case script.
+
+**An unaligned struct copy is order-sensitive against float work.** In
+Check_Undu, writing the 16-byte start-point copy before the direction
+vector made gcc emit the whole `ldl/ldr/sdl/sdr` block ahead of the float
+loads and rotated every callee-saved register (44 diffs). Written after
+the direction vector: exact.
+
+**Eight-argument calls are normal here.** `$a0-$a3` plus `$t0-$t3`.
+`Check_Undu` takes seven. Two of them are stored with `sd`, so those
+fields are 64-bit even though the arguments are plain `int`.
+
+### Swept and unreachable here
+
+- **Which of two loop-invariant constants gets the lower callee-saved
+  register.** In ACT_initSequence gcc hoists `32` and an
+  `ACT_updateDefault` address out of the loop into `$s4/$s5` and assigns
+  them the opposite way round to the original. The two fields' source
+  positions swap the STORE order and the register mapping *together*, so
+  neither ordering reaches the original. Hoisting either value into a
+  plain local, or pinning both, is worse. Permuter territory.
+- **Recomputing `lui %hi(sym)` at the top of each of several loops over
+  the same array.** ACT_pauseUpdate has three loops over `actor[]`; the
+  original rematerialises the `%hi` each time, gcc hoists it into a spare
+  register once. Scoping the pointers per loop makes it worse, not
+  better.
