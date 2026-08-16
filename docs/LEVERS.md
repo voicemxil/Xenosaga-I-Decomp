@@ -288,3 +288,66 @@ principled.
 `--barrier-return-store` targets GAS stealing the store into a return
 delay slot. When GCC ITSELF filled that slot, `--unfill-gcc-slots` is
 the right pass. The two read as interchangeable and are not.
+
+---
+
+## Added from the sound driver (sef/sdv/srs/ssd)
+
+**Two loops sharing a base pointer: spell the SECOND one with
+subscripts.** When a tail loop starts where the first loop ended, a
+walking `*p = 0; p++;` lets gcc reuse the already-live tail-address
+register directly. The subscript form `p[i] = 0;` makes it build its own
+induction variable off a *copy* of that register — the `move v1,a2` plus
+the extra R5900 pad nop the original has. Closed sefMemZero outright.
+
+**A repeated division by the same constant must be a named local.**
+`x / 60 / 60` written inline is folded to `x / 3600` and one `divu`
+disappears. Writing `m = x / 60;` and then using `m / 60` and `m % 60`
+keeps both divisions and lets them share one `divu`. (Symptom: `li 3600`
+where the original has several `li 60`s — gcc CSEs the `divu`s but never
+the constants, so a count of surplus `li K`s tells you how many division
+SITES the source had.)
+
+**An early `return CONST` hoists the constant to the top of the
+function.** When the original materialises a return value in its first
+few instructions and you materialise it at the end, the guard arm is a
+separate `return 1;`, not a fall-through to a shared expression that
+happens to evaluate to 1. Pairs with the `slt`/`sltu` row: a hit counter
+compared `< 1` only gives `sltiu` when the counter is `unsigned`.
+
+**Declare a float literal and its destination pointer INSIDE the arm
+that uses them, not pinned above the call.** `register float k
+__asm__("$f0") = ...;` above a call is silently dropped when the callee
+returns in `$f0`; a plain local inside the `if` body gets the `lwc1` and
+the address `addiu` scheduled into the call's and the branch's delay
+slots, which is where the original has them.
+
+**Prototype mismatch between two call sites of the same function is
+real.** `sdvPlaySound` is called with three arguments from one site and
+one from another, and `sefCnvEtEffectNo` with two and one. Widen the
+definition (dead parameters cost nothing) and give the narrow call site
+an aliased view: `extern int f1(int a) __asm__("f");`. Do not "fix" the
+narrow site by passing extra arguments.
+
+**Exhaustive permutation pays on small store blocks.** Four independent
+header stores in sefFreeSchedulerCf come out in neither source nor
+address order; 24 orderings is a two-minute script and exactly two of
+them reproduce the original.
+
+### Swept and unreachable here
+
+- **gcc cross-jumps identical `jr ra / move v0,aN` epilogues that the
+  original duplicates.** In sefCnvEtEffectNo three bands each have their
+  own fall-through epilogue; no arrangement of `return` vs `goto out`,
+  in either arm order, stops the merge, and dropping the `goto` turns
+  the arms into `movz`/`movn` instead.
+- **`(unsigned short)(x - K)` has three spellings and none gives
+  `addiu -K` + `andi 0xffff` in the block the original puts it in.**
+  Inline, gcc folds the `andi` away; as an `unsigned short` local it
+  builds the constant with `li 0xff69` + `addu`; as an int local
+  narrowed at the test it emits both but sinks them past the preceding
+  branch (a bare `__asm__ __volatile__("")` barrier pulls them back and
+  leaves only a register-naming difference).
+- **A `(short)` cast hoisted into its own local becomes a second `lh`
+  load.** Left inline against a value already loaded with `lhu`, it
+  stays the `sll`/`sra` pair the original has.
