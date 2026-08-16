@@ -51,6 +51,28 @@ data store and a `switch` case label (e.g. `nSlideY = 48` merged with
 `case 0x30:` into one callee-saved register, where retail materialises
 them independently).
 
+**A void-result call's declared RETURN TYPE is a register-allocation
+lever.** Declared `void`, gcc kept an unrelated read-modify-write in
+`$v0`; declared `int`, it moved to `$v1` and the function matched — same
+call, same arguments, no extra instruction. Check the prototype before
+reaching for a `PIN` when a near-miss is pure `$v0`/`$v1` naming around a
+call.
+
+**A constant that must cross a call has to be a local defined before
+it.** gcc 2.96 does NOT constant-propagate a local whose live range
+spans a call.
+
+**Advance a pointer local immediately after storing it** (`t->pp = p;
+p += 3;`) to kill the CSE that suppresses retail's reload.
+
+**A separate loop-counter variable per loop.** Reusing one `i` across
+two loops forces it into a callee-saved register and swaps the
+counter/pointer registers.
+
+**A byte field read for both a test and arithmetic wants the local
+INSIDE the arm** — `if (t->b) { n = t->b; ... }` recovers retail's `move`
+AND its `.p2align` pad: two words of LENGTH, not just registers.
+
 **One local, two roles.** A C local is one pseudo, so reusing it for two
 sequential purposes pins the second value into the first's register.
 This cuts BOTH ways and the direction is worth testing: reusing the
@@ -186,6 +208,16 @@ folds them and is TWO WORDS SHORTER. The mirror image of the block-local
 pointer entry — a third instance of this same axis, so always read the
 original's address arithmetic first.
 
+**Direct member access vs a struct pointer decides `addu` operand
+order.** `pEnt = &arr[i]; pEnt->f` gives `addu rd,off,base`; `arr[i].f`
+gives `addu rd,base,off`. No spelling of the pointer form reaches the
+latter.
+
+**The order of hoisted loop INVARIANTS is the source order of the
+statements that use them.** Writing a packet block in plain
+`p[0]..p[9]` order matched, while hoisting one element to second place
+moved its instruction seven slots and nothing else.
+
 **Let LSR build the giv.** `arr[i].field` yields `%hi/%lo(arr)` plus a
 separate `addiu +off` for the giv's initial value; a hand-walked pointer
 folds the offset into the `%lo` and comes out ONE WORD SHORTER — and
@@ -276,6 +308,14 @@ shared label.
 middle. A dispatch that starts at the LOWEST label means the source has
 a case you have not written — usually an empty `case 0: break;`.
 
+**A `beqz`/`bltz`/`slti 3` triple is a SWITCH decision tree**, not an
+if-chain.
+
+**`do {} while()` keeps the loop note** where a hand-rotated `goto test`
+loses it — the difference between a bound constant hoisted into `$s3`
+and rematerialised every iteration. (The goto-loop lever cuts both ways;
+see above.)
+
 **`switch` vs `if/else-if`.** gcc sorts the case TESTS but emits the
 BODIES in source order — that asymmetry is often the whole layout
 difference. Case-label order decides block layout.
@@ -311,6 +351,27 @@ two-instruction trampoline.
 ---
 
 ## Types, widths and constants
+
+**`while ((*p = *q) != 0) { q++; p++; }`** — the assignment EXPRESSION
+gives one `lbu` plus the `sll 24`/`bnez` QImode test. A named `char c`
+emits a second `lb`; an `unsigned char c` drops the `sll`.
+
+**`li at,0xffff` + `addu` means the source literally adds `0xFFFF`**,
+not `-1` (which folds to a single `addiu`).
+
+**A hardware/scratchpad store's addressing mode is a source choice.**
+Plain `*(char *)0x70000021 = 1` gives the absolute `lui at` form; a
+`volatile` pointer local gives the `lui`+`ori` register-base form. Worth
+~15 words if you pick wrong.
+
+**Volatile stores are scheduling barriers a load cannot cross** — read a
+field into a local BEFORE a volatile-store block if the original loads
+it early.
+
+**Check the struct's own ALIGNMENT when a `char pad[]` stops working.**
+Giving one struct a leading `int *` rounded its size 0x12 -> 0x14 and
+shifted every later member, surfacing as IMMEDIATE diffs in three
+already-matching functions.
 
 **`long` is 64-bit here.** `(long)` casts give dsll/daddu chains where
 plain int gives sll/addu.
