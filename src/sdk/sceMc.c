@@ -671,3 +671,49 @@ void mceIntrReadFixAlign(void *arg)
         }
     }
 }
+
+/* ------------------------------------------------------------------
+ * sceMcWrite: command 6.
+ *
+ * The IOP can only DMA from a 16-byte-aligned address, so a write whose
+ * buffer does not start on a boundary is split: the leading bytes up to
+ * the next boundary are staged inline in the payload at +32, and the
+ * DMA covers the aligned remainder.  A write of 16 bytes or fewer is
+ * staged whole.  The staging copy names the payload array at each use,
+ * so its address is re-formed inside the loop the way the original
+ * does, and the loop counter is compared UNSIGNED (`sltu`).
+ * ------------------------------------------------------------------ */
+
+int sceMcWrite(int fd, const void *buf, int size)
+{
+    unsigned int i;
+    int rc;
+
+    if (PollSema(semaidRegFunc) < 0)
+        return -200;
+    if (mcClientID[9] == 0) {
+        SignalSema(semaidRegFunc);
+        return -100;
+    }
+    sifParamOrd[0] = fd;
+    if (size < 17) {
+        sifParamOrd[5] = size;
+        sifParamOrd[6] = 0;
+        sifParamOrd[3] = 0;
+    } else {
+        int head = ((((int)buf - 1) & 0xfffffff0) - ((int)buf - 16));
+
+        sifParamOrd[6] = (int)buf + head;
+        sifParamOrd[3] = size - head;
+        sifParamOrd[5] = head;
+    }
+    for (i = 0; i < (unsigned int)sifParamOrd[5]; i++)
+        ((char *)sifParamOrd)[i + 32] = ((const char *)buf)[i];
+    FlushCache(0);
+    rc = sceSifCallRpc(mcClientID, 6, 1, sifParamOrd, 48, &retval, 4, 0, 0);
+    if (rc == 0)
+        mcRunCmdNo = 6;
+    else
+        SignalSema(semaidRegFunc);
+    return rc;
+}
