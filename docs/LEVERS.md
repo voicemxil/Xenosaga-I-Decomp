@@ -1208,3 +1208,20 @@ is the case: `int` parameter, `UmnPluginTextGet(plugin_folder[i])` in
 `tskUmnPluginInfo` (`lbu` for the compare, then `sll`/`sra`). Changing
 the prototype to `unsigned char` or `signed char` breaks one or the
 other; only `int` plus the cast satisfies both.
+
+**A `j` to a label defined inside the same inline-asm block needs
+`.globl`.** gas resolves the jump at assembly time and emits NO
+R_MIPS_26 relocation, so the encoded target is the section offset and
+the linked jump lands in the wrong place -- a CORRECTNESS bug, not just
+a one-word mismatch. Declaring the label `.globl` inside the block
+forces the relocation; checkfile then masks the field and the function
+matches. (`_ModelCalcClip` and friends.)
+
+**`move` inside an inline-asm block assembles to `addu`, not `daddu`.**
+Retail's register copies are `daddu rd,rs,$0` (0x2d); the `move` macro
+in an asm block gives 0x25. Spell `daddu %0, $2, $0` out. gcc's OWN
+moves are unaffected -- this only bites hand-written asm text.
+
+**Five pointer arguments arrive in `$a0-$a3` plus `$t0`** in this
+image's ABI, so a whole-body-asm leaf with a fifth operand needs no
+stack load (`_FacePoint`).
