@@ -186,6 +186,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "xglPacket.c": "--rotate-seq xglPacketInterpolate:26:2,xglPacketInterpolate:26:5",
     "tskMenuPausePage.c": "--swap-adjacent PauseMenuPage0:12 --rotate PauseMenuPage0:21:3",
     "xglCd.c": "--swap-adjacent xglCdReadCancel:41!",
     "xglDma.c": "--barrier-return-store xglDmaMFIFOKick --swap-adjacent xglDmaMFIFOKick:14",
@@ -336,12 +337,9 @@ FILE_FIX_FLAGS = {
     # __deregister_frame_info: the found-path epilogue's ld $16/$17 pair
     # is swapped in the original because `move $2,$16` still reads $16
     # (WAR delay in the original's sched2); see war_restore_swap.
-    "gcc_frame.c": ("--barrier-return-store --barrier-branch-move "
-                    "--expand-sym-loads "
-                    "--war-restore-swap __deregister_frame_info"),
+    "gcc_frame.c": ("--war-restore-swap __deregister_frame_info"),
     "_main.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
-    "fpbit_df.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads --branch-likely dpmul:5",
-    "fpbit_sf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "fpbit_df.c": "--branch-likely dpmul:5",
     # fabs: SET_HIGH_WORD's final `return x` computes the masked result
     # into a4/a1-family regs and needs an explicit copy into $2; gas's
     # reorder pass steals that copy into the jr $31 delay slot, but the

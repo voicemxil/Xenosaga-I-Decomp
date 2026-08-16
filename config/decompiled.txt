@@ -2444,3 +2444,4 @@ Java_xeno_util_Format_toString__F = 0x002F68B0, 0xA0; // Java_util.c
 taskEvtItemGet = 0x002C66C0, 0xD0; // task.c
 taskMapChange = 0x00246470, 0xBC; // task.c
 DrillXMoveFunc = 0x002CA260, 0x260; // Drill.c
+xglPacketInterpolate = 0x0022C398, 0xB8; // xglPacket.c
