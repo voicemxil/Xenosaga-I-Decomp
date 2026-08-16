@@ -1108,18 +1108,19 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     owner = function_at(lines)
 
-    # NOTE: a chain-tracking extension was tried here (accumulate pending
-    # mtc1 destinations across intervening non-compute instructions, under
-    # ASSUME_NO_LIT4) to close floorf/__ieee754_atan2f's missing hazard
-    # nop between two back-to-back mtc1s. It reproduced those two but
-    # regressed scalbnf and atanf (real, previously-matching functions
-    # gained spurious nops), and a closer look shows the true rule is NOT
-    # simply "any pending mtc1 register read by a later compute": atanf
-    # has the identical shape (mtc1->A, mtc1->B, compute reading A) with
-    # NO nop in the original, while floorf/atan2f need one. The
-    # distinguishing factor is not the register, the instruction count
-    # between them, or whether B is itself later consumed -- all of which
-    # were tried and ruled out. Left unsolved; see the resume doc.
+    # SOLVED -- see --fp-pair-hazard and reads_fp_reg().  A chain-tracking
+    # extension was tried here first (accumulate pending mtc1 destinations
+    # across intervening non-compute instructions) to close
+    # floorf/__ieee754_atan2f's missing hazard nop, and it regressed
+    # scalbnf and atanf.  It was reaching for the wrong invariant: the
+    # rule is neither the register chain, nor the distance, nor whether
+    # the destination is later consumed.  It is that the ORIGINAL
+    # assembler compared FP registers with the low bit masked off both
+    # sides -- $fN and $f(N^1) are one double -- so `mtc1 -> $f1` hazards
+    # against a following `mul.s $f0,$f4,$f0` and `mtc1 -> $f3` does not.
+    # atanf and scalbnf are exactly the cases where the pair does NOT
+    # overlap, which is why they regressed under any register-identity
+    # rule.  Opt in per file with --fp-pair-hazard.
     out = []
     lit_pool = []
     for i, line in enumerate(lines):
