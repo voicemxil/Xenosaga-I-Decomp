@@ -292,7 +292,20 @@ done:
     return nType;
 }
 
-/* Weapon cross-reference search. The three compared ids sit at +2, +4
+/* NEAR-MISS (1 word short of 33, ~10 differing words). The original
+ * keeps TWO separate return sites -- `jr ra / move v0,a3` inside the
+ * loop for the hit, and `jr ra / li v0,-1` at the tail for both the
+ * `nKey <= 0` guard and the loop falling out -- and leaves a nop in the
+ * blez delay slot. Every shape tried lets gcc sink `li v0,-1` into that
+ * delay slot and cross-jump the hit return into the same block, which
+ * is exactly one word shorter. Swept: shared-exit accumulator with
+ * goto; three `return i`s; block-local `short *` for each of the three
+ * compared fields (in use order and in address order); index form vs
+ * pointer form for the table walk. The three hoisted base pointers
+ * (tbl+2, tbl+4, tbl+6) come out right in every variant -- it is only
+ * the return-block layout that resists.
+ *
+ * Weapon cross-reference search. The three compared ids sit at +2, +4
  * and +6 of each 8-byte record -- the record's leading nWeaponID is not
  * examined, which is why the induction variable anchors at
  * _weaponTbl+2 and gcc hoists three separate base pointers. */
