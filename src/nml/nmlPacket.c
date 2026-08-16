@@ -229,7 +229,7 @@ void nmlPacketSetCurrent(void)
 /* Reset the GS register entry buffer */
 void nmlPacketGsInit(void)
 {
-    *(volatile int *)&g_nGsEntry = 0;
+    g_nGsEntry = 0;
 }
 
 /* Queue a CLAMP_1 register write */
