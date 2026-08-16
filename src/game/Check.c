@@ -370,3 +370,51 @@ int Check_InsideFan_Wooo(float *a, float *b, float fAngle, float fDist,
     half = fWidth / 180.0f * D_004D81C8 * 0.5f;
     return Check_Angle(angle, fAngle - half, fAngle + half) != 0;
 }
+
+extern float Get_Distance(float *, float *);
+extern int Check_Undu(float *, float *, int, VECTOR *, int, int, int);
+extern int CrossPointUwamono(float *, float *, VECTOR *, float);
+extern float D_004D8618;
+extern float D_004D861C;
+extern float D_004D8620;
+extern float D_004D8624;
+
+/* Full cone test: distance, angle, then a line-of-sight walk through the
+   undulation grid and the overlay-object silhouettes. */
+int Check_InsideFan(float *a, float *b, int nId, float fAngle, float fDist,
+                    float fWidth, float fHeight)
+{
+    VECTOR pt;
+    float angle;
+    float half;
+    float by;
+
+    if (fDist < Get_Distance3D(a, b)) {
+        return 0;
+    }
+    angle = Get_Angle(a, b);
+    half = fWidth / 180.0f * D_004D8618 * 0.5f;
+    if (Check_Angle(angle, fAngle - half, fAngle + half) == 0) {
+        return 0;
+    }
+    if (nId == -1) {
+        return 1;
+    }
+    if (Check_Undu(a, b, nId, &pt, 1, 0, 1024) == 0) {
+        return 0;
+    }
+    if (D_004D861C <= Get_Distance(b, &pt)) {
+        return 0;
+    }
+    by = b[1];
+    if (D_004D8620 <= __builtin_fabsf(by - pt.y)) {
+        return 0;
+    }
+    if (D_004D8624 < __builtin_fabsf(a[1] - by)) {
+        return 0;
+    }
+    /* `^ 1` not `== 0`: the original normalises the flipped bit with a
+       separate `sltu`, which only appears if the negation is spelled as an
+       XOR. `== 0` and `!x` both fold to a single sltiu. */
+    return (CrossPointUwamono(a, b, &pt, fHeight) ^ 1) != 0;
+}
