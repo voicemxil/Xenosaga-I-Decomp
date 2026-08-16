@@ -368,10 +368,9 @@ void sdvDrawAlters(int nOwner)
  * packs that serial into the high half and the slot index into the low.
  * The serial is re-read for the store because the block copy may alias
  * it. */
-extern int _sdvAlterSerial;
-
 int sdvCreateAlter(SDV_ALTER_COPY *pSrc)
 {
+    static int serial;
     SDV_ALTER_TAIL *q;
     int i;
     int nOfs;
@@ -382,10 +381,10 @@ int sdvCreateAlter(SDV_ALTER_COPY *pSrc)
     q = (SDV_ALTER_TAIL *)(pBase + 0x1270);
     for (i = 0, nOfs = 0; i < 16; i++, nOfs += 0x1280) {
         if (q->nUsed == 0) {
-            nSerial = (_sdvAlterSerial + 1) & 0xFF;
-            _sdvAlterSerial = nSerial;
+            nSerial = (serial + 1) & 0xFF;
+            serial = nSerial;
             *(SDV_ALTER_COPY *)(char *)(nOfs + (int)pBase) = *pSrc;
-            q->nSerial = _sdvAlterSerial;
+            q->nSerial = serial;
             q->f1276 = 0;
             q->nFlags = 0;
             q->nUsed = 1;
