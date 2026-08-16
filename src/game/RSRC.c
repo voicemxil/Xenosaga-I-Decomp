@@ -27,6 +27,8 @@ extern int infoIndex;
 extern int infoLength;
 extern u_int RSRC_loadFileSub(RSRC *pResource, void *pPath, void *pFile);
 extern void *memset(void *pDest, int nValue, u_int nSize);
+extern int strlen(const char *pStr);
+extern int strncmp(const char *pA, const char *pB, int nLen);
 
 void RSRC_inactiveSource(RSRC *pResource, u_int pSource)
 {
@@ -219,4 +221,27 @@ RSRC *RSRC_create(void *pBase, u_int nSize, int nItemCapacity)
     pResource->pItems = (RSRCITEM *)((u_int)pResource - nItemCapacity * 16);
     pResource->nItemCount = 0;
     return pResource;
+}
+
+/* Look up a loaded resource by file name; only type-1 (file) items are
+   candidates. */
+u_int RSRC_searchFile(RSRC *pResource, char *pName)
+{
+    int nItemCount = pResource->nItemCount;
+    int nLen = strlen(pName);
+    RSRCITEM *pItem = pResource->pItems;
+    int i = 0;
+
+    if (nItemCount != 0) {
+        do {
+            if (pItem->nType == 1) {
+                if (strncmp((char *)pItem->pName, pName, nLen) == 0) {
+                    return pItem->pData;
+                }
+            }
+            i++;
+            pItem++;
+        } while (i < nItemCount);
+    }
+    return 0;
 }
