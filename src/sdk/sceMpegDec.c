@@ -424,3 +424,100 @@ int _skipMB0(MPEGSTREAM *pStream, int *pMV, int *pType, int *pField, int *pStat)
     *pStat &= ~1;
     return bOK;
 }
+
+extern char D_004D5D68[];  /* second picture_structure in one frame */
+extern char D_004D5D88[];  /* unknown picture_structure */
+
+/* Track the presentation ordering across a temporal_reference wrap. */
+void _updateTempTackData(MPEGSTREAM *pStream, int nTempRef)
+{
+    /* The original keeps the stream pointer in $a2 and the base in $a0;
+     * gcc leaves the pointer in $a0 and never makes the copy at all. */
+    PIN(MPEGSTREAM *p, "$6");
+    int nBase;
+    int bWrapped;
+    int nCur;
+    int nMax;
+
+    p = pStream;
+    LAUNDER_V(p);
+    bWrapped = 0;
+    nBase = 0;
+    if (p->nUnk150 != 3) {
+        if (nTempRef != 0) {
+            if (nTempRef < 0) {
+                bWrapped = p->nUnk854 == 0;
+            }
+            p->nUnk854 = 0;
+            nBase = nTempRef;
+        }
+    }
+    nCur = p->nUnk84C + nTempRef;
+    p->nUnk1AC = nCur;
+    if (bWrapped != 0) {
+        if (nBase >= nTempRef) {
+            p->nUnk1AC = nCur + 1024;
+        }
+    }
+    nMax = p->nUnk850;
+    nCur = p->nUnk1AC;
+    if (nMax < nCur) {
+        nMax = nCur;
+    }
+    p->nUnk850 = nMax;
+}
+
+/* motion_vector(): fold one decoded delta into the running predictor. */
+void _decode_motion_vector(int *pVal, int nFCode, int nDelta, int nResid,
+                           int bHalf)
+{
+    int nLim;
+    int v;
+
+    nLim = 16 << nFCode;
+    v = bHalf ? (*pVal >> 1) : *pVal;
+    if (nDelta > 0) {
+        v += ((nDelta - 1) << nFCode) + nResid + 1;
+        if (v >= nLim) {
+            v -= nLim * 2;
+        }
+    } else if (nDelta < 0) {
+        v -= ((~nDelta) << nFCode) + nResid + 1;
+        if (v < -nLim) {
+            v += nLim * 2;
+        }
+    }
+    *pVal = bHalf ? v * 2 : v;
+}
+
+/* picture_data(): decode into the reference image the structure selects. */
+int _decPicture(MPEGSTREAM *pStream)
+{
+    REFIMAGE *pImg;
+    int nRet;
+
+    if (pStream->nUnk174 == 3 && pStream->nUnk120 != 0) {
+        _Error(pStream, D_004D5D68);
+        pStream->nUnk120 = 0;
+    }
+    switch (pStream->nUnk174) {
+    case 2:
+        pImg = pStream->pUnk1E0;
+        break;
+    case 1:
+        pImg = pStream->pUnk1D0;
+        break;
+    case 3:
+        pImg = pStream->pUnk1C0;
+        break;
+    default:
+        pImg = pStream->pUnk1C0;
+        _Error(pStream, D_004D5D88);
+        break;
+    }
+    nRet = _pictureData0(pStream);
+    if (nRet != 0) {
+        pImg->nUnk28 = 1;
+    }
+    return nRet;
+}
