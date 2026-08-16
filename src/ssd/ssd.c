@@ -1616,18 +1616,25 @@ typedef struct {
 /* Stash a realtime note-trigger request directly into RssdWork and wake
  * the IOP-side handler via its own (distinct, +0x1B8) semaphore -- no
  * sceSifCallRpc round trip.
- * PARKED near-miss (14/20 words): field offsets/logic verified against
- * tools/disasm.py -- it is a leaf (tail-calls SignalSema via `j`, no other
- * calls), so nothing constrains gcc's register choice and permute.py's
- * exhaustive statement-order sweep (720 orderings) could not find one that
- * reaches 0 diffs; every ordering bottoms out at 14. Not registered in
- * config/decompiled.txt. */
+ * PARKED near-miss, 9/20 words (was 14). The SCHED_FENCE after the flags
+ * update is what fixed the register allocation: without it gcc sinks the
+ * +0x1B8 semaphore load to just before its use and the whole function
+ * shifts a register (base in $v0 instead of $v1, and so on down). With the
+ * fence every register now matches the original. What is left is three
+ * things: the original hoists the epilogue's `ld ra` to right after the
+ * flags ori while gcc leaves it near the tail call; the original loads
+ * nVal1A with a signed `lh` where gcc narrows a short-to-short copy to
+ * `lhu`; and the remaining loads/stores interleave differently. Swept for
+ * the lh: int and short temporaries, explicit (short) and (int) casts, a
+ * LAUNDER on the temp, and grouping all three loads ahead of all three
+ * stores (that last one is worse, 11). Not registered. */
 void RssdBusy(RSSD_BUSY_ARG *pArg)
 {
     RSSD_WORK *p = &RssdWork;
     int nSema = *(int *)((char *)p + 0x1B8);
 
     p->nFlags |= 2;
+    SCHED_FENCE();
     *(int *)((char *)p + 8) = pArg->nVal10;
     p->nResolution = pArg->nVal18;
     *(short *)((char *)p + 0x12) = pArg->nVal1A;
