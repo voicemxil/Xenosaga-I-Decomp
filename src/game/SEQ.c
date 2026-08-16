@@ -62,7 +62,8 @@ typedef struct {
 typedef struct {
     int nMode;                      /* 0x00 */
     int nCount;                     /* 0x04 */
-    u8 pad08[0x18];                 /* 0x08 */
+    u8 pad08[0x8];                  /* 0x08 */
+    int nFrame[4];                  /* 0x10 */
     float fFrom[4];                 /* 0x20 */
     float fTo[4];                   /* 0x30 */
     float fDelta[4];                /* 0x40 */
@@ -232,6 +233,100 @@ void SEQ_motion(ACTOR *a)
         }
     }
     m->fTime += w->fSpeed;
+}
+
+
+/* Step the actor's linear scale channel: on the first frame of each axis
+   compute the per-frame delta from the current scale to the target, then
+   walk the scale toward the target and clear the axis when it arrives. */
+void SEQ_scale(ACTOR *a)
+{
+    SEQUENCE *p = &actSequence[a->nSerial];
+    SEQ_LIN *m = &p->scl.lin;
+    float *pFrom = m->fFrom;
+    float *pTo = m->fTo;
+    float *pDelta = m->fDelta;
+    float *s = a->fScale;
+    float d[3];
+
+    if ((p->nState & 0x20) == 0) {
+        if ((p->nFlags & 0x20) != 0) {
+            float f = s[0];
+            int n;
+
+            pFrom[0] = f;
+            n = m->nFrame[0];
+            if (n > 0) {
+                pDelta[0] = (pTo[0] - f) * (1.0f / (float)n);
+            }
+            p->nCount = 0;
+            p->nState |= 0x20;
+        } else {
+            pDelta[0] = 0.0f;
+            p->nState |= 0x20;
+        }
+    }
+    if ((p->nState & 0x40) == 0) {
+        if ((p->nFlags & 0x40) != 0) {
+            float f = s[1];
+            int n;
+
+            pFrom[1] = f;
+            n = m->nFrame[1];
+            if (n > 0) {
+                pDelta[1] = (pTo[1] - f) * (1.0f / (float)n);
+            }
+            p->nCount = 0;
+            p->nState |= 0x40;
+        } else {
+            pDelta[1] = 0.0f;
+            p->nState |= 0x40;
+        }
+    }
+    if ((p->nState & 0x80) == 0) {
+        if ((p->nFlags & 0x80) != 0) {
+            float f = s[2];
+            int n;
+
+            pFrom[2] = f;
+            n = m->nFrame[2];
+            if (n > 0) {
+                pDelta[2] = (pTo[2] - f) * (1.0f / (float)n);
+            }
+            p->nCount = 0;
+            p->nState |= 0x80;
+        } else {
+            pDelta[2] = 0.0f;
+            p->nState |= 0x80;
+        }
+    }
+    if ((p->nFlags & 0x20) != 0) {
+        d[0] = __builtin_fabsf(pTo[0] - s[0]);
+        if (d[0] <= __builtin_fabsf(pDelta[0])) {
+            s[0] = pTo[0];
+            p->nFlags &= ~0x20;
+        } else {
+            s[0] = s[0] + pDelta[0];
+        }
+    }
+    if ((p->nFlags & 0x40) != 0) {
+        d[1] = __builtin_fabsf(pTo[1] - s[1]);
+        if (d[1] <= __builtin_fabsf(pDelta[1])) {
+            s[1] = pTo[1];
+            p->nFlags &= ~0x40;
+        } else {
+            s[1] = s[1] + pDelta[1];
+        }
+    }
+    if ((p->nFlags & 0x80) != 0) {
+        d[2] = __builtin_fabsf(pTo[2] - s[2]);
+        if (d[2] <= __builtin_fabsf(pDelta[2])) {
+            s[2] = pTo[2];
+            p->nFlags &= ~0x80;
+        } else {
+            s[2] = s[2] + pDelta[2];
+        }
+    }
 }
 
 /* Advance a unit's spline-driven rotation channel (degrees to radians) */
