@@ -440,3 +440,39 @@ char *make_fullpath(char *pDest, char *pName, int nFlag)
     }
     return p;
 }
+
+int sceWrite(int nFd, void *pBuf, int nSize);
+int sceChstat(char *pName, void *pStat, int nMask);
+
+typedef struct {
+    int nUnk00;
+    int nMode;
+    char pad08[56];
+} XGLHDDSTAT;
+
+/* Create (or truncate) a save file, write it out and stamp its mode */
+int create_file(char *pName, int nFlag, void *pBuf, int nSize)
+{
+    char szPath[256];
+    XGLHDDSTAT stat;
+    int nFd;
+    int nRet;
+
+    make_fullpath(szPath, pName, nFlag);
+    nFd = sceOpen(szPath, 1538, 438);
+    if (nFd < 0) {
+        return -1;
+    }
+    nRet = 0;
+    if (sceWrite(nFd, pBuf, nSize) < 0) {
+        nRet = -1;
+    }
+    if (sceClose(nFd) < 0) {
+        nRet = -1;
+    }
+    stat.nMode = 0x8497;
+    if (sceChstat(szPath, &stat, 2) < 0) {
+        nRet = -1;
+    }
+    return nRet;
+}

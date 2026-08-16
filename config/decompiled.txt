@@ -2748,3 +2748,4 @@ check_culling_map = 0x0023EBE0, 0xB8; // xglCulling.c
 nmlPacketAddTexture = 0x00237DA0, 0x148; // nmlPacket.c
 stream_check = 0x00226CA8, 0xB4; // xglSound.c
 TMENU_init = 0x0025ED60, 0x368; // TMENU.c
+create_file = 0x00227E68, 0xBC; // xglHdd.c
