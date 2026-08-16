@@ -973,3 +973,40 @@ void sefLerpVectorSC(void *pTable, void *pState)
             ".set reorder" : : "r"(pDst), "f"(k) : "$8", "memory");
     }
 }
+
+/* --- sefDestroyEffect / sefDestroyEffectCf: tear the whole effect
+ * system down. Identical apart from the reloader-memory argument (1 vs
+ * 0). The three globals are wiped with memset, and the last teardown
+ * step is a tail call. --- */
+extern void sefKillEffect(int nID);
+extern void sdvInitAmbient(void);
+extern void scDestroyScriptAll(void);
+extern void sresFreeReloaderMemory(int nWhich);
+extern void sdvDestroyAlters(void);
+extern void *memset(void *p, int c, unsigned int n);
+
+void sefDestroyEffect(void)
+{
+    _sefLoadEftQue = 0;
+    sefKillEffect(-1);
+    sdvInitAmbient();
+    scDestroyScriptAll();
+    sresFreeReloaderMemory(1);
+    memset(_battlePrm, 0, 52);
+    memset(_battleData, 0, 560);
+    memset(&_battleActor, 0, 3488);
+    sdvDestroyAlters();
+}
+
+void sefDestroyEffectCf(void)
+{
+    _sefLoadEftQue = 0;
+    sefKillEffect(-1);
+    sdvInitAmbient();
+    scDestroyScriptAll();
+    sresFreeReloaderMemory(0);
+    memset(_battlePrm, 0, 52);
+    memset(_battleData, 0, 560);
+    memset(&_battleActor, 0, 3488);
+    sdvDestroyAlters();
+}
