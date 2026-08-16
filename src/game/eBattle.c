@@ -98,3 +98,95 @@ void *eBattleWinInit2(unsigned char *pWork)
     endPrintInit();
     return p;
 }
+
+/* Every win sub-window shares this layout: a status word at 0, a page
+ * word at 4, a WindowDX block at 8, a state byte at 0x18, and its
+ * message context at 0x19C. */
+typedef struct {
+    int nStatus;               /* 0x000 */
+    int nPage;                 /* 0x004 */
+    char win[0x18 - 8];        /* 0x008 WindowDX block */
+    char nState;               /* 0x018 */
+    char pad19[0x19C - 0x19];
+    char msg[4];               /* 0x19C */
+} EBWIN;
+
+typedef struct {
+    char pad0[0x2A];
+    unsigned short hHeld;      /* 0x2A */
+} EBPADWORK;
+extern EBPADWORK PadData;
+
+extern void endPrintExtFunc(int nColor, int a, int b);
+extern void WindowDXMain(void *p);
+extern void eMessageMain(void *p);
+extern int eMessageNextPage(void *p, int a);
+
+/* BW3: the plain message sub-window. State 0 closes it, state 3 keeps
+ * pumping the message, anything else in range just stays open. */
+int eBattleWinMain2(void)
+{
+    EBWIN *w = (EBWIN *)g_pEBattleUnk3;
+    int ret;
+    if (w->nStatus == 0) {
+        return 0;
+    }
+    endPrintExtFunc(0xFFFFFF, 100, 0);
+    WindowDXMain(((EBWIN *)g_pEBattleUnk3)->win);
+    w = (EBWIN *)g_pEBattleUnk3;
+    switch (w->nState) {
+    case 0:
+        w->nStatus = 0;
+        goto closed;
+    case 3:
+        eMessageMain(w->msg);
+        ret = 2;
+        break;
+    case 1:
+    case 2:
+    case 4:
+    case 5:
+        ret = 1;
+        break;
+    default:
+    closed:
+        ret = 0;
+        break;
+    }
+    return ret;
+}
+
+/* BW4: same shape, but its message advances a page on the confirm button
+ * and the state numbering starts at 1. */
+int eBattleWinMain4(void)
+{
+    EBWIN *w = (EBWIN *)g_pEBattleUnk5;
+    int ret;
+    if (w->nStatus == 0) {
+        return 0;
+    }
+    endPrintExtFunc(0xFFFFFF, 100, 0);
+    WindowDXMain(((EBWIN *)g_pEBattleUnk5)->win);
+    w = (EBWIN *)g_pEBattleUnk5;
+    switch (w->nState) {
+    case 3:
+        if (PadData.hHeld & 0x20) {
+            if (eMessageNextPage(w->msg, 0) == 0) {
+                ((EBWIN *)g_pEBattleUnk5)->nPage = 1;
+            }
+        }
+        eMessageMain(((EBWIN *)g_pEBattleUnk5)->msg);
+        ret = 2;
+        break;
+    case 1:
+    case 2:
+    case 4:
+    case 5:
+        ret = 1;
+        break;
+    default:
+        ret = 0;
+        break;
+    }
+    return ret;
+}
