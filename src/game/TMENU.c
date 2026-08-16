@@ -810,8 +810,8 @@ void TMENU_updateDefault(TMENU *t)
             }
             nFlags = t->nFlags;
             if (nFlags & 0x200) {
-                t->b54 = t->b68;
                 t->nFlags = nFlags & ~0x200;
+                t->b54 = t->b68;
             }
             return;
         case 16:
