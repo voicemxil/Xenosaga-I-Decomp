@@ -1014,3 +1014,74 @@ void nmlPacketSendCircleTexture(u_int nAddr, void *pData)
     sceVif1PkRef(s_pPacket, nmlPacketSetAttributeData16N(pData, 0x42), 0x42,
                  0, 0, 0);
 }
+
+/* TODO: near-miss, 6 diffs of 107 words, NOT registered.  Right length,
+ * right control flow, right constants, right registers everywhere except
+ * one: the original merges the PRIM bits with `or s1,s1,s0` (into
+ * nBase's own register) and we get `or s0,s1,s0` (into nOn's).  Because
+ * our `or` no longer reads s1 afterwards, the four setup instructions
+ * around it (lui 0x8 / lui 0xfff7 / nor / ori) also come out in a
+ * different order -- fix the destination and the order follows.
+ * Swept and REJECTED (all worse):
+ *   `nBase |= nOn << 20;` and `inTag.w[1] |= (nBase |= ...)`  -- 11, and
+ *      they rotate the whole constant allocation ($v1/$a0/$t1 -> one
+ *      register short: 0x80000 and the or-result get coalesced)
+ *   `(nOn << 20) | nBase`, a named nTag temp, `nOn <<= 20` first (13),
+ *      `nOn <<= 20` + assign back to nBase (17), nOn shifted at its
+ *      definition (17), nMask hoisted to just before its use (69),
+ *      nMask written `~(0x80000 | nBase)` / `& ~0x80000` (11),
+ *      LAUNDER_V on nOn (23) or on nBase (20) after the merge.
+ * The union type IS load-bearing and must stay: with `u_int aTag[4]` +
+ * `*(TI *)aTag` gcc hoists the `lw 4(sp)` ABOVE the `sq` that fills the
+ * buffer -- 18 diffs and a genuine aliasing miscompile.  This one is
+ * good permuter material: it is a pure register tie-break.
+ */
+/* Copy the model's GIF tag template, patch its PRIM word for the given
+ * primitive and the layout's alpha/blend status bits, and unpack it into
+ * the three microprogram tag slots (0x3F3, 0x3F4, 0x3F2). */
+typedef union {
+    TI q;
+    u_int w[4];
+} GIFTAG;
+
+void nmlPacketAddGifTag(void *pModel, void *pLayout, int nPrim)
+{
+    GIFTAG inTag;
+    u_int nBase;
+    u_int nMask;
+    int nStatus;
+    int nOn;
+
+    nStatus = *(int *)((char *)pLayout + 0x250);
+    nOn = ((nStatus & 0x1000002) != 0);
+    nOn = ((nStatus & 0x2000) != 0) ? 0 : nOn;
+    s_pPacket = xglPacketGetCurrent();
+    sceVif1PkCnt(s_pPacket, 0);
+    inTag.q = *(TI *)((char *)pModel + 0xB0);
+    nBase = nPrim << 21;
+    nMask = ~(nBase | 0x80000);
+    inTag.w[1] |= nBase | (nOn << 20);
+    if ((*(int *)((char *)pModel + 0xC0) & 1) != 0) {
+        inTag.w[1] |= 0x80000;
+    } else {
+        inTag.w[1] &= 0xFFF7FFFF;
+    }
+    nStatus = *(int *)((char *)pLayout + 0x250);
+    if ((nStatus & 0x8000) != 0) {
+        inTag.w[1] &= nMask;
+    }
+    if ((nStatus & 0x800) != 0) {
+        inTag.w[1] |= 0x80000;
+    }
+    sceVif1PkOpenUpkCode(s_pPacket, 0x3F3, 0x6C, 1, 1);
+    sceVif1PkAddUpkData128(s_pPacket, inTag.q);
+    sceVif1PkCloseUpkCode(s_pPacket);
+    inTag.w[1] = (inTag.w[1] & 0xFFF7FFFF) | 0x1200000;
+    sceVif1PkOpenUpkCode(s_pPacket, 0x3F4, 0x6C, 1, 1);
+    sceVif1PkAddUpkData128(s_pPacket, inTag.q);
+    sceVif1PkCloseUpkCode(s_pPacket);
+    inTag.w[1] = (inTag.w[1] | 0x80000) & 0xFEFFFFFF;
+    sceVif1PkOpenUpkCode(s_pPacket, 0x3F2, 0x6C, 1, 1);
+    sceVif1PkAddUpkData128(s_pPacket, inTag.q);
+    sceVif1PkCloseUpkCode(s_pPacket);
+}
