@@ -50,9 +50,19 @@ typedef struct {
             signed char nLo;            /* 0x50 */
             signed char nHi;            /* 0x51 */
         } ex;
+        struct {
+            char pad[3];
+            signed char nSel;           /* 0x53: mail cursor row */
+        } mail;
     } u;
-    int nListNum;                       /* 0x54: rows in the current list */
-    char pad58[0x5C - 0x58];
+    union {
+        int nListNum;                   /* 0x54: rows in the current list */
+        struct {
+            signed char nNum;           /* 0x54: mail rows on screen */
+            char pad55[1];
+            signed char aId[6];         /* 0x56: their header ids */
+        } mail;
+    } u54;
     signed char nMailSel;               /* 0x5C: mail hint-slot cursor */
     char pad5D[1];
     signed char nDataBaseOpen;          /* 0x5E: pop-up may be opened */
@@ -1147,7 +1157,7 @@ void tskUmnSimulationList(TSK_TASK *pTask, UMN_LIST *w)
         w->nX = 528;
         w->nY = 112;
         w->nColor = 0xFFFF00;
-        for (i = 0; i < UmnWork.nListNum; i++) {
+        for (i = 0; i < UmnWork.u54.nListNum; i++) {
             w->row[i].pText = ListText[i];
             if (GameLoopState.nFlags & 0x400000) {
                 w->row[i].bGray = 0;
@@ -1530,4 +1540,145 @@ void tskUmnPluginList(TSK_TASK *pTask, UMN_PLIST *w)
         WindowSPMain(&w->sp);
     }
     xglFontDebugPrintf(0, 16, "list : %2d", w->nState);
+}
+
+/* --- Mail screen: the reply ("hensin") window --- */
+
+/* eMessage object as this screen lays it out: the header the mail list
+   shares, 0x44 bytes, position at +4 rather than +0. */
+typedef struct {
+    char pad00[4];
+    short nX;                           /* 0x04 */
+    short nY;                           /* 0x06 */
+    int nColor;                         /* 0x08 */
+    char pad0C[0x44 - 0x0C];
+} EMSG;
+
+/* eCursol object: same +4 position header. */
+typedef struct {
+    char pad00[4];
+    short nX;                           /* 0x04 */
+    short nY;                           /* 0x06 */
+    int nColor;                         /* 0x08 */
+    char pad0C[0x50 - 0x0C];
+} ECURSOL;
+
+typedef struct {
+    unsigned char nState;               /* 0x000 */
+    unsigned char bReady;               /* 0x001 */
+    char pad002[2];
+    short nX;                           /* 0x004 */
+    short nY;                           /* 0x006 */
+    int nColor;                         /* 0x008 */
+    WINDOWDX win;                       /* 0x00C */
+    EMSG msg;                           /* 0x1A0 */
+    EMSG list[3];                       /* 0x1E4 */
+    ECURSOL cur;                        /* 0x2B0 */
+} UMN_HENSIN;
+
+extern void eCursolSet(ECURSOL *pCur, int nMode);
+extern void eCursolModeChange(ECURSOL *pCur, int nMode);
+extern void eCursolMain(ECURSOL *pCur);
+extern void eMessageModeChange(void *pMsg, int nMode);
+extern char *UmnMailHeaderGet(signed char nNo);
+
+/* Mail screen: the three-choice reply window.
+ *
+ * The window's own nState runs 0 -> 10 (cursor parked, wait for page 81)
+ * -> 20 (slide in) -> 30 (accept input) -> 40 (slide out).  The trailer
+ * redraws unconditionally once bReady is set: the "1:\n2:\n3:" numbering
+ * column, one eMessage per available reply, and the cursor parked on the
+ * row UmnWork selected. */
+void tskUmnMailHensin(TSK_TASK *pTask, UMN_HENSIN *w)
+{
+    short nTarget;
+    short nTargetOut;
+    int i;
+
+    if (UmnWork.nScene != 1) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nX = 528;
+        w->nY = 48;
+        w->nColor = 0x00FF0000;
+        WindowDXSet(&w->win);
+        w->win.nX = w->nX;
+        w->win.nW = 302;
+        w->win.nH = 78;
+        w->win.nY = w->nY;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        eCursolSet(&w->cur, 0);
+        w->bReady = 0;
+        w->nState = 0;
+        break;
+    case 2:
+        switch (w->nState) {
+        case 0:
+            w->bReady = 0;
+            w->nState = 10;
+            eCursolModeChange(&w->cur, 112);
+            /* fallthrough: the page test runs on the same frame.  The jump
+             * table's state-10 entry points PAST this call, which is how
+             * the split between the two arms was recovered. */
+        case 10:
+            if (UmnWork.nPage == 81) {
+                w->nState = 20;
+                w->bReady = 1;
+                eCursolModeChange(&w->cur, 32);
+            }
+            break;
+        case 20:
+            nTarget = 16;
+            MoveSlide(&w->nX, &nTarget, 3.0f);
+            if (w->nX == nTarget) {
+                w->nState = 30;
+            }
+            break;
+        case 30:
+            if ((UmnWork.nPage >> 4) != 5) {
+                w->nState = 40;
+            } else {
+                UmnWork.nUiLock = 0;
+            }
+            break;
+        case 40:
+            nTargetOut = 528;
+            MoveSlide(&w->nX, &nTargetOut, 3.0f);
+            if (w->nX == nTargetOut) {
+                w->nState = 0;
+            }
+            break;
+        }
+        break;
+    }
+    if (w->bReady) {
+        w->win.nX = w->nX;
+        w->win.nY = w->nY;
+        w->win.nColor = w->nColor;
+        WindowDXMain(&w->win);
+        eMessageSet(&w->msg, "1:\n2:\n3:");
+        w->msg.nX = w->win.nX + 19;
+        w->msg.nY = w->win.nY + 3;
+        w->msg.nColor = w->win.nColor + 2;
+        eMessageModeChange(&w->msg, 32);
+        eMessageMain(&w->msg);
+        for (i = 0; i < UmnWork.u54.mail.nNum; i++) {
+            eMessageSet(&w->list[i],
+                        UmnMailHeaderGet(UmnWork.u54.mail.aId[i]) + 64);
+            w->list[i].nX = w->win.nX + 59;
+            w->list[i].nColor = w->win.nColor + 2;
+            w->list[i].nY = w->win.nY + i * 24 + 3;
+            eMessageModeChange(&w->list[i], 32);
+            eMessageMain(&w->list[i]);
+        }
+        w->cur.nX = w->win.nX + 3;
+        w->cur.nY = w->list[UmnWork.u.mail.nSel].nY + 4;
+        w->cur.nColor = w->win.nColor + 2;
+        eCursolMain(&w->cur);
+    }
 }

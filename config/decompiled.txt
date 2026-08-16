@@ -2773,3 +2773,5 @@ _quantMatrixExtension = 0x00214450, 0xC4; // sceMpegDec.c
 sefAllocLocalData = 0x002E3520, 0xB4; // sef.c
 _outputFrame = 0x00214770, 0x90; // sceMpegDec.c
 sefCreateEffect = 0x002E7570, 0xAC; // sef.c
+nmlPacketAddGsFlush = 0x00236658, 0x174; // nmlPacket.c
+tskUmnMailHensin = 0x00A07B38, 0x378; // tskUmn.c
