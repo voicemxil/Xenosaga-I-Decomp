@@ -1,5 +1,7 @@
 /* PS2 SDK filesystem driver dispatch wrappers */
 
+#include <stdarg.h>
+
 extern int _sceCallCode(void *arg0, int code);
 
 int sceRemove(void *path)
@@ -595,4 +597,116 @@ int sceGetstat(char *name, void *buf)
     WaitSema(semid);
     DeleteSema(semid);
     return result;
+}
+
+/* The open request layout: flags at +12, mode at +16, the name at +20
+ * and the EE-side slot index in a trailing word, 1048 bytes in all. */
+typedef struct t_fs_send_open {
+    int   semid;
+    void *dst;
+    int   size;
+    int   flags;                /* +12 */
+    int   mode;                 /* +16 */
+    char  path[1024];           /* +20 */
+    int   index;                /* +1044 */
+} fs_send_open_t;               /* 1048 bytes */
+
+extern int _fs_version(void);
+
+/* sceOpen: the mode argument is variadic (open(path, flags) is legal),
+ * which is what spills a2..t3 into the top of the frame.  The flags
+ * word is masked to 0x6fffffff on the way out but stored UNMASKED into
+ * the iob slot afterwards.
+ *
+ * PARKED NEAR-MISS, 30 diffs of 161 words, RIGHT LENGTH.  Everything up
+ * to the reply handling is exact.  Two residues:
+ *   - `name` and `sd` have swapped callee-saved registers ($s0/$s1).
+ *     Moving the `sd = &_send_data` assignment earlier or later, and
+ *     reordering the declarations, does not move it (66 diffs when the
+ *     assignment sinks past va_arg).
+ *   - the two-arm tail.  Written with two `return`s the arms are laid
+ *     out exactly right but gcc coalesces `r = idx` away, so the
+ *     original's `move s1,s5` is missing and the function is one word
+ *     short (50 diffs / 160 words).  Written single-exit as below the
+ *     `move` appears and the length is right, but the error arm then
+ *     routes its value through $s1 where the original loads it straight
+ *     into $v0, and the `lw v0,48(sp)` result reload schedules three
+ *     slots late.  Swept: `r = idx` hoisted above the `if`, an
+ *     if/else with an early return in the error arm, and LAUNDER(r)
+ *     (162 words).  Wants a register tie-break, not a shape. */
+int sceOpen(char *name, int flags, ...)
+{
+    va_list ap;
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_open_t *sd;
+    iob_t *p;
+    int done;
+    int i;
+    int idx;
+    int mode;
+    int r;
+
+    sd = (fs_send_open_t *)&_send_data;
+    _sceFsWaitS(0);
+    if (_fs_init == 0)
+        sceFsInit();
+    if (_fs_version() != 0) {
+        _sceFsSigSema();
+        return 0xfffefffc;
+    }
+    p = new_iob();
+    if (p == 0) {
+        _sceFsSigSema();
+        return -19;
+    }
+    va_start(ap, flags);
+    mode = va_arg(ap, int);
+    va_end(ap);
+    for (i = 0; i < 1024; i++) {
+        sd->path[i] = name[i];
+        if (sd->path[i] == 0)
+            break;
+    }
+    if (i == 1024)
+        sd->path[1023] = 0;
+    idx = p - _iob;
+    sd->flags = flags & 0x6fffffff;
+    sd->mode = mode;
+    sd->index = idx;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->dst = &result;
+    sd->semid = semid;
+    sd->size = 4;
+    if (sceSifCallRpc(&_cd, 0, 0, &_send_data, 1048, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    if (result < 0) {
+        WaitSema(_fs_iob_semid);
+        p->used = 0;
+        SignalSema(_fs_iob_semid);
+        r = result;
+    } else {
+        r = idx;
+        WaitSema(_fs_iob_semid);
+        p->used |= flags;
+        p->fd = result;
+        SignalSema(_fs_iob_semid);
+    }
+    return r;
 }
