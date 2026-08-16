@@ -257,6 +257,59 @@ int xglHddMcCheckCore(int *pFree);
 int xglHddMcLoadMount(void);
 int xglHddMcCheckYourSaves(void *pBuf);
 
+/* TODO: near-miss (5 diffs, REGISTER only, 77/77 words).  The three
+ * round-up divisions (signed for pFree[2], unsigned for the 964-byte
+ * header and the pInfo[2]-pInfo[1] span -- that div/divu/divu split is
+ * real and is what fixes the operand types), the devctl argument
+ * blocks, the frame and the -4/1 conditional move all match.  What is
+ * left is the ACCUMULATOR of the three-term sum: the original adds
+ * into the pFree[2] quotient's register ($t2), ours into whichever
+ * term the scheduler finishes last, so $t2/$t3/$v1 rotate over five
+ * instructions (not a uniform permutation, so --swap-regs cannot
+ * express it).
+ * Swept: all six orderings of the three terms as one expression
+ * (5, 5, 15, 17, 20, 24-28 diffs -- CBA and ABC tie at 5), explicit
+ * per-term temporaries (26: they also reorder the divisions),
+ * `nNeed = B; nNeed += A; ...` (24), an extra paren group around
+ * (B + A) (17), and hoisting only the 964 term into a temp (9).
+ * The two 5-diff shapes differ only in WHICH rotation you get. */
+/* Check that the mounted card image has room for another save: pFree[0]
+ * is the scratch buffer, pFree[1] the region descriptor and pFree[2] the
+ * save size.  Returns 0 when it fits, 1/-4 for the "card too small"
+ * cases and -1 if the device query fails. */
+int xglHddMcCheckCore(int *pFree)
+{
+    unsigned int *pInfo;
+    int nBuf;
+    int nUnit;
+    int nFree;
+    int nNeed;
+    int nRet;
+
+    nRet = xglHddMcCheckYourSaves((void *)pFree[0]);
+    if (nRet < 0) {
+        return nRet;
+    }
+    nUnit = sceDevctl(D_004DC370, 20481, 0, 0, 0, 0);
+    nFree = sceDevctl(D_004DC370, 20482, 0, 0, 0, 0);
+    pInfo = (unsigned int *)pFree[1];
+    nNeed = (pInfo[2] - pInfo[1] + nUnit - 1) / nUnit
+          + (pFree[2] + nUnit - 1) / nUnit
+          + (964U + nUnit - 1) / nUnit
+          + 7;
+    if (nFree >= nNeed) {
+        return 0;
+    }
+    if (sceDevctl(D_004DC368, 0x480A, 0, 0, (int)&nBuf, 4) < 0) {
+        return -1;
+    }
+    nRet = 1;
+    if (nBuf <= 0x1FFFFF) {
+        nRet = -4;
+    }
+    return nRet;
+}
+
 /* Report the free space (in KB) available for saves on the HDD.
  * Register shape: the zone-size quotient needs its own variable pinned
  * to $16 fed by the zero-code tied passthrough, and the zero-clamped
