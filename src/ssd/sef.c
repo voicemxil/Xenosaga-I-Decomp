@@ -2096,24 +2096,40 @@ void SGsInitGifPacket(SGS_PKT *p)
     p->nTagQw = 0;
 }
 
+/* SWEPT, 6 diffs, REGISTER only: two independent register swaps
+ * ($t0<->$t1 and $v0<->$v1). The volatile reads pin the source order --
+ * nQw must be read before pBase, which must be read before the nNloop
+ * write -- so there is no statement order left to vary; a `char *pBase`
+ * local instead of the folded SGS_QWD address gives a 3-cycle rotation
+ * instead, which is worse. Permuter territory. */
 void SGsOpenGifPacket(SGS_PKT *p, unsigned long long nPrim,
                       unsigned long long nRegs, unsigned long long nNReg)
 {
     int nQw = p->nQw;
+    SGS_QWD *pq = (SGS_QWD *)(p->pBase + nQw * 16);
 
     p->nNloop = 1;
     p->nTagQw = nQw;
-    ((SGS_QWD *)(p->pBase + nQw * 16))->hi = nRegs;
-    *(volatile unsigned long long *)(p->pBase + p->nQw * 16) =
+    pq->hi = nRegs;
+    ((SGS_QWD *)(p->pBase + p->nQw * 16))->lo =
         (nPrim << 47) | (nNReg << 60) | 0x0000400000008000ULL;
     p->nQw = p->nQw + 1;
 }
 
+/* SWEPT, 7 diffs, REGISTER only: retail holds the tag address in $v1 and
+ * loads through it into $v0, keeping $a0 (the packet) live; gcc reuses
+ * $a0 for the loaded value. Both `*q | nNloop` and `nNloop | *q`, the
+ * offset-first int temporary and reading nNloop into a local before the
+ * address all land on the same assignment. */
 void SGsCloseGifPacket(SGS_PKT *p)
 {
-    volatile unsigned long long *q = (volatile unsigned long long *)(p->pBase + p->nTagQw * 16);
+    int nOfs = p->nTagQw * 16;
+    char *pBase = p->pBase;
+    int nNloop = p->nNloop;
+    volatile unsigned long long *q =
+        (volatile unsigned long long *)(nOfs + (int)pBase);
 
-    *q = *q | p->nNloop;
+    *q = nNloop | *q;
 }
 
 void SGsAddReg(SGS_PKT *p, unsigned long long nReg, unsigned long long nData)
@@ -2146,6 +2162,14 @@ void SGsAddGifData(SGS_PKT *p, SGS_T128 v)
     p->nQw = p->nQw + 1;
 }
 
+/* SWEPT, 19 diffs, REGISTER only: the $v0/$v1 alternation across the
+ * four address computations starts on the wrong parity, and the last
+ * one takes the dead $a1 instead of continuing the alternation. Retail
+ * does the opposite here from what it does in SGsAddGifXYZ2, which has
+ * the identical shape but integer arguments -- so the parity is falling
+ * out of argument-register pressure, not statement order. Plain stores,
+ * volatile stores, a non-volatile pad field and struct-member stores
+ * were all tried. */
 void SGsAddGifSTQ(SGS_PKT *p, float fS, float fT, float fQ)
 {
     ((SGS_QWF *)(p->pBase + p->nQw * 16))->s = fS;
