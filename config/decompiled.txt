@@ -2648,3 +2648,7 @@ srsEffectNameToID = 0x002E9AB8, 0x70; // srsGet.c
 scPRINTScript = 0x002EAC18, 0xB4; // sc.c
 scONGOSUB = 0x002EAA08, 0xA0; // sc.c
 subEtherTreeRightMain = 0x002BACF0, 0xA4; // sub.c
+_lmcGetClientPtr = 0x0020EBA0, 0x30; // sceMc.c
+mcHearAlarm = 0x0020F378, 0x24; // sceMc.c
+mcDelayThread = 0x0020F3A0, 0x44; // sceMc.c
+mceGetInfoApdx = 0x0020F4C8, 0x54; // sceMc.c

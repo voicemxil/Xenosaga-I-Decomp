@@ -182,3 +182,71 @@ int sceMcGetSlotMax(int port)
     SignalSema(semaidRegFunc);
     return retval;
 }
+
+/* ------------------------------------------------------------------
+ * Module-internal helpers.
+ * ------------------------------------------------------------------ */
+
+#include "matching.h"
+
+/* _lmcGetClientPtr: hand the two fixed blocks back to the caller and
+ * refresh the module semaphore id the reply block carries at +60.  The
+ * return value is the SIF client-data block itself. */
+void *_lmcGetClientPtr(void **ppRetval, void **ppCmdNo)
+{
+    int *p;
+
+    p = &retval;
+    *ppRetval = p;
+    *ppCmdNo = &mcRunCmdNo;
+    p[15] = semaidRegFunc;
+    return mcClientID;
+}
+
+/* mcHearAlarm: the alarm handler mcDelayThread arms.  Wakes the sleeping
+ * thread from interrupt context; `ei` is not reachable from C. */
+
+extern int iWakeupThread(int thid);
+
+void mcHearAlarm(int id, unsigned short time, void *common)
+{
+    iWakeupThread((int)common);
+    PS2_ASM("sync.l\n\tei");
+}
+
+/* mcDelayThread: sleep this thread for `usec` microseconds.  The alarm
+ * handler address is materialised BEFORE GetThreadId so it survives the
+ * call in s0, and SleepThread is a real tail call. */
+
+extern int GetThreadId(void);
+extern int SetAlarm(unsigned short time, void *handler, void *common);
+extern void SleepThread(void);
+
+void mcDelayThread(unsigned short usec)
+{
+    SetAlarm(usec, (void *)mcHearAlarm, (void *)GetThreadId());
+    SleepThread();
+}
+
+/* mceGetInfoApdx: scatter the three fields of a card-info reply into
+ * whichever of the three caller-supplied destinations were registered.
+ * The reply was written by IOP DMA, so it is read through the
+ * uncached-accelerated alias -- the `or` sits in the first test's delay
+ * slot, i.e. it is unconditional. */
+
+extern int *typeAddr;
+extern int *freeAddr;
+extern int *formAddr;
+
+void mceGetInfoApdx(void *info)
+{
+    int *p;
+
+    p = (int *)((int)info | 0x20000000);
+    if (typeAddr != 0)
+        *typeAddr = p[0];
+    if (freeAddr != 0)
+        *freeAddr = p[1];
+    if (formAddr != 0)
+        *formAddr = p[36];
+}
