@@ -469,10 +469,24 @@ void DefocusMainType05(GAME_DEFOCUS *p, void *pkt)
     sceVif1PkAddDataN(pkt, (void *)0x70000000, 0x1C);
 }
 
-/* TODO near-match (20 diffs, correct length/structure): the original keeps
-   the %hi base in $a0 (reusing the dead nMode parameter) and the 0x24020000
-   constant in $v0, and annuls the first two switch branches (beql) where we
-   emit beq; case order and if/else chains do not flip it. */
+/* TODO near-match (20 diffs, correct length and structure -- the
+   instruction multiset is the original's).
+
+   ONE root cause, not two: the retail build puts the %hi page base in $a0
+   (reusing the dead nMode parameter) and the 0x24020000 constant in $v0;
+   gcc swaps those two roles. Every other difference FOLLOWS from that.
+   The %hi lui lives in each switch branch's delay slot, so when it targets
+   $a0 it kills nMode on the fall-through path and the branch MUST be
+   annulled -- that is where the retail build's beql/beqzl come from. With
+   the lui targeting $v0 (harmless on the fall-through) gcc needs no annul,
+   and on the two branches where the polarity is the other way round the
+   same reasoning runs in reverse. So --branch-likely/--branch-unlikely on
+   the four sites would paper over the register choice rather than fix it,
+   and the final or-chain's operand order (words 24-31) is the same swap
+   again. --swap-regs GetTex0:2-4 is NOT the answer either: nMode arrives
+   in $4 and the early tests read it there, so a whole-function rename
+   breaks the parameter. What is needed is a source shape that makes gcc
+   allocate the buffer address to the argument register. */
 /* Compose a GS TEX0 register for one of the three defocus work buffers */
 u_long GetTex0(int nMode, int nUnk)
 {
