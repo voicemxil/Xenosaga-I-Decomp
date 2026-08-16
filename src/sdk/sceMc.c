@@ -437,3 +437,80 @@ int sceMcRead(int fd, void *buf, int size)
         SignalSema(semaidRegFunc);
     return rc;
 }
+
+/* sceMcChdir: pathname command 12.  The current-directory buffer the
+ * IOP fills in is flushed before the call and copied out afterwards by
+ * the RPC end function mceStorePwd, whose end-data is the caller's
+ * destination pointer. */
+
+extern char currentDir[1024];       /* 0x00997500 */
+extern void mceStorePwd(void);
+
+int sceMcChdir(int port, int slot, const char *name, char *pwd)
+{
+    int *p;
+    int rc;
+
+    if (PollSema(semaidRegFunc) < 0)
+        return -200;
+    if (mcClientID[9] == 0) {
+        SignalSema(semaidRegFunc);
+        return -100;
+    }
+    if (name == 0 || *name == 0) {
+        SignalSema(semaidRegFunc);
+        return -210;
+    }
+    p = sifParamFname;
+    p[0] = port;
+    p[4] = (int)currentDir;
+    p[1] = slot;
+    strncpy((char *)p + 20, name, 1023);
+    ((char *)p)[1043] = 0;
+    sceSifWriteBackDCache(currentDir, 1024);
+    rc = sceSifCallRpc(mcClientID, 12, 1, p, 1044, &retval, 4,
+                       (void *)mceStorePwd, pwd);
+    if (rc == 0)
+        mcRunCmdNo = 12;
+    else
+        SignalSema(semaidRegFunc);
+    return rc;
+}
+
+/* sceMcGetDir: pathname command 13.  Six arguments -- the EE register
+ * convention puts the fifth and sixth in $t0/$t1 -- and the caller's
+ * entry array is flushed only when the requested count is not negative
+ * (a negative count means "just count them", no buffer). */
+int sceMcGetDir(int port, int slot, const char *name, int flags,
+                int maxent, void *table)
+{
+    int *p;
+    int rc;
+
+    if (PollSema(semaidRegFunc) < 0)
+        return -200;
+    if (mcClientID[9] == 0) {
+        SignalSema(semaidRegFunc);
+        return -100;
+    }
+    if (name == 0 || *name == 0) {
+        SignalSema(semaidRegFunc);
+        return -210;
+    }
+    p = sifParamFname;
+    p[0] = port;
+    p[1] = slot;
+    p[2] = flags;
+    p[3] = maxent;
+    p[4] = (int)table;
+    strncpy((char *)p + 20, name, 1023);
+    ((char *)p)[1043] = 0;
+    if (maxent >= 0)
+        sceSifWriteBackDCache(table, maxent << 6);
+    rc = sceSifCallRpc(mcClientID, 13, 1, p, 1044, &retval, 4, 0, 0);
+    if (rc == 0)
+        mcRunCmdNo = 13;
+    else
+        SignalSema(semaidRegFunc);
+    return rc;
+}
