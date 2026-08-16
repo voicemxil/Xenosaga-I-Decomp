@@ -8,6 +8,12 @@ typedef unsigned int u_int;
 
 typedef struct
 {
+    u_short  nUnk00;
+    u_short  nTail;
+} FSOT;
+
+typedef struct
+{
     int      nLoadAddr;   /* 0x00 */
     int      nTexAddr;    /* 0x04 */
     u_short  nFlags;      /* 0x08 */
@@ -21,6 +27,7 @@ typedef struct
     u_char   nUnk13;      /* 0x13 */
     char     pad14[0x8];  /* 0x14 */
     u_char  *pStream;     /* 0x1C */
+    FSOT     aOT[16];     /* 0x20 */
 } FSDATA;
 
 extern FSDATA FS;
@@ -447,4 +454,40 @@ int xglFontAscii2Euc(char nChar, u_char **ppStr)
         nRet = *(u_short *)(D_004908D6 - 70 + nChar * 2);
     }
     return nRet;
+}
+
+/* Reset the 16 ordering-table buckets to empty (each bucket's tail link
+ * points at itself) and rewind the packet stream to just past them */
+void buffer_reset(void)
+{
+    FSOT *p;
+    int i;
+
+    p = FS.aOT;
+    for (i = 0; i < 16; i++) {
+        p->nTail = (u_short)((u_char *)p - (u_char *)FS.aOT);
+        p->nUnk00 = 0;
+        p++;
+    }
+    FS.pStream = (u_char *)p;
+    FS.pad11 = 0;
+}
+
+/* Append the current stream position to the ordering-table bucket picked
+ * by the top nibble of nZ, then reserve a two-byte link cell */
+void set_ot(int nZ)
+{
+    FSOT *p;
+    u_short nOfs;
+    u_char *q;
+
+    p = (FSOT *)((u_char *)FS.aOT + ((nZ >> 22) & 0x3C));
+    nOfs = (u_short)(FS.pStream - (u_char *)FS.aOT);
+    q = (u_char *)FS.aOT + p->nTail;
+    q[0] = (u_char)nOfs;
+    q[1] = (u_char)(nOfs >> 8);
+    p->nTail = nOfs;
+    FS.pStream[0] = 0;
+    FS.pStream[1] = 0;
+    FS.pStream += 2;
 }
