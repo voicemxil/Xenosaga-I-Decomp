@@ -64,7 +64,8 @@ typedef struct {
 
 typedef struct {
     int nUnk00;
-    u_char aPad04[0x20];
+    int nUnk04;
+    u_char aPad08[0x1C];
     u_char nType;
     u_char aPad25[3];
     int nFd;
@@ -420,21 +421,107 @@ int StreamReadRingCoreSub(XGLCDSTREAM *pStr, char *pBuf, int nSectors);
 
 int sceOpen(char *pName, int nFlags);
 
-/* TODO: near-miss -- 70 of 72 words, and every one of those 70 is
- * byte-identical (register allocation, both string loops, the
- * beqzl/beql annul bits and the sceOpen/sceRead/sceClose sequence all
- * line up).  The whole residue is the SHORT-LOOP PAD in the final
- * newline-stripping loop: this ee-gcc 2.96 pads a branch-likely loop
- * out to 8 instructions (3 nops), the original build padded the same
- * loop to 10 (5 nops).  Verified it is a fixed total, not a fixed nop
- * count -- adding real instructions to the body drops the pad to 0 at
- * 8 total.  Swept: while/do-while/for/goto loop shapes, char vs
- * u_char pointer, named-temp vs direct `*r` compare (all 3 nops);
- * SCHED_NOP() padding lands BEFORE the closing lbu, not between the
- * lbu and the branch where the original's nops are, and 5 of them
- * rewrite the exit branch to bnel.  There is no fix_cc_asm pass for
- * loop padding; adding an opt-in one is the way in.
- * Do not re-sweep the C -- sweep the pad. */
+int sceSifAllocIopHeap(int nSize);
+int sceCdStInit(int nSectors, int nRingSects, int nBuf);
+int sceCdStStart(int nLsn, u_char *pMode);
+extern XGLCDSTREAM *listnow[2];
+
+/* TODO: near-miss -- 88 of 89 words with
+ *   --short-loop-pad xglCdStreamOpen:0:4,xglCdStreamOpen:1:0,xglCdStreamOpen:2:0
+ * (39 differing).  Everything up to the type dispatch is byte-identical.
+ * Three residues, in decreasing size:
+ *  (1) the slot-search loop.  The original keeps a PEELED first test
+ *      that stores through the gp-relative symbol (sw s0,-13464(gp))
+ *      and a live-but-unreachable second iteration; ee-gcc 2.96 folds
+ *      `i <= 0` after `i++` and deletes the whole back edge unless the
+ *      peel is written out by hand.  Writing the peel recovers the
+ *      shape but costs a pointer copy (`move a0,v0`) the original does
+ *      not have.  Swept: do/while/for/goto, ++i vs i++, peel through
+ *      `listnow[0]` vs `*pp`, arm order, and `for (i=0;i<2;i++)` with
+ *      the array indexed (which strength-reduces to sll/addu instead).
+ *  (2) `nType` wants a zero-extend (`andi a0,v0,0xff`) computed BEFORE
+ *      the `sb`, with the unmasked value still live.  The chained
+ *      `nType = pStream->nType = sPos.nType` gets the register right
+ *      (a0) but emits `move`; reading the u_char field back afterwards
+ *      gets the `andi` but lands it after the `sb`, in v0.  Swept: both
+ *      orders, `& 0xff` (folded away -- gcc knows an lbu is 0..255), a
+ *      u_char temp, and a cast.
+ *  (3) the `nType < 3` arm's `sw v0,16(s0)` belongs to a one-word block
+ *      of its own at +0xe0 that falls through into the merge point; gcc
+ *      puts it in the `b`'s delay slot instead, which also loses the
+ *      .p2align nop before +0xe0 -- the last word of the length gap.
+ * Levers that DID land here, worth reusing: the branch-polarity lever
+ * (making the CD arm the `else` took 71 diffs to 41), and the nested
+ * `if (n >= 0) { if (n < 3) ... }` form -- an `&&` there folds to a
+ * single `bnez` because gcc drops the sign test on a byte value, while
+ * the nested form keeps the original's bltz+slti pair. */
+/* Open a stream: locate the file, then either hand it to the IOP CD
+ * streaming engine (type 0) or keep the plain file descriptor
+ * (host/HDD, types 1-2), and claim one of the two active-stream slots */
+int xglCdStreamOpen(XGLCDSTREAM *pStream, char *pName)
+{
+    XGLCDFILEPOS sPos;
+    u_char aMode[4];
+    int nType;
+
+    LW.nStatus = 3;
+    if (xglCdGetFilePos(&sPos, pName, xglCdDummyCallback) == 0) {
+        LW.nStatus = 0;
+        return -1;
+    }
+
+    nType = pStream->nType = sPos.nType;
+    pStream->nUnk14 = sPos.nUnk04;
+    if (nType != 0) {
+        if (nType >= 0) {
+            if (nType < 3) {
+                pStream->nFd = sPos.nFd;
+            }
+        }
+    } else {
+        int nBuf;
+
+        sceCdSync(0);
+        sceCdDiskReady(0);
+        pStream->nFd = sPos.nUnk00;
+        nBuf = sceSifAllocIopHeap((pStream->nSectors << 11) + 128);
+        pStream->nUnk00 = nBuf;
+        sceCdStInit(pStream->nSectors, pStream->nRingSects,
+                    (nBuf + 127) & ~127);
+        aMode[0] = 0;
+        aMode[1] = 0;
+        aMode[2] = 0;
+        sceCdStStart(pStream->nFd, aMode);
+    }
+
+    pStream->nUnk18 = pStream->nUnk14;
+    pStream->nUnk1C = 2048;
+    pStream->nUnk08 = 0;
+    if (pStream->nUnk20 != 0) {
+        XGLCDSTREAM **pp;
+        int i;
+
+        pStream->nWritePos = 0;
+        pStream->nReadPos = 0;
+        i = 0;
+        if (listnow[0] == 0) {
+            listnow[0] = pStream;
+        } else {
+            pp = listnow;
+            while (*pp != 0) {
+                i++;
+                if (i > 0) {
+                    goto done;
+                }
+                pp++;
+            }
+            *pp = pStream;
+        }
+    done:;
+    }
+    return 0;
+}
+
 /* Re-read the file list for pFS's directory into its buffer, turning every
  * newline into a terminator */
 void FileSelectListReload(XGLCDFSEL *pFS)
