@@ -73,6 +73,18 @@ counter/pointer registers.
 INSIDE the arm** — `if (t->b) { n = t->b; ... }` recovers retail's `move`
 AND its `.p2align` pad: two words of LENGTH, not just registers.
 
+**Which of two `x | c` values reuses the shared temp's register is
+decided by which variable you SEED with the temp**: `gt = n; eop = gt|C1;
+gt |= C2;`.
+
+**PIN the first parameter to sink its incoming-argument copy to the
+end** — otherwise the whole prologue's `sd`/`move` interleave comes out
+rotated by one. Fixed three functions.
+
+**An empty asm is the only way to keep a combine-folded compare temp
+alive** — a bare `PIN` on it is silently ignored — **and it buys the
+register at the price of the schedule** (9-14 words for this gcc).
+
 **One local, two roles.** A C local is one pseudo, so reusing it for two
 sequential purposes pins the second value into the first's register.
 This cuts BOTH ways and the direction is worth testing: reusing the
@@ -631,6 +643,47 @@ must); caching costs a callee-saved register and a wider frame.
 **Read a field back out after the `if`**, do not assign the local inside
 it — fixes both the store's source register and gcc's jump threading of
 a redundant re-test.
+
+---
+
+## Inline asm — correctness traps
+
+**`j` to a label INSIDE an inline-asm block needs `.globl`.** gas
+resolves it at assembly time and emits NO `R_MIPS_26` relocation, so the
+linked jump is wrong. A correctness bug, not a mismatch.
+
+**`move` in an asm block assembles to `addu`, not `daddu`** — spell
+`daddu %0,$2,$0` out. gcc's own moves are fine.
+
+**Even a ONE-INSTRUCTION asm block gets stolen for the `jr ra` delay
+slot** — wrap it in `.set noreorder`.
+
+**Retail clears and copies quadwords with `sq $0` / `lq $2`+`sq $2` asm
+macros.** No C spelling reaches it: `v.q = 0` always emits `por`+`sq` at
+a frame offset and loses the held address.
+
+---
+
+## Whole-file symptoms: check the TU boundary first
+
+**A scheduling difference affecting a WHOLE FILE is a translation-unit
+boundary, not a lever.** Run `python3 tools/tu_boundaries.py`. The
+original left 415 `__gnu_compiled_c` markers and our tree has ~190 .c
+files, so many of ours merge several original TUs — and per-file
+compiler flags are the one thing no source lever can reach.
+
+Confirmed twice, and **both splits wanted `-O2 -G0`** (i.e. WITHOUT the
+SDK default `-fno-schedule-insns`):
+
+  mpeg.c -> sceMpegDec.c              4 near-misses became matches with
+                                      NO source change; one function
+                                      21 differing words -> 0
+  sceVif1Pk.c -> sceVif1PkRefLoadImage.c
+                                      20 -> 14 diffs, and decisively
+                                      19 wrong OPCODES -> 4
+
+The fingerprint: **address materialisation interleaved AROUND an
+intervening store is something `-fno-schedule-insns` can never emit.**
 
 ---
 
@@ -1466,6 +1519,20 @@ that first, always.
 ---
 
 ## Added by the game/SEQ sweep
+
+**Write a shared trailing store into BOTH arms of an if/else, not once
+after it.** With a single-store `else` arm gcc sinks it into an
+annulling `beqzl` delay slot and you come out 2 words SHORT per site;
+duplicated in the source, gcc cross-jumps it and fills the delay with
+the shared computation instead.
+
+**A lone `if (i == N) i = N-1;` comes out as a `movz`** — give the arm
+its own store and gcc branches, plus tail-duplicates the way the
+original does.
+
+**A boolean field store must be if/else with a store in EACH arm**,
+polarity chosen so the branch is `bnez` to the `= 1` arm. `?:` gives a
+branchless `sltu`, three words short.
 
 **Write a shared trailing store into BOTH arms, not once after the
 if/else.** When the `else` arm holds exactly one store and the tail
