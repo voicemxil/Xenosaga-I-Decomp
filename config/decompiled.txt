@@ -2445,3 +2445,4 @@ taskEvtItemGet = 0x002C66C0, 0xD0; // task.c
 taskMapChange = 0x00246470, 0xBC; // task.c
 DrillXMoveFunc = 0x002CA260, 0x260; // Drill.c
 xglPacketInterpolate = 0x0022C398, 0xB8; // xglPacket.c
+RssdBackNextWaveThread = 0x0023FF68, 0x88; // ssd.c

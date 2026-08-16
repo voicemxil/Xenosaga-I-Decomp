@@ -1635,13 +1635,8 @@ extern void SleepThread(void);
 
 /* Background thread: streams the wave-DMA staging buffer to the IOP in
  * <=64KB chunks, forever. nDmaSize/pDmaAddr track how much is left.
- * PARKED near-miss (27/34 words): logic and field offsets verified against
- * tools/disasm.py, but gcc schedules the infinite for(;;) very differently
- * from the original -- the initial SleepThread() call and the 0x10000
- * chunk-cap constant get relocated/duplicated. Tried: hoisting 0x10000 into
- * its own persistent local (worse -- flips movz to movn and swaps which
- * register holds nDmaSize vs the cap). Not registered in
- * config/decompiled.txt. */
+ * SleepThread() is inside the loop -- the backward branch targets the call
+ * itself, not the code after it. */
 void RssdBackNextWaveThread(void)
 {
     RSSD_WORK *p = &RssdWork;
@@ -1651,22 +1646,31 @@ void RssdBackNextWaveThread(void)
     char *pDmaAddr;
     int nLast;
     int nFlags;
+    int nMax;
 
-    SleepThread();
+    nMax = 0x10000;
+    /* nMax is a persistent local, not a literal: the original hoists the
+     * 64KB cap into a callee-saved register outside the loop and copies it
+     * into nChunk each iteration. */
     for (;;) {
-        nChunk = 0x10000;
+        /* SleepThread is INSIDE the loop -- the backward branch targets it,
+         * not the code after it. */
+        SleepThread();
+        nChunk = nMax;
         nDmaSize = p->nDmaSize;
         if (nDmaSize != 0) {
-            if (nDmaSize <= 0x10000) {
-                nChunk = nDmaSize;
-            }
+            /* A ternary, not `if (nDmaSize <= nMax) nChunk = nDmaSize;`:
+             * from the if-form gcc rebuilds the select the other way round
+             * (movn from the cap onto nDmaSize) instead of the original's
+             * movz from nDmaSize onto the cap. */
+            nChunk = (nMax < nDmaSize) ? nMax : nDmaSize;
             pDmaAddr = p->pDmaAddr;
             nFlags = p->nFlags;
             nDmaSize -= nChunk;
             nLast = ((unsigned int)nDmaSize < 1);
             pkt.nArg[2] = nLast;
-            p->nFlags = nFlags | 0x24;
             p->pDmaAddr = pDmaAddr + nChunk;
+            p->nFlags = nFlags | 0x24;
             pkt.nArg[0] = (int)pDmaAddr;
             p->nDmaSize = nDmaSize;
             pkt.nArg[1] = nChunk;
@@ -1707,28 +1711,38 @@ extern void iSignalSema(int);
  * (p->something0x82 == 0) invoke the registered pFuncFunc callback with
  * the "error" bit (nFlags bit 5) and the response buffer, then wake
  * whoever's waiting via iSignalSema and clear pFuncFunc.
- * PARKED near-miss (only 3/46 words -- the trailing sync/ei -- confirmed
- * matching): logic and every field offset verified against
- * tools/disasm.py, but the original's inner null-check on pFuncFunc
- * compiles to a `beqzl` (branch-likely) whose annulled delay slot feeds
- * the sema-load for the shared tail, and this compiler will not emit
- * that form from equivalent C here. Candidate for --branch-likely once
- * closer; not registered in config/decompiled.txt. */
+ * SEMANTIC FIX: the pFuncFunc null-check and call are NOT inside the
+ * f82 == 0 guard -- the original computes pResp unconditionally (it sits
+ * in the delay slot of the f82 branch) and defaults nBit to -1, then calls
+ * pFunc on both arms. Only the (nFlags >> 5) & 1 computation is guarded.
+ * PARKED near-miss, 36/49 words, instruction counts now agree. What is
+ * left: (a) the original's pFuncFunc test is a `beqzl` whose annulled
+ * delay slot holds the shared tail's sema load -- a --branch-likely site;
+ * (b) the 32-byte unaligned copy addresses its destination as base+0x80..
+ * with the offsets folded into the sdl/sdr, while gcc materialises
+ * base+128 into its own register and uses offsets 0..31; and (c) the
+ * original keeps &RssdWork in $a2 for the pre-call half and copies it to
+ * $s0 for the post-call half, where gcc uses $s0 throughout. Swept:
+ * dropping the pResp temp, computing it after the guard, and taking it as
+ * &p->nResultCode -- all identical. Not registered. */
 void RssdSifRpcCallback(void)
 {
     RSSD_WORK *p = &RssdWork;
+    void *pResp;
+    int nBit;
+    void (*pFunc)(int, void *, void *);
 
     p->nFlags &= ~8;
     *(RSSD_PACKET *)((char *)p + 0x80) =
         **(RSSD_PACKET **)((char *)p + 0x34);
+    nBit = -1;
+    pResp = (char *)p + 0x80;
     if (*(short *)((char *)p + 0x82) == 0) {
-        void *pResp = (char *)p + 0x80;
-        int nBit = (p->nFlags >> 5) & 1;
-        void (*pFunc)(int, void *, void *) = (void (*)(int, void *, void *))p->pFuncFunc;
-
-        if (pFunc != 0) {
-            pFunc(nBit, pResp, p->pFuncArg);
-        }
+        nBit = (p->nFlags >> 5) & 1;
+    }
+    pFunc = (void (*)(int, void *, void *))p->pFuncFunc;
+    if (pFunc != 0) {
+        pFunc(nBit, pResp, p->pFuncArg);
     }
     iSignalSema(*(int *)((char *)p + 0x1B4));
     p->pFuncFunc = 0;
