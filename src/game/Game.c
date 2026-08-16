@@ -849,3 +849,92 @@ int GameModeDebugMenu(void)
     }
     return 0;
 }
+
+extern unsigned char GameCFSoundMenuPurgeFlag;
+extern int UmnSimulationNo;
+extern int MenuDrillCall;
+extern void RES_GetMapEnvSeName(char *pName);
+extern char *RES_GetEnemySeName(int nIndex);
+extern void xglSoundSequenceNormal2(int nSeq, int nVolume);
+
+/* Reload the menu-side sound set: the map ambience bank, any sequences the
+   purge flag says were playing, and every enemy effect bank */
+void GameCFSoundMenuReload(void)
+{
+    char szName[64];
+    int nAddr;
+    int i;
+    char *pName;
+    int nSlot;
+
+    nAddr = GameResourceGetFreeAddr();
+    xglSoundSendSwd(0, -5);
+    xglSoundSendSmd2(0, 4);
+    RES_GetMapEnvSeName(szName);
+    xglSoundLoadEffect(szName, nAddr, 3);
+    for (i = 0; i < 8; i++) {
+        if (((GameCFSoundMenuPurgeFlag >> i) & 1) && UmnSimulationNo == 0 &&
+            MenuDrillCall == 0) {
+            xglSoundSequenceNormal2(i, 127);
+        }
+    }
+    i = 4;
+    while (1) {
+        pName = RES_GetEnemySeName(i);
+        nSlot = i + 4;
+        i++;
+        if (pName == 0 || *pName == 0) {
+            break;
+        }
+        xglSoundLoadEffect(pName, nAddr, nSlot);
+    }
+}
+
+typedef struct {
+    unsigned short nUnk00;      /* 0x00 */
+    unsigned short nId;         /* 0x02 */
+} GAME_SOUNDENTRY;
+
+extern GAME_SOUNDENTRY SoundWork[];
+extern int SsdGetSeqPlayStatus(int nId);
+extern int SsdGetResultValue(int *pValue);
+extern void xglSoundSequenceStop2(int nSeq);
+extern void EnemySound_StopAll(int nType);
+
+/* Stop the menu-side sound set, remembering in the purge flag which
+   sequences were still playing so the reload can restart them */
+void GameCFSoundMenuPurge(int nMode)
+{
+    unsigned short nStatus[8];
+    int i;
+    int nStat;
+
+    if (nMode == 1) {
+        GameCFSoundMenuPurgeFlag = 0;
+        xglSoundSendEffect(0, 0, 3);
+        for (i = 0; i < 8; i++) {
+            /* Both the sequence id and the polled status go through their
+               own named locals: letting CSE invent the temporaries costs
+               an extra `move` at each site (and the block scope on nId is
+               what keeps it in $a0 rather than a callee-saved). */
+            {
+                int nId = SoundWork[i].nId;
+
+                if (nId != 0xFFFF) {
+                    SsdGetSeqPlayStatus(nId);
+                    do {
+                    } while (SsdGetResultValue((int *)nStatus) < 0);
+                    nStat = nStatus[0];
+                    if (nStat == 1) {
+                        GameCFSoundMenuPurgeFlag |= nStat << i;
+                        xglSoundSequenceStop2(i);
+                    }
+                }
+            }
+        }
+    }
+    EnemySound_StopAll(1);
+    for (i = 4; i < 8; i++) {
+        xglSoundSendEffect(0, 0, i + 4);
+    }
+}
