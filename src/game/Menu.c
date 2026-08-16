@@ -4303,13 +4303,14 @@ void MenuAgwsListMake_Pilot(void)
    instead of `addu v0,s3,v1`. And the PIN on `win` was actively harmful:
    with $s0..$s3 pinned, $s4 falls out naturally, and unpinning it restores
    the retail `lw v1,gp` into a temp before `addiu s4,v1,304`.
-   Left, both pure scheduling with an identical instruction multiset:
-   (a) the five window-header stores issue in a different order even though
-   our source order already equals the retail store order; (b) in the tail
-   retail starts the D_0036C200 %hi chain before the &MenuWork chain and we
-   do the reverse -- and `&D_0036C200[-5]` as a separate local folds the -5
-   into the %lo and LOSES an instruction, so the -5 has to stay inside the
-   subscript. */
+   Left, pure scheduling with an identical instruction multiset:
+   the tail's fourteen words: retail starts the D_0036C200 %hi chain before
+   the &MenuWork chain and we do the reverse. Swept there: `char *pTbl =
+   &D_0036C200[-5]` (folds the -5 into the %lo and LOSES a word) and `char
+   *pTbl = D_0036C200` in both declaration orders (also 87 words). The -5
+   has to stay inside the subscript and the table cannot be named by a
+   local, so the order is the scheduler's and no source shape reaches it.
+   The window-store block is CLOSED -- see the permute note below. */
 /* Build the AGWS weapon list for the selected mount: enable by equip-pos check */
 void MenuAgwsListMake_Wpn(void)
 {
@@ -4366,6 +4367,7 @@ void MenuAgwsListMake_Wpn(void)
 
         WindowSPSetSelect(win, &D_0036C200[pw[pw[0x56] + 0x10] * 5 - 5]);
     }
+
 }
 
 /* ================= Wave 4: mid-size Menu functions ================= */
