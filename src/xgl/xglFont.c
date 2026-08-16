@@ -491,3 +491,22 @@ void set_ot(int nZ)
     FS.pStream[1] = 0;
     FS.pStream += 2;
 }
+
+/* One hex digit to its value; anything else is 0 */
+int hex2val(int nChar)
+{
+    char c = nChar;
+    u_char n;
+
+    n = c - '0';
+    if (n < 10) {
+        return n;
+    }
+    if (c >= 'a' && c <= 'f') {
+        return (u_char)(c - 'a' + 10);
+    }
+    if (c >= 'A' && c <= 'F') {
+        return (u_char)(c - 'A' + 10);
+    }
+    return 0;
+}
