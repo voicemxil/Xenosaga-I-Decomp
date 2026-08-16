@@ -76,7 +76,7 @@ void *sceSifGetDataTable(void)
 /* Thin dispatch wrappers around the underscore-prefixed internal SIF
  * loader/heap primitives (same house pattern as sceFs.c). */
 
-extern int sceSifFreeSysMemory(int a0, int a1);
+extern int sceSifFreeSysMemory(int addr);
 /* (path, section name, destination, mode) -- the section name is what
  * sceSifLoadElf below hard-codes to "all". */
 extern int _sceSifLoadElfPart(const char *path, const char *sec, void *dest,
@@ -84,9 +84,9 @@ extern int _sceSifLoadElfPart(const char *path, const char *sec, void *dest,
 extern int _sceSifLoadModuleBuffer(int a0, int a1, int a2, int a3);
 extern int _sceSifLoadModule(int a0, int a1, int a2, int a3, int a4);
 
-int sceSifFreeIopHeap(int a0, int a1)
+int sceSifFreeIopHeap(int addr)
 {
-    return sceSifFreeSysMemory(a0, a1);
+    return sceSifFreeSysMemory(addr);
 }
 
 int sceSifLoadElfPart(const char *path, const char *sec, void *dest)
@@ -267,7 +267,17 @@ extern int sceSifCallRpc(void *pCd, unsigned int nFno, int nMode,
                           void *pSend, int nSSize, void *pRecv, int nRSize,
                           void *pEndFunc, void *pEndArg);
 extern int cd_00994A40;
-extern int _senddata;
+
+/* The loadfile RPC send/receive block at 0x994840. Its first word is the
+ * scalar argument (module id, address) or reply; sceSifSearchModuleByName
+ * fills the 252-byte name buffer that follows. */
+typedef struct SifLfSendData {
+    int  arg;           /*   0 */
+    int  pad;           /*   4 */
+    char name[252];     /*   8..259 */
+} SifLfSendData;
+
+extern SifLfSendData _senddata;
 
 int sceSifUnloadModule(int modId)
 {
@@ -277,7 +287,7 @@ int sceSifUnloadModule(int modId)
         return (int)0xffff0000;
     if (_lf_version() != 0)
         return (int)0xfffefffc;
-    _senddata = id;
+    _senddata.arg = id;
     {
         void *pCd = &cd_00994A40;
 
@@ -285,7 +295,7 @@ int sceSifUnloadModule(int modId)
         if (sceSifCallRpc(pCd, 8, 0, &_senddata, 4, &_senddata, 4, 0, 0) < 0)
             return (int)0xfffeffff;
     }
-    return _senddata;
+    return _senddata.arg;
 }
 
 /* ------------------------------------------------------------------
@@ -616,4 +626,136 @@ void sceSifRpcLoop(SifRpcDataQueue *q)
             sceSifExecRequest(sd);
         SleepThread();
     }
+}
+
+/* ------------------------------------------------------------------
+ * IOP heap / system memory RPC. One client-data block (`cd_00994680`),
+ * one send buffer (`sdata`) and one reply word (`rdata_009946C0`), all
+ * named fixed addresses. `_bind` holds the bind state: negative means
+ * the RPC has never been bound and every entry point fails closed.
+ * ------------------------------------------------------------------ */
+
+typedef struct SifRpcClientData {
+    SifRpcHeader hdr;               /*  0..15 */
+    unsigned int command;           /* 16 */
+    void        *buff;              /* 20 */
+    void        *cbuff;             /* 24 */
+    void       (*func)(void *);     /* 28 */
+    void        *para;              /* 32 */
+    SifRpcServerData *serve;        /* 36 */
+} SifRpcClientData;
+
+extern int sceSifBindRpc(SifRpcClientData *cd, unsigned int sid, int mode);
+extern int _bind;
+extern SifRpcClientData cd_00994680;
+extern int rdata_009946C0;
+extern int sdata[3];
+
+/* sceSifInitIopHeap: bind the heap RPC, spinning on a fixed-count delay
+ * loop until the IOP side answers.
+ *
+ * PARKED NEAR-MISS, 3 words of 34 (everything else -- the rotated
+ * while-loop, its four R5900 erratum pad nops, the `li v1,-1` preheader
+ * constant, the bgezl -- is exact). The residue is the classic v0/v1
+ * allocator tie-break on the final `_bind = 0; return 0;`: the original
+ * puts the %hi address temp in v0 and overwrites it with the return
+ * value, we put it in v1 and set v0 first. Swept without success:
+ * `return _bind;`, `r = 0; _bind = r; return r;` with and without
+ * LAUNDER, a volatile store, PIN($2) with and without PASSTHRU (which
+ * costs a real addiu because it defeats %hi/%lo folding). Same class as
+ * xglDmaMFIFOLeave and SsdGetMemoryBlocks -- permuter or a two-register
+ * pin, not a source shape. */
+int sceSifInitIopHeap(void)
+{
+    int i;
+
+    for (;;) {
+        if (sceSifBindRpc(&cd_00994680, 0x80000003, 0) < 0)
+            return -1;
+        if (cd_00994680.serve != 0)
+            break;
+        for (i = 0x100000; i != -1; i--)
+            ;
+    }
+    _bind = 0;
+    return 0;
+}
+
+int sceSifAllocIopHeap(int size)
+{
+    if (_bind < 0)
+        return 0;
+    sdata[0] = size;
+    if (sceSifCallRpc(&cd_00994680, 1, 0, sdata, 4,
+                      &rdata_009946C0, 4, 0, 0) < 0)
+        return 0;
+    return rdata_009946C0;
+}
+
+int sceSifAllocSysMemory(int size, int mode, void *addr)
+{
+    if (_bind < 0)
+        return 0;
+    sdata[0] = mode;
+    sdata[1] = size;
+    sdata[2] = (int)addr;
+    if (sceSifCallRpc(&cd_00994680, 4, 0, sdata, 12,
+                      &rdata_009946C0, 4, 0, 0) < 0)
+        return 0;
+    return rdata_009946C0;
+}
+
+int sceSifFreeSysMemory(int addr)
+{
+    if (_bind < 0)
+        return 0;
+    sdata[0] = addr;
+    if (sceSifCallRpc(&cd_00994680, 2, 0, sdata, 4,
+                      &rdata_009946C0, 4, 0, 0) < 0)
+        return -1;
+    return rdata_009946C0;
+}
+
+/* sceSifSearchModuleByAddress / ByName: the loadfile RPC's two module
+ * lookups, same version-check-then-dispatch boilerplate as
+ * sceSifUnloadModule above. */
+
+extern char *strncpy(char *dst, const char *src, unsigned int n);
+
+int sceSifSearchModuleByAddress(void *addr)
+{
+    /* Same $17 pin as sceSifUnloadModule, and for the same reason: the
+     * argument and the &_senddata base are both live across two calls,
+     * and gcc hands $16 to whichever pseudo it allocates first. The
+     * original gives $16 to the base and $17 to the argument; every
+     * natural spelling (int parameter, base hoisted into a local before
+     * or after the calls) gives the opposite. sceSifSearchModuleByName
+     * below needs no pin -- it reuses one register for both roles. */
+    PIN(int a, "$17");
+    SifLfSendData *sd;
+
+    a = (int)addr;
+    if (_lf_bind(a) < 0)
+        return (int)0xffff0000;
+    if (_lf_version() != 0)
+        return (int)0xfffefffc;
+    sd = &_senddata;
+    sd->arg = a;
+    if (sceSifCallRpc(&cd_00994A40, 10, 0, sd, 4, sd, 4, 0, 0) < 0)
+        return (int)0xfffeffff;
+    return sd->arg;
+}
+
+int sceSifSearchModuleByName(const char *name)
+{
+    if (_lf_bind((int)name) < 0)
+        return (int)0xffff0000;
+    if (_lf_version() != 0)
+        return (int)0xfffefffc;
+    strncpy(_senddata.name, name, 252);
+    _senddata.name[251] = 0;
+    if (sceSifCallRpc(&cd_00994A40, 9, 0, &_senddata, 512,
+                      &_senddata, 4, 0, 0) < 0)
+        return (int)0xfffeffff;
+    return _senddata.arg;
 }

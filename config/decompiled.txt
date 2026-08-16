@@ -2566,3 +2566,7 @@ loadArray = 0x002F5068, 0x3C; // JavaClass.c
 initBaseClasses = 0x002F4348, 0x48; // JavaClass.c
 newClass = 0x002F4860, 0x38; // JavaClass.c
 reloadClassEntry = 0x002F51B0, 0x64; // JavaClass.c
+sdvKillAlter = 0x002EE168, 0x64; // sdv.c
+sefDestroyLocalData = 0x002E35D8, 0x64; // sef.c
+sefCalcRotTransSMatrix = 0x002E1270, 0x6C; // sef.c
+sceSifSearchModuleByAddress = 0x00207E70, 0x90; // sceSif.c
