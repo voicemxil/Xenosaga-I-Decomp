@@ -35,11 +35,14 @@ typedef struct MSGQUEUE {
     int *pBuf;                     /* 0x00 */
     unsigned short field_4;
     unsigned short field_6;
-    unsigned short field_8;
-    unsigned short field_A;
+    short field_8;
+    short field_A;
     unsigned short field_C;
     unsigned short field_E;
-    unsigned short field_10;
+    short field_10;                /* 0x10 */
+    short field_12;                /* 0x12 */
+    char pad014[0x1C - 0x14];
+    unsigned short field_1C;       /* 0x1C */
 } MSGQUEUE;
 
 typedef struct TMENU {
@@ -51,10 +54,12 @@ typedef struct TMENU {
     char pad016[0x20 - 0x16];
     float nField20;              /* 0x20 */
     float nField24;              /* 0x24 */
-    char pad028[0x50 - 0x28];
+    char pad028[0x30 - 0x28];
+    short h30;                     /* 0x30: per-mode phase counter */
+    char pad032[0x50 - 0x32];
     int n50;                       /* 0x50 */
     signed char b54;               /* 0x54: drawDefault reads it with lb */
-    unsigned char b55;             /* 0x55 */
+    signed char b55;               /* 0x55 */
     unsigned char nItemCount;      /* 0x56: occupied item slots */
     unsigned char b57;             /* 0x57: widest line so far */
     short h58;                     /* 0x58 */
@@ -62,16 +67,16 @@ typedef struct TMENU {
     char pad05C[0x60 - 0x5C];
     MBUF *pMBuf1;                 /* 0x60 */
     MBUF *pMBuf2;                 /* 0x64 */
-    char pad068[0xD8 - 0x68];
+    unsigned char b68;             /* 0x68 */
+    char pad069[0xD8 - 0x69];
     MSGQUEUE queue;                /* 0xD8 */
-    char pad0EC[0xF8 - 0xEC];  /* MSGQUEUE is word-aligned, so it rounds up to 0xEC */
     int nTexF8;                    /* 0xF8: cursor sprite texture handle */
     EWCOMP *pEwComp;               /* 0xFC */
     EWCOMP *pComp[16];             /* 0x100: child component table */
     unsigned char nItemMax;        /* 0x140: item slot capacity */
     unsigned char b141;            /* 0x141 */
-    unsigned char b142;            /* 0x142 */
-    unsigned char b143;            /* 0x143 */
+    signed char b142;              /* 0x142 */
+    signed char b143;              /* 0x143 */
     unsigned char **ppLine144;     /* 0x144 */
     unsigned char *pText148;        /* 0x148 */
     unsigned char **ppItem;        /* 0x14C: item pointer slots */
@@ -634,6 +639,243 @@ void TMENU_drawDefault(TMENU *t)
         p->h06 = (int)((float)nCur + ((t->nField24 + 16.0f) - 6.0f + (float)nOff));
         EW_sprtSetCursorUV(p, 0, t->nTexF8);
         p->h00 |= 0x4000;
+    }
+}
+
+
+typedef struct XGLPADDATA {
+    char pad000[0x32];
+    unsigned short nTrig;          /* 0x32 */
+    unsigned short nRepeat;        /* 0x34 */
+    char pad036[0x68 - 0x36];
+} XGLPADDATA;
+
+extern XGLPADDATA PadData[2];
+
+extern void xglSoundEffectNormalID(int nId, int nArg);
+extern void MSG_queueGetInfo(MSGQUEUE *q, short *pInfo, int nArg);
+extern int MSG_queuePop(MSGQUEUE *q, unsigned char *pDst, int nArg);
+extern void MSG_queueReset(MSGQUEUE *q, int nArg);
+extern void TW_setPos(TMENU *t);
+
+/* Per-frame state machine for a default text menu.  h14 is the mode and
+ * h30 the phase counter; the mode is dispatched twice, once for the
+ * "not yet running" half (bit 2 of nFlags clear) and once for the live
+ * half.  The live half opens/closes the panel with a two-channel fade,
+ * drains the message queue a character at a time and moves the cursor
+ * from the pad. */
+void TMENU_updateDefault(TMENU *t)
+{
+    EWCOMP *p;
+    short info[4];
+    int nFlags;
+    int nA;
+    int nB;
+    int nCount;
+    int c;
+    short n;
+    short h58;
+    signed char cur;
+    signed char nNew;
+
+    nFlags = t->nFlags;
+    if (!(nFlags & 0x10)) {
+        return;
+    }
+    if (t->nItemCount < t->h5A) {
+        t->h5A = t->nItemCount;
+    }
+    t->nTexF8 = t->nTexF8 + 1;
+    if (!(nFlags & 2)) {
+        switch (t->h14) {
+        case 16:
+            t->nFlags |= 2;
+            p = t->pComp[1];
+            t->h30 = 0;
+            p->u10.n |= 0x100;
+            p->u14.n = 0x808000;
+            return;
+        case 1:
+            t->nFlags |= 2;
+            t->h30 = 0;
+            t->h0E = t->h5A * 24 + 4;
+            MSG_queueGetInfo(&t->queue, info, 0);
+            if (info[1] > 0) {
+                t->h0E = t->h0E + (info[1] * 24 + 12);
+            }
+            if (t->h0C < info[2] + 36) {
+                t->h0C = info[2] + 36;
+            }
+            t->b141 = info[1];
+            return;
+        case 14:
+        case 15:
+            t->h30 = 0;
+            t->nFlags |= 2;
+            /* fall through */
+        case 13:
+            t->nFlags |= 2;
+            return;
+        case 2:
+            t->h30 = 10;
+            t->nFlags |= 2;
+            t->pEwComp->h00 &= 0xBFFF;
+            return;
+        }
+    } else if (nFlags & 4) {
+        switch (t->h14) {
+        case 15:
+            t->nFlags &= ~2;
+            if (t->n50 & 1) {
+                t->h14 = 2;
+            } else {
+                t->h14 = 0;
+            }
+            return;
+        case 14:
+            if (PadData[0].nTrig & 0x40) {
+                xglSoundEffectNormalID(2, 0);
+                t->b55 = -1;
+                t->nFlags &= ~2;
+                t->h14 = 15;
+                return;
+            }
+            cur = t->b54;
+            if (PadData[0].nTrig & 0x20) {
+                xglSoundEffectNormalID(1, 0);
+                t->h14 = 15;
+                t->nFlags &= ~2;
+                return;
+            }
+            t->h30 = (t->h30 + 1) & 0xFF;
+            if ((PadData[0].nRepeat & 0x1000) && cur > 0 && t->b55 == 0) {
+                xglSoundEffectNormalID(3, 0);
+                t->b54 = t->b54 - 1;
+                t->h30 = 0;
+            }
+            if (PadData[0].nRepeat & 0x4000) {
+                if (t->b54 < t->nItemCount - 1) {
+                    xglSoundEffectNormalID(3, 0);
+                    t->b54 = t->b54 + 1;
+                    t->h30 = 0;
+                }
+            }
+            if (t->b54 == cur) {
+                return;
+            }
+            if (t->b54 < 0) {
+                t->b54 = 0;
+            }
+            if (t->b54 >= t->h58 + t->h5A) {
+                t->h58 = t->h58 + 1;
+            }
+            if (t->b54 >= t->nItemCount) {
+                t->b54 = t->nItemCount - 1;
+            }
+            if (t->b54 < t->h58) {
+                t->h58 = t->h58 - 1;
+            }
+            if (t->h58 < 0) {
+                t->h58 = 0;
+            }
+            if (t->h58 >= t->nItemCount - t->h5A) {
+                t->h58 = t->nItemCount - t->h5A;
+            }
+            return;
+        case 13:
+            t->h30 = t->h30 - 1;
+            if (t->h30 < 0) {
+                t->nFlags &= ~2;
+                t->h14 = 16;
+            }
+            return;
+        case 2:
+            t->h30 = t->h30 - 1;
+            if (t->h30 < 0) {
+                TMENU_dispose(t);
+            }
+            return;
+        case 1:
+            t->h30 = t->h30 + 1;
+            TW_setPos(t);
+            if (t->h30 >= 11) {
+                t->nFlags |= 1;
+                /* The retail object keeps both nFlags stores because an
+                 * unelidable read of pText148 sits between them; without
+                 * it gcc folds (x | 1) & ~2 into a single store. */
+                *(unsigned char *volatile *)&t->pText148;
+                t->h14 = 16;
+                t->nFlags &= ~2;
+            }
+            nFlags = t->nFlags;
+            if (nFlags & 0x200) {
+                t->b54 = t->b68;
+                t->nFlags = nFlags & ~0x200;
+            }
+            return;
+        case 16:
+            n = t->h30;
+            if (n < 8) {
+                nA = (int)(128.0f - (float)n * 0.125f * 128.0f);
+            } else {
+                nA = 1;
+            }
+            if (t->h30 < 4) {
+                nB = (int)(128.0f - (float)t->h30 * 0.25f * 128.0f);
+            } else {
+                nB = 1;
+            }
+            c = t->h30 + 1;
+            p = t->pComp[1];
+            p->u14.n = (nB << 16) | (nA << 8);
+            t->h30 = c;
+            if (t->h30 >= 8) {
+                t->pComp[2]->n18 = 128;
+                t->pComp[3]->n18 = 128;
+            }
+            p->n08 = 0xFFFFF1;
+            p->h04 = (int)(t->nField20 + 16.0f);
+            p->h06 = (int)(t->nField24 + 16.0f);
+            p->h0C = t->h0C;
+            p->h0E = t->h0E;
+            if (t->queue.field_A > 0) {
+                c = MSG_queuePop(&t->queue, t->ppLine144[t->b142] + t->b143, 1);
+                t->b143 = t->b143 + c;
+                c = t->queue.field_12;
+                if (c >= 128) {
+                    switch (c - 128) {
+                    case 0:
+                        break;
+                    case 1:
+                        break;
+                    case 2:
+                        break;
+                    case 3:
+                        t->h14 = 13;
+                        t->h30 = t->queue.field_1C;
+                        break;
+                    case 4:
+                        break;
+                    case 5:
+                        break;
+                    }
+                } else if (t->queue.field_10 >= t->h0C || c == 10) {
+                    t->b142 = t->b142 + 1;
+                    t->b143 = 0;
+                    MSG_queueReset(&t->queue, 10);
+                }
+            }
+            if (t->queue.field_8 >= t->queue.field_A) {
+                if (t->h30 >= 9) {
+                    MSG_queueReset(&t->queue, 0);
+                    t->nFlags &= ~2;
+                    t->h14 = 14;
+                    t->pComp[1]->u14.n = 0x10100;
+                }
+            }
+            return;
+        }
+        t->h30 = t->h30 + 1;
     }
 }
 

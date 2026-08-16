@@ -97,6 +97,7 @@ def cc_for(name):
 # stride stays 8 bytes/reg (2.96), ruling out the SDK 2.9-ee compiler --
 # this is a lone -G threshold difference, not a compiler-family swap.
 FILE_CFLAGS_OVERRIDE = {
+    "sceVif1PkRefLoadImage.c": "-O2 -G0 -mgpopt",
     "sceMpegDec.c": "-O2 -G0",
     "sceTty.c": "-O2 -G0",
     "sceFs.c": "-O2 -G0",
@@ -317,7 +318,7 @@ FILE_FIX_FLAGS = {
     # that regressed three matched functions before fix_cc_asm.py
     # grew a duplicate-flag guard. Comma-separate every site.
     "Menu.c": "--barrier-return-store MenuRWeaponCheck2 --branch-likely MenuFaceEpidGet:3,MenuSkillEquip:2,MenuItemInfoMain:13 --swap-adjacent MenuAgwsListMake_Gun:30,MenuAgwsListMake_Acc:30,MenuAgwsListMake_Pilot:30,MenuModelUnitDispose:15,MenuCfTaikiPush:6 --rotate MenuTecL1R1Main:43:-4,MenuEtherL1R1Main:43:-4,MenuSkillL1R1Main:43:-4,MenuSystemInfoMain:60:5,MenuModelUnitDispose:22:5,MenuCfTaikiPop:10:2 --swap-slot-target MenuShopModelDisp:6 --branch-unlikely MenuCharNameGet:0",
-    "TMENU.c": "--swap-adjacent TMENU_addItem:4",
+    "TMENU.c": "--swap-adjacent TMENU_addItem:4 --mtc1-nop TMENU_updateDefault:2,TMENU_updateDefault:5",
     # xgl delay-slot shapes found by the xgl subagent (all verified):
     "xglTimer.c": "--barrier-return-store xglTimer0Reset",
     # xglCameraTravelProc: one branch-likely annul bit at site 3 (xgl
