@@ -2453,3 +2453,5 @@ Java_xeno_util_Runtime_setPartyData__II = 0x002F7CD0, 0xF4; // Java_util.c
 __kernel_tanf = 0x00328F78, 0x2A4; // libm.c
 __ieee754_rem_pio2f = 0x00326F38, 0x3C8; // libm.c
 __ieee754_asinf = 0x003267C8, 0x3B8; // libm.c
+subSeisanHissatuCheck00 = 0x002A1410, 0x50; // sub.c
+subSeisanHissatuCheck01 = 0x002A1460, 0x50; // sub.c
