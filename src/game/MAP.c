@@ -96,6 +96,8 @@ typedef struct {
     MAPUNIT *pPlayer;               /* 0x04 */
     u8 pad008[0x14];                /* 0x08 */
     int nUnk01C;                    /* 0x1C */
+    u8 pad020[0x34];                /* 0x20 */
+    MAPUNIT *pSearch;               /* 0x54 */
 } MAPGAMELOOP;
 
 extern MAPUNIT MapUnit[];
@@ -684,4 +686,67 @@ clear_e8:
         pUnit->nUnk0FC = 0;
         pUnit->mdl[0] = 0;
     }
+}
+
+typedef struct {
+    u8 pad00[0x50];
+    int nPartsOffset;               /* 0x50 */
+} SEARCHMODEL;
+
+extern u16 D_00490DF8[];
+extern char D_004DA520[];
+extern int partsIndex;
+extern void nmlModelSetPartsVisible(void *, int, int);
+extern void printM(int, int, void *);
+extern int sprintf(char *, const char *, int);
+extern void xglFontDebugPrintf(int, int, char *);
+
+/* Debug parts browser: step the visible model part with the pad and print
+   its index.
+
+   PARKED at 70 of 71 words; the whole tail from `printM` down is exact.
+   The missing word is a SECOND `slti v1,a2,0`: the original evaluates
+   `partsIndex < 0` in the delay slot of the branch that skips the
+   pad-0x1000 block as well as inside it (gcc's fill_slots_from_thread
+   copying the target block's first insn and redirecting the branch past
+   it), and we fill that slot from the fall-through with `move a1,a2`
+   instead.  Swept: a local index variable carrying the value across both
+   blocks with an explicit else (71 words but 41 diffs -- it rotates every
+   register), and the store of the decrement inside vs after the first
+   block. */
+void MAP_serach(void)
+{
+    static int visible;
+    char buf[256];
+    MAPUNIT *pUnit;
+    SEARCHMODEL *pModel;
+    char *pParts;
+
+    visible++;
+    pUnit = GameLoopState.pSearch;
+    if (pUnit == 0) {
+        return;
+    }
+    pModel = (SEARCHMODEL *)pUnit->pUpdate;
+    if (pModel == 0) {
+        return;
+    }
+    pParts = (char *)pModel + pModel->nPartsOffset;
+    if (D_00490DF8[22] & 0x4000) {
+        nmlModelSetPartsVisible(pModel, partsIndex, 1);
+        visible = 0;
+        partsIndex = partsIndex - 1;
+    }
+    if (D_00490DF8[22] & 0x1000) {
+        nmlModelSetPartsVisible((void *)pUnit->pUpdate, partsIndex, 1);
+        visible = 0;
+        partsIndex = partsIndex + 1;
+    }
+    if (partsIndex < 0) {
+        partsIndex = 0;
+    }
+    printM(0x20, 0x40, pParts + (partsIndex << 6));
+    sprintf(buf, D_004DA520, partsIndex);
+    xglFontDebugPrintf(8, 0x20, buf);
+    nmlModelSetPartsVisible((void *)pUnit->pUpdate, partsIndex, (visible >> 4) & 1);
 }
