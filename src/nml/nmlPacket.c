@@ -856,3 +856,69 @@ int nmlPacketAddTexture(void *pModel)
     return 0x200000 < (nSizeQw << 4)
                       + (s_pPacket[8] - s_pPacket[9]) + 0x10000;
 }
+
+/* VU1 microprogram GS-kick entry points; every one of these links at 0. */
+extern char NewVu1GsKick[];
+extern char NewVu1TexEnvGsKick[];
+extern char NewVu1EnvGsKick[];
+extern char NewVu1ProGsKick[];
+extern char NewVu1AddGsKick[];
+extern char NewVu1AddEnvGsKick[];
+extern char NewVu1DropGsKick[];
+
+extern int s_nProgType;
+
+/* Kick the accumulated GS A+D register writes: unpack the tag buffer,
+ * MSCAL the GS-kick entry of whichever microprogram is loaded, then a
+ * flush-end and a microcode wait.  The entry counter is cleared on both
+ * paths. */
+void nmlPacketAddGsFlush(void)
+{
+    u_int *p;
+
+    s_pPacket = xglPacketGetCurrent();
+    if (g_nGsEntry > 0) {
+        p = g_aGsTag.w;
+        p[1] = 0x10000000;
+        p[2] = 14;
+        p[0] = 0x8000 + g_nGsEntry;
+        p[3] = 0;
+        sceVif1PkCnt(s_pPacket, 0);
+        sceVif1PkOpenUpkCode(s_pPacket, 0x3D5, 0x6C, 1, 1);
+        sceVif1PkAddUpkData128N(s_pPacket, p, g_nGsEntry + 1);
+        sceVif1PkCloseUpkCode(s_pPacket);
+        switch (s_nProgType) {
+        case 1:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1GsKick >> 3) | 0x14000000);
+            break;
+        case 2:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1TexEnvGsKick >> 3) | 0x14000000);
+            break;
+        case 3:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1EnvGsKick >> 3) | 0x14000000);
+            break;
+        case 4:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1ProGsKick >> 3) | 0x14000000);
+            break;
+        case 5:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1AddGsKick >> 3) | 0x14000000);
+            break;
+        case 6:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1AddEnvGsKick >> 3) | 0x14000000);
+            break;
+        case 7:
+            sceVif1PkAddCode(s_pPacket,
+                             ((u_int)NewVu1DropGsKick >> 3) | 0x14000000);
+            break;
+        }
+        sceVif1PkAddCode(s_pPacket, 0x17000000);
+        nmlPacketAddWaitMicrocode();
+    }
+    g_nGsEntry = 0;
+}
