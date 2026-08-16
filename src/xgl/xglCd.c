@@ -29,9 +29,13 @@ typedef struct {
     int nUnk08;          /* 0x08 */
     int nUnk0C;          /* 0x0C */
     void (*pProgress)(int, int); /* 0x10 */
-    u_char aPad14[0x1C];
-    char nStatus;
-    u_char aPad31[3];
+    u_char aPad14[8];
+    u_char nDiskOk;      /* 0x1C */
+    u_char nDiskFlags;   /* 0x1D */
+    u_char aPad1E[0x12];
+    char nStatus;        /* 0x30 */
+    u_char aPad31[2];
+    u_char nForce;       /* 0x33 */
     char nPowerOff;      /* 0x34 */
     u_char aPad35[0x9];
     u_char nUnk3E;
@@ -119,6 +123,60 @@ void extract(u_int *pDst, u_int *pSrc, int nSize)
             pDst++;
         } while (nSize > 0);
     }
+}
+
+extern char D_004D2468[];
+extern char D_004D2478[];
+extern char D_004D2488[];
+int sceCdStatus(void);
+int sceCdGetDiskType(void);
+
+/* Re-probe the disc, rebuilding the "which xenosaga disc is this" flag
+ * byte; returns the flag byte or a negative error */
+int xglCdDiskCheck(void)
+{
+    int nOld;
+    int nType;
+
+    if (LW.nForce != 0) {
+        LW.nDiskOk = 1;
+        LW.nDiskFlags = 0x7F;
+    }
+    nOld = LW.nDiskOk;
+    if (nOld != 1) {
+        LW.nDiskOk = 0;
+        if (sceCdStatus() == 1) {
+            return -2;
+        }
+        if (sceCdDiskReady(1) != 2) {
+            return -3;
+        }
+        nType = sceCdGetDiskType();
+        if (nType == 1) {
+            return -3;
+        }
+        if (nType == 0) {
+            return 0;
+        }
+        if (nType != 20) {
+            return -1;
+        }
+        LW.nDiskFlags = 0;
+        if (xglCdGetFileSize(D_004D2468) > 0) {
+            LW.nDiskFlags |= 1;
+        }
+        if (xglCdGetFileSize(D_004D2478) > 0) {
+            LW.nDiskFlags |= 2;
+        }
+        if (xglCdGetFileSize(D_004D2488) > 0) {
+            LW.nDiskFlags |= 4;
+        }
+        LW.nDiskOk = 1;
+    } else if (sceCdStatus() == nOld) {
+        LW.nDiskOk = 0;
+        return -2;
+    }
+    return LW.nDiskFlags;
 }
 
 /* Issue the next queued read; returns 1 when the ring is empty */
