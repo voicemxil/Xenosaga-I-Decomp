@@ -162,3 +162,62 @@ void *scePowerOffHandler(void *func, void *arg)
     _sceFsSigSema();
     return old;
 }
+
+/* ------------------------------------------------------------------
+ * The iob table: 16-byte per-descriptor slots in the fixed array
+ * `_iob`.  A file descriptor is the slot's INDEX, so the wrappers hand
+ * back `slot - _iob`, which for a 16-byte element is the original's
+ * subu + sra 4.
+ * ------------------------------------------------------------------ */
+
+typedef struct t_iob {
+    int fd;                     /* +0: the IOP-side descriptor */
+    int used;                   /* +4: nonzero while the slot is taken */
+    int reserved[2];
+} iob_t;                        /* 16 bytes */
+
+extern iob_t _iob[];
+extern iob_t *new_iob(void);
+extern int _fs_iob_semid;
+extern int _sceCallCode(void *arg0, int code);
+
+/* sceDopen: open a directory.  The two arms of the result test each
+ * take the iob lock themselves rather than sharing one WaitSema above
+ * the branch -- that duplication is in the original, and hoisting it
+ * costs a word.  Both arms fall through to one SignalSema and one
+ * return, so `r` carries either the negative error or the slot index. */
+int sceDopen(void *name)
+{
+    iob_t *p;
+    int r;
+
+    _sceFsWaitS(9);
+    if (_fs_init == 0)
+        sceFsInit();
+    _sceFsSigSema();
+    p = new_iob();
+    if (p == 0)
+        return -19;
+    r = _sceCallCode(name, 9);
+    if (r < 0) {
+        WaitSema(_fs_iob_semid);
+        p->used = 0;
+        SignalSema(_fs_iob_semid);
+        return r;
+    }
+    {
+        /* The %hi/%lo temp holding &_iob lands in $v0 by default; the
+         * original has it in $v1.  Plain C cannot reach it -- a named
+         * local for the base changes the tail shape (52-53 words) --
+         * so the address is pinned and fed in through the zero-cost
+         * PASSTHRU, which is what makes a pin stick on a value that is
+         * only used as an operand. */
+        PIN(iob_t *base, "$3");
+        WaitSema(_fs_iob_semid);
+        p->fd = r;
+        PASSTHRU(base, _iob);
+        r = p - base;
+    }
+    SignalSema(_fs_iob_semid);
+    return r;
+}

@@ -2680,3 +2680,4 @@ sefFreeLineData = 0x002E3C10, 0x84; // sef.c
 scePadGetDmaStr = 0x0020BB98, 0x60; // scePad.c
 MenuShopInfoSet = 0x002A7DA0, 0x278; // Menu.c
 scePowerOffHandler = 0x00204378, 0x90; // sceFs.c
+sceDopen = 0x00205EB0, 0xC8; // sceFs.c
