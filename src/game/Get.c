@@ -39,6 +39,7 @@ typedef struct {
 extern JAVAREACTION D_0037C8F0[];
 extern ENEPC enepc[];
 extern float LocaterAngle[8][2];
+extern unsigned short *DataSpline;
 
 extern float atan2f(float y, float x);
 extern float sqrtf(float f);
@@ -284,6 +285,52 @@ float Get_Multi_Max_Under(float value, float step, float maximum)
         }
     }
     return result;
+}
+
+void GetBSplineLoop(short time, short count, short interval, VECTOR *points,
+                    VECTOR *result)
+{
+    int point;
+    int splineTime;
+    int point1;
+    int point2;
+    int point3;
+    float weight0;
+    float weight1;
+    float weight2;
+    float weight3;
+    VECTOR *p0;
+    VECTOR *p1;
+    VECTOR *p2;
+    VECTOR *p3;
+
+    point = (time / interval) % count;
+    splineTime = (time % interval) * (0x800 / interval);
+    point &= 0xFFFF;
+    splineTime &= 0xFFFF;
+
+    weight0 = (float)DataSpline[(splineTime + 0x10D0) >> 1];
+    weight1 = (float)DataSpline[(splineTime + 0x10D2) >> 1];
+    weight2 = (float)DataSpline[(splineTime + 0x10D4) >> 1];
+    weight3 = (float)DataSpline[(splineTime + 0x10D6) >> 1];
+
+    point1 = (point + 1) % count;
+    point2 = (point + 2) % count;
+    point3 = (point + 3) % count;
+    p0 = (VECTOR *)((unsigned int)(point << 4) + (unsigned int)points);
+    p1 = (VECTOR *)((unsigned int)((point1 & 0xFFFF) << 4) +
+                    (unsigned int)points);
+    p2 = (VECTOR *)((unsigned int)((point2 & 0xFFFF) << 4) +
+                    (unsigned int)points);
+    p3 = (VECTOR *)((unsigned int)((point3 & 0xFFFF) << 4) +
+                    (unsigned int)points);
+
+    result->x = (weight0 * p0->x + weight1 * p1->x +
+                 weight2 * p2->x + weight3 * p3->x) / 24576.0f;
+    result->y = (weight0 * p0->y + weight1 * p1->y +
+                 weight2 * p2->y + weight3 * p3->y) / 24576.0f;
+    result->z = (weight0 * p0->z + weight1 * p1->z +
+                 weight2 * p2->z + weight3 * p3->z) / 24576.0f;
 }
 
 /* Wrap an angle into the signed radius interval */
