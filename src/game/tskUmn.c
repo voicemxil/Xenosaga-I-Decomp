@@ -147,7 +147,7 @@ typedef struct {
     MSGDX msg;                          /* 0x1A0 */
     char pad1E4[0x350 - 0x1E4];
     union {
-        char szText[0x10];              /* 0x350 (simulation) */
+        char szText[0x100];             /* 0x350 (simulation / mail) */
         long long nAlign;
     } u;
 } UMN_INFO;
@@ -757,6 +757,212 @@ void tskUmnMailPas(TSK_TASK *pTask, UMN_PAS_M *w)
             }
             endPrintExtFunc(w->nColor, 102, 0);
         }
+        break;
+    }
+}
+
+/* TODO: PARKED at 115 differing words of 303 (built 299 -- four short).
+ * Behaviour, both switch shapes, all three fragment tables, every
+ * string and every struct offset are recovered; words 0..114 (the
+ * prologue, the three block copies, the whole of case 0 and the entry
+ * to case 2) are byte-exact.  What is left is register NAMING from the
+ * page dispatch onward -- retail keeps &w->u.szText in $s3 and the
+ * UmnWork %hi in $s0 for the whole function, gcc swaps the two -- plus
+ * four `.p2align' pad nops between arms that will fall out once the
+ * arm lengths agree.
+ *
+ * Swept, all measured, none better than the shape below:
+ *  - &w->u.szText as a per-arm block local, as one case-2-scope local,
+ *    and written out at every use.  BOTH pointer forms grow the frame
+ *    from 144 to 160 bytes (an extra spill); only the repeated member
+ *    expression keeps retail's frame.
+ *  - w->nMode hoisted into its own local ahead of the inner switch
+ *    (this is what puts retail's `lbu' in the outer `beql' delay slot
+ *    -- but it costs two words elsewhere: 118 rather than 115).
+ *  - `w->msg.pText = ...' duplicated into both arms of the
+ *    bReplyReady test and of the nMailHist test, and shared after
+ *    them.  Shared is right for bReplyReady, duplicated is right for
+ *    nMailHist; the two are not independent, and the wrong pair costs
+ *    47 words by shifting $s2/$s3 across the whole function.
+ *  - i/j at function scope and scoped to the history arm: identical.
+ *  - the three fragment tables as `memcpy' from static templates
+ *    rather than as local initialisers.  memcpy makes gcc use aligned
+ *    `ld/sd'; retail's `ldl/ldr' pairs only come from a local array
+ *    with an initialiser list, which is the shape kept below.
+ *
+ * Still to try: stopping gcc cross-jumping the page-48 arm's
+ * eMessageCpy into the shared 82/84/96 tail (retail duplicates it,
+ * because its `lw a1,0(v0)' fills the call's delay slot). */
+
+/* Mail screen: bottom info window.  Unlike the other three info windows
+ * the caption is BUILT here, out of three tables of fragments that gcc
+ * block-copies onto the stack, so the arms read as eMessageCpy followed
+ * by a run of eMessageCat.  The window's own 0x350 text buffer is both
+ * the destination and what msg.pText ends up pointing at. */
+void tskUmnMailInfo(TSK_TASK *pTask, UMN_INFO *w)
+{
+    char *szTag[6] = {
+        "Old/", "New/", "File attached.", "No attachments.",
+        "Mail from ", "Reply to "
+    };
+    char *szMenu[4] = {
+        "View selected mail.", "View history of selected mail.",
+        "Download attachment.", "Cancel."
+    };
+    char *szMsg[7] = {
+        "Select the reply mail to ",
+        "Will reply with the selected mail.",
+        "Sent reply. \037", "Saved attachment. \037",
+        "Investment amount: ", "Amount needed: ", "G"
+    };
+    short nTarget;
+
+    if (UmnWork.nScene != 1) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nColor = 0xFF0000;
+        w->bReady = 0;
+        w->nMode = 0;
+        memset(w->u.szText, 0, 256);
+        WindowDXSet(&w->win);
+        w->win.nX = -16;
+        *(volatile char *)&w->win.nState = 0;
+        w->win.nY = 480;
+        w->win.nW = 544;
+        w->win.nH = 54;
+        w->win.pFunc = MenuInfoWindow;
+        w->win.pMsg = &w->msg;
+        w->msg.nX = 0;
+        w->win.nColor = w->nColor;
+        w->win.nState = 1;
+        w->msg.nY = 0;
+        w->msg.pText = 0;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        break;
+    case 2:
+        nTarget = 386;
+        switch (w->nMode) {
+        case 0:
+            w->bReady = 1;
+            w->nMode = 2;
+            /* fallthrough */
+        case 2:
+            switch (UmnWork.nPage) {
+            case 16:
+            case 17:
+            case 32:
+            case 33: {
+                unsigned char nFlag =
+                    *(unsigned char *)UmnMailDataGet(UmnWork.u.db.nSel);
+
+                if (nFlag & 8) {
+                    char *pHdr;
+                    int i;
+                    int j;
+
+                    for (i = 0; i < 81; i++) {
+                        signed char *pTree = UmnHistoryTreeGet(i);
+
+                        for (j = 0; j < 3; j++) {
+                            if (pTree[j] == UmnWork.u.db.nSel) {
+                                break;
+                            }
+                        }
+                        if (j != 3) {
+                            break;
+                        }
+                    }
+                    pHdr = UmnMailHeaderGetI(i);
+                    if (pHdr) {
+                        eMessageCpy(w->u.szText, szTag[4]);
+                        eMessageCat(pHdr);
+                        eMessageCat(".\n");
+                        eMessageCat(szTag[5]);
+                        eMessageCat(pHdr + 64);
+                        eMessageCat(".\n");
+                        w->msg.pText = w->u.szText;
+                    } else {
+                        eMessageCpy(w->u.szText, "");
+                        w->msg.pText = w->u.szText;
+                    }
+                } else {
+                    if (nFlag & 2) {
+                        eMessageCpy(w->u.szText, szTag[0]);
+                    } else {
+                        eMessageCpy(w->u.szText, szTag[1]);
+                    }
+                    if (UmnWork.u54.mail.bReplyReady) {
+                        eMessageCat(szTag[2]);
+                    } else {
+                        eMessageCat(szTag[3]);
+                    }
+                    w->msg.pText = w->u.szText;
+                }
+                break;
+            }
+            case 48:
+            case 49: {
+                eMessageCpy(w->u.szText, szMenu[UmnWork.nDataBaseSel]);
+                w->msg.pText = w->u.szText;
+                break;
+            }
+            case 80:
+            case 81:
+                if (UmnWork.nMailHist >= 0) {
+                    char *pHdr = UmnMailHeaderGet(UmnWork.u.db.nSel);
+
+                    eMessageCpy(w->u.szText, szMsg[0]);
+                    eMessageCat(pHdr + 64);
+                } else {
+                    char *pHdr = UmnMailHeaderGet(UmnWork.u.db.nSel);
+                    int nNeed = -UmnWork.nMailHist;
+
+                    eMessageCpy(w->u.szText, szMsg[4]);
+                    eMessageCat(MenuNumberTextGet(*(int *)(pHdr + 140), 8, 1));
+                    eMessageCat(szMsg[6]);
+                    eMessageCat("\n");
+                    eMessageCat(szMsg[5]);
+                    eMessageCat(MenuNumberTextGet(nNeed, 8, 1));
+                    eMessageCat(szMsg[6]);
+                }
+                w->msg.pText = w->u.szText;
+                break;
+            case 82:
+            case 83: {
+                eMessageCpy(w->u.szText, szMsg[1]);
+                w->msg.pText = w->u.szText;
+                break;
+            }
+            case 84:
+            case 85: {
+                eMessageCpy(w->u.szText, szMsg[2]);
+                w->msg.pText = w->u.szText;
+                break;
+            }
+            case 96:
+            case 97: {
+                eMessageCpy(w->u.szText, szMsg[3]);
+                w->msg.pText = w->u.szText;
+                break;
+            }
+            default: {
+                eMessageCpy(w->u.szText, "");
+                nTarget = 512;
+                w->msg.pText = w->u.szText;
+                break;
+            }
+            }
+            break;
+        default:
+            w->msg.pText = w->u.szText;
+            break;
+        }
+        MoveSlide(&w->win.nY, &nTarget, 3.0f);
+        WindowDXMain(&w->win);
         break;
     }
 }
@@ -1581,6 +1787,14 @@ extern void eCursolModeChange(ECURSOL *pCur, int nMode);
 extern void eCursolMain(ECURSOL *pCur);
 extern void eMessageModeChange(void *pMsg, int nMode);
 extern char *UmnMailHeaderGet(signed char nNo);
+/* Same routine, int-argument view: the mail info window passes a loop
+   counter and retail does not truncate it. */
+extern char *UmnMailHeaderGetI(int nNo) __asm__("UmnMailHeaderGet");
+extern signed char *UmnHistoryTreeGet(int nNo);
+extern void eMessageCpy(void *pMsg, char *pText);
+extern void eMessageCat(char *pText);
+extern char *MenuNumberTextGet(int nValue, int nDigits, int nMode);
+extern void *memset(void *pDst, int nVal, unsigned int nSize);
 
 /* Mail screen: the three-choice reply window.
  *
