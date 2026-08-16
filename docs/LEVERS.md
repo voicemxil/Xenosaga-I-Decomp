@@ -1030,3 +1030,67 @@ size rounded 0x12 up to 0x14 and every member after it in the enclosing
 struct moved by four bytes -- diagnosed as IMMEDIATE diffs in three
 *already matching* functions. The pad after an embedded struct has to be
 computed from the ROUNDED end, not the last member's offset.
+
+---
+
+## Translation-unit boundaries (SDK)
+
+**A whole file that is one word off everywhere is the wrong compiler
+flag, not a lever problem.** The MPEG2 decoder helpers around 0x2107B0
+would not stop interleaving their address materialisation around an
+intervening store -- something `-fno-schedule-insns` can never emit.
+Splitting them out of `mpeg.c` into their own TU (`sceMpegDec.c`, at
+`-O2 -G0`) turned four near-misses into matches with NO source change,
+and the parked ones dropped from 21 to 4 differing words. Symptom: the
+first scheduling pass's fingerprint -- an unrelated instruction sitting
+between a `lui` and its `ori`, or between a `%hi` and the load that uses
+it. `__gnu_compiled_c` symbols in the ELF mark the boundaries; a
+function whose neighbours in address order are in a different file is a
+candidate for its own TU.
+
+**Constants used only AFTER a loop, but living in callee-saved
+registers, mean the code that uses them is INSIDE the loop.**
+`_nextHeader` hoists the callback message's `5` and `-1` into `$s6`/`$s1`
+ahead of a scan loop; that only happens if loop-invariant motion saw
+them, i.e. the picture-header tail is a `return` from inside the loop
+rather than code after a `break`.
+
+**A four-way dispatch with an `sltiu` midpoint test is a `switch`, and
+the case blocks come out in SOURCE order.** `_nextHeader` went from 29
+differing words to 2 purely by moving one `case` above another; the
+decision tree is fixed by the label values, but the out-of-line block
+layout follows the order the cases are written.
+
+## Statement-order levers
+
+**Reusing ONE variable across both arms makes gcc reuse its register.**
+`_outputFrame` kept `picture_structure` and `progressive_frame` in two
+locals and gcc gave the second a fresh `$a0`; assigning both to the same
+`int nType` (reloaded at the head of each arm) let the second load reuse
+`$v0` -- last three differing words, gone.
+
+**A run of `sw zero` stores comes out ROTATED RIGHT by one from source
+order.** Twice (`_skipMB0`, `_sliceA0`) a block of zero stores matched
+only after rotating the source LEFT by one position. Write the desired
+output order, move its first store to the end, and the delay-slot filler
+puts it back.
+
+**`LAUNDER` on an intermediate defeats cross-jumping without moving the
+result's register.** Two arms ending in an identical `slt; xori` get
+folded into one block (one word short). Laundering the *operand* the arm
+computes (`nArea = w*h; LAUNDER(nArea);`) splits them; laundering the
+*result* splits them too but hands the boolean a callee-saved register
+one slot earlier and costs five register diffs instead.
+
+**A constant address whose low half is zero folds its displacement into
+the load -- but only through a pointer VARIABLE.**
+`*(volatile long long *)0x10002030` gives `lui/ori/ld 0(r)`;
+`pRegs = (volatile long long *)0x10000000; pRegs[1030]` gives the
+original's `lui/ld 0x2030(r)`, because gcc constant-folds the address
+back together if you write it as one constant. Worth 26 differing words
+in `_ipuVdec`.
+
+**gcc 2.9x sibling-calls a void tail call.** `void f(p){ g(p, 3); }`
+compiles to `j g` with no frame at all; if the original has
+`addiu sp,-16 / sd ra / jal g / ld ra / jr ra`, no argument shuffling
+will reproduce it (`_dmVector`, parked at 7 words).
