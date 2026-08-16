@@ -1592,24 +1592,23 @@ UmnEventTextInit = 0x00A0F650, 0x24; // Umn.c
 __ieee754_fmod = 0x00324B78, 0x41C; // libm.c
 _dtoa_r = 0x003340B8, 0x1264; // newlib_dtoa2
 
-_fpadd_parts = 0x0032BBC8, 0x25C; // fpbit.c
-dpadd = 0x0032BE28, 0x58; // fpbit.c
-dpsub = 0x0032BE80, 0x64; // fpbit.c
-dpdiv = 0x0032C198, 0x174; // fpbit.c
-__fpcmp_parts_d = 0x0032DE50, 0x120; // fpbit.c
-dpcmp = 0x0032C310, 0x4C; // fpbit.c
-dptoli = 0x0032C418, 0x9C; // fpbit.c
-dptofp = 0x0032C4E8, 0x54; // fpbit.c
+_fpadd_parts = 0x0032BBC8, 0x25C; // fpbit_df
+dpadd = 0x0032BE28, 0x58; // fpbit_df
+dpsub = 0x0032BE80, 0x64; // fpbit_df
+dpdiv = 0x0032C198, 0x174; // fpbit_df
+__fpcmp_parts_d = 0x0032DE50, 0x120; // fpbit_df
+dpcmp = 0x0032C310, 0x4C; // fpbit_df
+dptoli = 0x0032C418, 0x9C; // fpbit_df
+dptofp = 0x0032C4E8, 0x54; // fpbit_df
 
-litodp = 0x0032C360, 0xB8; // fpbit.c
+litodp = 0x0032C360, 0xB8; // fpbit_df
 
-fptodp = 0x0032BB88, 0x3C; // fpbit.c
+fptodp = 0x0032BB88, 0x3C; // fpbit_sf
 
-__unpack_d = 0x0032DDA0, 0xAC; // fpbit.c
+__unpack_d = 0x0032DDA0, 0xAC; // fpbit_df
 
-__pack_d = 0x0032DC88, 0x118; // fpbit.c
+__pack_d = 0x0032DC88, 0x118; // fpbit_df
 
-// dpmul = 0x0032BEE8, 0x2AC; // fpbit.c -- TODO: down to 117 of 169 diff words (started at 684 vs 692 bytes fully mismatched). The (UDItype)(x & 0xffffffffULL) mask idiom fixed the __muldi3-vs-native-multu widening-mult mismatch (now 4 jal __muldi3 calls match). Remaining gap is purely register allocation: original saves s0-s6+ra (176-byte frame) to keep nl/nh/ml/mh/pp_hl/pp_lh live across all 4 __muldi3 calls plus a,b pointers across the whole function; built only saves s0+ra (160-byte frame) and reloads a/b fields from the stack repeatedly instead. Needs register pinning (register T x __asm__("$N")) on the 4-5 live-across-call temporaries, one at a time per the project's pinning idiom, or a source restructuring that keeps a/b pointers live in locals across the whole function.
 
 strstr = 0x00330220, 0x84; // newlib_str.c
 strrchr = 0x003301D0, 0x50; // newlib_str.c
@@ -2361,3 +2360,11 @@ Java_xeno_Stage_start__ILjava_lang_Object_ = 0x00304D70, 0x124; // Java_Stage.c
 nmlModelSetFilter = 0x0022FB70, 0x8C; // nmlModel.c
 ACT_updateMotionCore = 0x00306D98, 0xD8; // ACT.c
 RSRC_getDirtyItem = 0x0026DDB0, 0xA0; // RSRC.c
+HitCheckContainerPosSize = 0x002CAF40, 0x108; // Hit.c
+HitCheckMapUnitAt = 0x002C0498, 0xDC; // Hit.c
+HitCheckMapUnitPosAt = 0x002C0578, 0xDC; // Hit.c
+dpmul = 0x0032BEE8, 0x2AC; // fpbit_df
+DrillClearContainer = 0x002C9390, 0x58; // Drill.c
+DrillCalcCameraPos = 0x002CAC10, 0xC4; // Drill.c
+DrillResetCameraPos = 0x002CACD8, 0x98; // Drill.c
+DrillResetFlag = 0x002CAD70, 0xA8; // Drill.c
