@@ -1101,3 +1101,35 @@ void ACT_initSequence(void)
         a->nShadowSize = 80;
     }
 }
+
+void JNT_initProducer(void *);
+
+/* Detach an actor from its parent: clear the joint slot it occupied,
+   close the gap in the parent's child list and forget the parent. */
+void ACT_resetParent(ACTOR *pActor, ACTOR *pParent)
+{
+    int i;
+
+    JNT_initProducer(&pActor->producer);
+    for (i = 0; i < pParent->nChildNum; i++) {
+        if (pParent->pChild[i] == pActor) {
+            int j;
+
+            if (pActor->nJointId >= 0) {
+                pParent->aJointBusy[pActor->nJointId] = 0;
+                pParent->nJointUsed--;
+            }
+            pActor->nJointId = -1;
+            for (j = i; j < pParent->nChildNum - 1; j++) {
+                pParent->pChild[j] = pParent->pChild[j + 1];
+            }
+            /* Both `nChildNum - 1` expressions are written out, not held
+               in a local: gcc hoists the load but rematerialises the -1 in
+               each block, which is what the original does.  A local `n`
+               CSEs the subtraction and costs 21 words. */
+            pParent->nChildNum = pParent->nChildNum - 1;
+            break;
+        }
+    }
+    pActor->pParent = 0;
+}

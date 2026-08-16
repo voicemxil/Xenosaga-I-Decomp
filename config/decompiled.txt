@@ -2740,3 +2740,4 @@ sefGetCubePosBtm = 0x002E23C8, 0xF8; // sef.c
 CheckNearPoint = 0x002C29D8, 0xDC; // Check.c
 sceChstat = 0x002063D8, 0x23C; // sceFs.c
 sefGetCubePos = 0x002E24F0, 0xF4; // sef.c
+ACT_resetParent = 0x003066D0, 0xD8; // ACT.c

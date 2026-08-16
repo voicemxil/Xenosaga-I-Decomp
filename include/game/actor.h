@@ -69,13 +69,18 @@ typedef struct ACTOR {
     int nVMObject;                  /* 0x4C0 */
     u8 pad4C4[0x4];                 /* 0x4C4 */
     int nUndu;                      /* 0x4C8 */
-    u8 pad4CC[0x224];               /* 0x4CC */
+    u8 pad4CC[0x1CC];               /* 0x4CC */
+    int nJointUsed;                 /* 0x698 */
+    int nJointId;                   /* 0x69C */
+    u8 pad6A0[0x40];                /* 0x6A0 */
+    u8 aJointBusy[0x10];            /* 0x6E0 */
     u8 anim[0x14];                  /* 0x6F0 */
     u16 nAnimFlags;                 /* 0x704 */
     u8 pad706[0x16];                /* 0x706 */
     int pAnimData;                  /* 0x71C */
     int pUserData;                  /* 0x720 */
-    u8 pad724[0xD4];                /* 0x724 */
+    u8 pad724[0x6C];                /* 0x724 */
+    u8 producer[0x68];              /* 0x790 */
     int *pAccessories;              /* 0x7F8 */
     int nMoveElementID;             /* 0x7FC */
     u8 pad800[0x24];                /* 0x800 */
