@@ -559,15 +559,23 @@ int sceMcGetInfo(int port, int slot, int *type, int *free, int *format)
     return rc;
 }
 
-/* PARKED NEAR-MISS, 2 words of 90 (a pure adjacent swap): the original
- * sets up FlushCache's `move a0,zero` argument BEFORE the
- * `sw s0,16(s1)` payload store, we emit them the other way round.
- * Swept: both orders of `q[63] = 0` against `p[4] = (int)q` (the order
- * below is the better one, 3 words the other way), and --swap-adjacent
- * at sceMcRename:54..58 (54/55/56 are ineligible sites and change
- * nothing, 57 and 58 make it worse). Everything else -- the two
- * strncpys, the backwards-derived buffFileInfo base, the 19-not-14
- * command code -- is exact.
+/* MATCHES, 90 words.  The last 2 were a pure adjacent swap: the original
+ * sets up FlushCache's `move a0,zero` argument BEFORE the `sw s0,16(s1)`
+ * payload store, gcc emits them the other way round.  No source shape
+ * reaches it -- both orders of `q[63] = 0` against `p[4] = (int)q` were
+ * swept (the order below is the better one, 3 words the other way), as
+ * were a `mode` local for FlushCache's constant, LAUNDER_V(q),
+ * LAUNDER(p), LAUNDER2(p, q) and the `*(int *)((char *)p + 16)` store
+ * spelling; all leave it at 2.
+ *
+ * Closed with `--swap-adjacent sceMcRename:53`.  NOTE THE INDEX: the
+ * differing words are at 56/57 of the FINAL disassembly, and a previous
+ * sweep of sites 54..58 -- read off that disassembly -- found nothing.
+ * --swap-adjacent counts instructions in the POST-PROCESSED ASM, before
+ * gas steals `sb $0,63($16)` into the jal's delay slot, so the site is
+ * three lower than the diff index.  Dump the indices with
+ * fix_cc_asm.function_at()/RE_INSN rather than guessing them from the
+ * diff.
  *
  * sceMcRename: command 14 -- but the in-flight command code recorded is
  * 19, not 14.  Two names: the path goes in the usual 1024-byte field,
