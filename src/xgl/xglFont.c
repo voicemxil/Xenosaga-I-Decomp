@@ -46,97 +46,63 @@ void xglFontPrintDirectOT(int nOT, char *pStr);
 int xglFontGetStringWidth2(void *pStr, int nArg);
 void set_ot(int nOT);
 void set_xyz();
-void xglFontPrintDirectCore(char *pStr);
-void xglFontPrintSub(char *pStr);
-
-typedef unsigned int u_int;
-typedef struct { u_char a[8]; } SPBITS;
-extern u_char D_004DC2A9[];   /* SP-code-8 bit sizes live at -9 from here */
-
-/* TODO: near-miss (44 vs 47, LENGTH). Findings: u_short idx + int
- * intermediate reproduces the addiu -161/andi + gas $at addiu-macro arm
- * shape; $3/$7 passthrough pins put the compare bools in the right regs.
- * Blockers: (1) c must land in a FRESH $v0 while the lo*94 chain also
- * wants $v0 -- pinning c to $2 makes sched1 hoist the chain's sll above
- * the hi srl (chain then allocates $t0), unpinned c folds in-place into
- * $a0; (2) a stray `move $t0,$a1` pClut save appears in every variant;
- * (3) arm 1 splits its 0xC4E2 add (li $a0) whenever idx lands in $a0. */
-/* Map a Shift-JIS kanji code to its cache-texture UV origin, optionally
- * returning the CLUT/page word through pClut */
-int xglFontGetKanjiClutUV(int nCode, u_int *pClut)
+/* TODO: near-miss (39/57 words, 228 vs 232 bytes). Control flow, the
+ * lb-then-lbu double load and every loop body now line up; the whole
+ * residue is HOW the FS.pStream address is materialised. The original
+ * builds it three times as a *folded* symbol address -- `addiu sN,
+ * %hi-reg, %lo(FS+28)` then `lw 0(sN)` -- once hoisted for the outer
+ * store, once again for the inner loop (off a second %hi copy in $s2),
+ * and a third time at the tail as `&FS` + a separate `addiu 28`. Ours
+ * hoists plain `&FS` and leaves the 28 in the load/store offset
+ * (`lw 28($s1)`), which is one instruction shorter and costs the two
+ * extra materialisations.
+ * Swept (24 body variants x entry/inner/outer/tail shapes, sweep.py):
+ * writing the loops through a local `u_char **pp = &FS.pStream` DOES
+ * fold the offset exactly as the original does, but gcc's GCSE then
+ * collapses all three sites onto one pseudo (196 bytes, 48 diffs) even
+ * when pp is reassigned at each site or scoped per block; three
+ * LAUNDER(pp)s reproduce the three materialisations and land at 228
+ * bytes / 44 diffs, i.e. no better than the plain-C shape below, so the
+ * steering is not carrying its weight. What is missing is whatever made
+ * the original compiler treat `&FS.pStream` as a symbol+offset value in
+ * the loops and as `&FS`-plus-28 at the tail in the SAME function --
+ * the sibling matched functions (xglFontDebugHex, xglFontPrintExtFunc)
+ * all use the plain `lw 28($base)` form, so this shape is specific to
+ * this TU position. Not re-swept: entry/loop-rotation shapes. */
+void xglFontPrintDirectCore(char *pStr)
 {
-    u_int c;
-    PIN(u_int lo, "$6");
-    PIN(u_int hi, "$4");
-    u_short idx;
-    int t;
-    PIN(int b173, "$3");
-    PIN(int b176, "$7");
-    u_int u;
-    u_int page;
+    u_char *pSrc;
+    u_char *pDst;
+    u_char c;
+    int n;
 
-    PASSTHRU(c, nCode & 0xFFFF);
-    PASSTHRU(lo, c & 0xFF);
-    PASSTHRU(hi, c >> 8);
-    PASSTHRU(b173, lo < 173);
-    PASSTHRU(b176, lo < 176);
-    PASSTHRU(t, hi + lo * 94 - 161);
-    idx = t;
-
-    if (b173) {
-        idx += 0xC4E2;
-    } else if (b176) {
-        idx += 0xC30C;
-    } else {
-        idx += 0xC250;
-    }
-    u = idx & 0x1F;
-    page = (idx >> 5) & 0xFF;
-    if (pClut != 0) {
-        *pClut = ((page >> 5) << 12) + 4100;
-    }
-    return ((page & 0x1F) * 3 << 23) + (u * 5 << 6);
-}
-
-/* Byte length of a special (control) code sequence: table-driven, with
- * code 8 (bitfield payload) and code 21 (counted payload) computed */
-int xglFontGetSPcodeSize(int nCode, u_char *pStr)
-{
-    static u_char spcode[32] = {
-        0, 1, 1, 1, 1, 1, 3, 0, 255, 0, 0, 0, 3, 1, 5, 3,
-        5, 6, 2, 2, 0, 255, 0, 7, 1, 1, 0, 1, 0, 0, 0, 0,
-    };
-    SPBITS bits;
-    u_char nSize;
-    u_char nBit;
-    u_char nBits;
-    int i;
-
-    nCode &= 0xFF;
-    nSize = spcode[nCode];
-    if (nSize == 255) {
-        switch (nCode) {
-        case 8:
-            bits = *(SPBITS *)(D_004DC2A9 - 9);
-            nBits = pStr[1];
-            nSize = 1;
-            for (i = 0; i < 8; i++) {
-                nBit = nBits & 1;
-                if (nBit != 0) {
-                    nSize = nSize + bits.a[i];
+    pSrc = (u_char *)pStr;
+    c = *pSrc;
+    if (*(char *)pSrc != 0) {
+        do {
+            if (*pSrc < 32) {
+                n = xglFontGetSPcodeSize(*pSrc, pSrc);
+                while (n > 0) {
+                    n--;
+                    pDst = FS.pStream;
+                    *pDst = *pSrc;
+                    pSrc++;
+                    FS.pStream = pDst + 1;
                 }
-                nBits >>= 1;
+                c = *pSrc;
             }
-            break;
-        case 21:
-            nSize = pStr[1] + 1;
-            break;
-        }
+            pSrc++;
+            pDst = FS.pStream;
+            *pDst = c;
+            FS.pStream = pDst + 1;
+            c = *pSrc;
+        } while (c != 0);
     }
-    return nSize;
+    pDst = FS.pStream;
+    *pDst = 0;
+    FS.pStream = pDst + 1;
 }
 
-/* Return the font microcode load address */
 int xglFontGetLoadAddress(void)
 {
     return FS.nLoadAddr;
@@ -357,6 +323,48 @@ int xglFontGetProportionalSize(int nCode)
     }
     return nSize;
 }
+typedef __builtin_va_list va_list;
+#define va_start(ap, last) __builtin_stdarg_start(ap, last)
+#define va_arg(ap, type) __builtin_va_arg(ap, type)
+
+/* Queue a printf-style debug command (11) into the font stream buffer.
+ * The whole caller argument list is snapshotted into a 32-doubleword
+ * scratch -- element 0 is the format word, the rest is the raw varargs
+ * area -- because xglFontPrintSub consumes it after this frame is gone.
+ * Going through `pp = &FS.pStream` rather than naming FS.pStream twice
+ * is what makes gcc keep the member address live in a register across
+ * the load/store pair, as the original does. */
+void xglFontDebugPrintf(int nX, int nY, u_int nFmt, ...)
+{
+    va_list ap;
+    long long aBuf[32];
+    long long *pDst;
+    u_char *p;
+    u_char **pp;
+    int i;
+
+    if ((FS.nFlags & 3) != 3) {
+        return;
+    }
+    aBuf[0] = nFmt;
+    va_start(ap, nFmt);
+    pDst = &aBuf[1];
+    for (i = 30; i >= 0; i--) {
+        *pDst = va_arg(ap, long long);
+        pDst++;
+    }
+    if (FS.nDebugMode == 0) {
+        nX <<= 1;
+        nY <<= 1;
+    }
+    set_xyz(nX, nY, -1);
+    pp = &FS.pStream;
+    p = *pp;
+    *p = 11;
+    *pp = p + 1;
+    xglFontPrintSub((char *)aBuf);
+}
+
 /* TODO: near-miss (11 words). Logic and the 8-byte command layout are
  * right; ours converts the nDebugMode test to bnezl with the
  * FS.pStream lw hoisted into the annulled slot, the original keeps
