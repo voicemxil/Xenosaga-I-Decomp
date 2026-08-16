@@ -2264,3 +2264,73 @@ by three compares.
   loop-bottom test loaded. `do/while` with an explicit guard, a plain
   `while`, and reading the index into a local before advancing the pointer
   all CSE identically.
+
+---
+
+## Wave-5 additions (src/xgl)
+
+**A loop bound written INLINE in the `for` header is a different pseudo
+from a named local.** jump.c's `duplicate_loop_exit_test` copies the
+test ahead of the loop and LICM then hoists the invariant a SECOND
+time, which is retail's `move t0,a2`; a named `nBytes`/`nLim` local
+coalesces the two and the copy disappears. (xglFlagsGet, matched.)
+
+**Independent conditional-move clamps are emitted in SOURCE order, and
+that order picks the registers.** `xglCameraSetWindow` has two groups of
+four `if (x < bound) x = ...` clamps; the emitted `slti`/`movn`/`movz`
+sequence follows the statements exactly, so the group order decides
+which of `$t1..$t4` and `$a2`/`$a3` each corner gets. Neither group is
+in reading order -- the negative clamps run X0,X1,Y0,Y1 and the
+screen-size clamps X0,Y0,X1,Y1. All 24 orderings of each group are
+cheap to sweep and 14 diffs -> 4 -> match came out of it, where no
+register lever moved anything.
+
+**A PIN plus LAUNDER_V is how you BUY a `move` out of `$v0`.** When
+retail copies a call's result (`move $v1,$v0`) before storing and
+testing it, local_alloc coalesces the pseudo onto `$v0` in every source
+shape. `PIN(int nRead, "$3"); nRead = f(); LAUNDER_V(nRead);` produces
+the copy -- the bare PIN is silently ignored on a plain assignment, and
+the LAUNDER_V is what makes it stick. The extra word then restores the
+following `.p2align` pad by itself. (fillBuff, matched.)
+
+**`--barrier-branch-move` already knows the volatile-store rule.** A
+volatile MMIO store sitting immediately before a call is NOT stolen into
+the call's delay slot by the original assembler; gcc's pipeline steals
+it. The pass covers this (it looks for gcc's `#.set volatile` marker),
+and it is worth trying on any function that mixes MMIO writes with
+calls. An empty `__asm__ volatile` barrier in the C does NOT help --
+gas fills the slot regardless. (xglRenderInit, matched.)
+
+**An `extern char x[]` with NO size is not small data.** At -G8 gcc puts
+a sized extern array in .sdata and reaches it with `addiu $a1,$gp,off`;
+an unknown-size `extern char x[]` gets an absolute `lui`/`addiu` pair.
+This is the mirror of the existing "declare it `extern char X[0x10]` for
+the absolute lui" entry -- read the original's addressing first, then
+pick the declaration. (xglCdLoadOverlay.)
+
+**Write string copies as plain `(*pDst = *pSrc)` and delete the
+steering.** Staging the character through an `int` and testing
+`(c << 24) == 0` folds to `beqz` on an `lbu` value AND makes gcc comment
+out its own `#nop` load-hazard pads (they appear as `#nop`, not a real
+nop, once an `#APP` block sits between the load and its use). The plain
+char-lvalue form keeps both the `sll 24` test and the pads. Three words
+in xglCdLoadOverlay came back purely from removing a `PASSTHRU`.
+
+**Spell `&sym` at its use rather than hoisting it into a local when the
+original does not keep it in a callee-saved register.** A `void *gp =
+&_gp;` local becomes a loop invariant that global_alloc ranks ahead of
+the loop's own giv, and `$s6`/`$s7` come out the other way round;
+writing `&_gp` at the single use took xglThreadInitial 15 diffs -> 10.
+
+**A separate destination pointer per copy PHASE.** Two string-building
+phases sharing one `char *p` make one pseudo, which takes one register
+for both; retail uses `$a1` in the first and `$a2` in the second.
+Splitting it also recovered the guard's branch-likely form. Took both
+xglSoundLoadEffect and xglSoundLoadRequestSmd 13 diffs -> 7.
+
+**Ranged `--swap-regs` composes, so it can express a 3-cycle.** A
+permutation that is not a single transposition needs two swap sites over
+the same window, applied in order; `xglHddMcCheckCore` needed
+`10-11:50`, `3-10:52-55` and `11-3:52` to name its accumulator retail's
+way. Reach for it only after the source sweep has bottomed out -- it is
+assembly post-processing, so it costs a port nothing.
