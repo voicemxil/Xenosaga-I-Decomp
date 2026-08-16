@@ -510,3 +510,48 @@ int hex2val(int nChar)
     }
     return 0;
 }
+
+/* TODO: near-miss (46 words vs 44). All the arithmetic is right; the
+ * residue is that sched2 sinks the `pClut != 0` branch to the very end
+ * and computes both the CLUT value and the return value above it, where
+ * the original branches first and computes the v half in the merge
+ * block. Consequences: an extra `move a3,a1` (pClut spilled out of $a1
+ * because $a1 becomes an arithmetic temp) and one extra word.
+ * Levers applied to get here: nIdx built with a separate `nIdx &= 0xFFFF`
+ * statement per step (a `(u_short)` cast on the whole expression turns
+ * `addiu -161` into `li 0xff5f` + `addu`), and `u_char nRow` -- with
+ * `u_int nRow = (nIdx >> 5) & 0xFF`, combine folds the later `& 0x1F`
+ * into the same andi and the 0xff mask disappears, because in the
+ * original those two masks sit in different basic blocks.
+ * Swept: nU inlined into the return, nU accumulated, LAUNDER(nRow). */
+/* Map a Shift-JIS style kanji code to its (u,v) position in the font
+ * texture, and optionally to the CLUT address that goes with its row */
+u_int xglFontGetKanjiClutUV(u_short nCode, u_int *pClut)
+{
+    u_int nLo;
+    u_int nHi;
+    u_int nIdx;
+    u_int nCol;
+    u_char nRow;
+
+    nLo = nCode & 0xFF;
+    nHi = nCode >> 8;
+    nIdx = nHi + nLo * 94 - 161;
+    nIdx &= 0xFFFF;
+    if (nLo < 0xAD) {
+        nIdx = 0xC4E2 + nIdx;
+        nIdx &= 0xFFFF;
+    } else if (nLo < 0xB0) {
+        nIdx = 0xC30C + nIdx;
+        nIdx &= 0xFFFF;
+    } else {
+        nIdx = 0xC250 + nIdx;
+        nIdx &= 0xFFFF;
+    }
+    nCol = nIdx & 0x1F;
+    nRow = nIdx >> 5;
+    if (pClut != 0) {
+        *pClut = ((nRow >> 5) << 12) + 4100;
+    }
+    return (((nRow & 0x1F) * 3) << 23) + ((nCol * 5) << 6);
+}
