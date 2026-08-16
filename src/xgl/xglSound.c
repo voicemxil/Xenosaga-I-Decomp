@@ -805,3 +805,69 @@ void xglSoundLoadEffect(char *pName, void *pBuf, int nNo)
         xglSoundSendSed(pBuf, nNo);
     }
 }
+
+/* TODO: near-miss (13 words). The $s0/$s1 parameter tie-break is fixed
+ * by the PINs below (gcc gives pName $s1 and pBuf $s0 on its own, and no
+ * source shape flips it -- char* vs void* parameter, an extra use of
+ * pName before the guard, while-loops instead of for-loops, nested-if
+ * guards were all tried). What is left is ONE thing and its cascade: the
+ * guard is `bnez` where the original has the branch-likely `bnezl`, so
+ * the annulled `move a1,sp` (p = szPath) is not safe on the reset path
+ * -- where $a1 must hold -1 for xglSoundSendSwd -- and gcc puts p in
+ * $a2 instead, renaming the whole first copy loop. Pinning p to $5
+ * makes it worse (18). This is a --branch-likely site
+ * (xglSoundLoadRequestSmd:1) but the flag only flips the l-bit; the
+ * register choice would still need fixing, so it is left unregistered.
+ * xglSoundLoadEffect above has the identical residue. */
+/* Load a sequence's wave bank and sequence data, then start it: first
+ * "smd\<name>" through the SWD loader, then
+ * "data\sound\smd\<name>.SMD" straight off the disc */
+void xglSoundLoadRequestSmd(char *pNameArg, void *pBufArg)
+{
+    static char ext[8] = ".SMD";
+    char szPath[256];
+    /* PIN: the parameters' $s0/$s1 tie-break goes the other way here. */
+    PIN(char *pName, "$16");
+    PIN(void *pBuf, "$17");
+    char *p;
+    char *q;
+
+    pName = pNameArg;
+    pBuf = pBufArg;
+
+    if (pName == 0 || pBuf == 0) {
+        xglSoundSendSwd(0, -1);
+        xglSoundSendSmd2(0, 0);
+        return;
+    }
+    p = szPath;
+    for (q = SoundSequencePath; *q != '\0'; q++) {
+        *p++ = *q;
+    }
+    for (q = pName; (*p = *q) != '\0'; q++) {
+        p++;
+    }
+    if (xglSoundLoadSwd(szPath, pBuf) > 0) {
+        xglSoundSendSwd(pBuf, -1);
+        while (SsdSpuDmaCompleted(0) != 0) {
+            ;
+        }
+    }
+    p = szPath;
+    for (q = SoundDataPath; *q != '\0'; q++) {
+        *p++ = *q;
+    }
+    for (q = SoundSequencePath; *q != '\0'; q++) {
+        *p++ = *q;
+    }
+    for (q = pName; *q != '\0'; q++) {
+        *p++ = *q;
+    }
+    for (q = ext; (*p = *q) != '\0'; q++) {
+        p++;
+    }
+    if (xglCdReadFile(szPath, pBuf, 0, 0) > 0) {
+        xglSoundSendSmd2(pBuf, 0);
+    }
+    xglSoundSequenceNormal2(0, 127);
+}
