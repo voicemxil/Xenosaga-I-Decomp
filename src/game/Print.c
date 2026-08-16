@@ -283,3 +283,62 @@ void PrintPoint(void **packet, PRINT_POINT *point)
 
     sceVif1PkAddDirectDataN(*packet, direct, 3);
 }
+
+typedef struct {
+    short x;                /* 0x00 */
+    short y;                /* 0x02 */
+    PRINT_U32 z;            /* 0x04 */
+    PRINT_U32 pad08;        /* 0x08 */
+    void *pImage;           /* 0x0C */
+} PRINT_THUMBNAIL;
+
+extern void sceVif1PkCloseDirectHLCode(void *packet);
+extern void sceVif1PkOpenDirectHLCode(void *packet, int a);
+extern void sceVif1PkCnt(void *packet, int a);
+extern void sceVif1PkRef(void *packet, void *data, unsigned int count,
+                         int a3, int t0, int t1);
+
+static PRINT_U32 ThumImageEnv[24] = {
+    0, 0, 0x11000000, 0x51000005,
+    0x8004, 0x10000000, 0xE, 0,
+    0, 0x23800, 0x50, 0,
+    0, 0, 0x51, 0,
+    0x80, 0x70, 0x52, 0,
+    0, 0, 0x53, 0,
+};
+static PRINT_U32 ThumDrawEnv[48] = {
+    0x5, 0x10000000, 0xE, 0,
+    0, 0, 0x3F, 0,
+    0, 0, 0x8, 0,
+    0, 0, 0x14, 0,
+    0xDC00B800, 0x5, 0x6, 0,
+    0x50003, 0, 0x47, 0,
+    0x8001, 0x508B4000, 0x53531, 0,
+    0x80, 0x80, 0x80, 0x80,
+    0, 0x80, 0, 0,
+    0, 0, 0, 0,
+    0x800, 0x660, 0, 0,
+    0, 0, 0, 0,
+};
+
+/* Blit a save thumbnail: upload its image through a REF transfer, then
+   draw the textured sprite the draw env describes. */
+void PrintThumbnail(void **packet, PRINT_THUMBNAIL *thumb)
+{
+    sceVif1PkCloseDirectHLCode(*packet);
+    sceVif1PkRef(*packet, ThumImageEnv, 6, 0, 0, 0);
+    sceVif1PkRef(*packet, thumb->pImage, 3586, 0, 0, 0);
+    sceVif1PkCnt(*packet, 0);
+    sceVif1PkOpenDirectHLCode(*packet, 0);
+    /* The two shifted coordinates are written out four times rather than
+       staged in `x`/`y` locals: named locals make gcc keep both shifts
+       live across the whole block, and the original lets CSE reuse the
+       one register destructively for the second pair. */
+    ThumDrawEnv[36] = (thumb->x << 4) + 0x6FF8;
+    ThumDrawEnv[37] = (thumb->y << 4) + 0x71F8;
+    ThumDrawEnv[38] = thumb->z;
+    ThumDrawEnv[44] = (thumb->x << 4) + 0x77F8;
+    ThumDrawEnv[45] = (thumb->y << 4) + 0x77D8;
+    ThumDrawEnv[46] = thumb->z;
+    sceVif1PkAddDirectDataN(*packet, ThumDrawEnv, 12);
+}
