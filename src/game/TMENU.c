@@ -44,7 +44,7 @@ typedef struct MSGQUEUE {
 typedef struct TMENU {
     char pad000[0x0C];
     short h0C;                     /* 0x0C: running max line width */
-    short h0E;                     /* 0x0E */
+    unsigned short h0E;            /* 0x0E: addQuery2 reads it with lhu */
     int nFlags;                    /* 0x10 */
     short h14;                     /* 0x14 */
     char pad016[0x20 - 0x16];
@@ -358,4 +358,161 @@ void TMENU_init(TMENU *t)
     EW_addComponent(p, 8, e);
     t->nFlags = 0x55;
     t->h14 = 1;
+}
+
+/* Convert an array of already-converted message lines into the menu's text
+ * arena: tag markup (/[..]) is stripped, double-byte characters are copied
+ * as pairs, newlines close a line and grow the widest-line counter.  An
+ * all-zero three-byte header ends the query block; the remaining entries
+ * are handed to TMENU_addItem.  Finally the line-pointer table is laid out
+ * on a 4-byte boundary after the text and the panel is refit.
+ *
+ * NEAR-MISS, 2 words long (202 orig vs 204 built), everything else in
+ * shape.  The surplus is the "i >= nCount" loop exit: retail spells it
+ * `beqzl v0,tail` with `lw t2,340(s1)` in the annulled delay slot,
+ * while gcc puts the load in a block of its own reached by a `b` (+2).
+ * Swept without moving it: break vs goto done for either or both exits;
+ * a redundant else arm around the empty-line block (the LEVERS layout
+ * lever); hoisting `pTop = t->pText154` above the i++ (208, worse);
+ * dropping the pTop local so the tail re-reads the member (204, the
+ * same surplus just moves to the empty-line -> tail edge instead);
+ * and every loop form for the tokenizer -- while, for(;;)+break,
+ * while(1)+break, do/while(1), and split load/test all give 204, while
+ * the explicit goto form gives 200 because it loses loop-invariant
+ * motion of the 10/47/91 constants and the two .p2align pad nops.
+ * The movn/branch-likely/store shapes elsewhere already match. */
+void TMENU_addQuery2(TMENU *t, unsigned char **ppSrc, int nCount)
+{
+    unsigned char *pOut;
+    unsigned char *pTop;
+    unsigned char *pSrc;
+    int nFirst;
+    int nLines;
+    int i;
+    int j;
+    int c;
+    int v;
+    int w;
+
+    pTop = t->pText154;
+    if (t->pText148 == 0) {
+        t->pText148 = pTop;
+    }
+    pOut = pTop;
+    nFirst = -1;
+    nLines = 0;
+    if (nCount > 0) {
+        i = 0;
+        pSrc = ppSrc[0];
+        c = pSrc[0];
+        if (((c << 16) | (pSrc[1] << 8) | pSrc[2]) == 0) {
+            pOut[0] = 0;
+            pOut[1] = 0;
+            pOut += 2;
+            t->pText154 = pOut;
+            pTop = pOut;
+            nFirst = 1;
+        } else {
+            for (;;) {
+                while ((c = *pSrc++) != 0) {
+                    if (c == 47) {
+                        if (*pSrc == 91) {
+                            do {
+                                v = *pSrc++;
+                                if (v >= 0xA1) {
+                                    *pOut++ = v;
+                                    *pOut++ = *pSrc++;
+                                }
+                            } while (v != 93);
+                        } else {
+                            *pOut++ = c;
+                        }
+                    } else if (c == 10) {
+                        w = pOut - t->pText154;
+                        if (t->b57 < w) {
+                            t->b57 = w;
+                        }
+                        *pOut++ = c;
+                        t->pText154 = pOut;
+                        nLines++;
+                    } else {
+                        *pOut++ = c;
+                        if (c >= 0xA0) {
+                            *pOut++ = *pSrc++;
+                        }
+                    }
+                }
+                pTop = t->pText154;
+                w = pOut - pTop;
+                if (t->b57 < w) {
+                    t->b57 = w;
+                }
+                v = pOut[-1];
+                if (i == nCount - 1) {
+                    if (v == 10) {
+                        pOut[-1] = 0;
+                        *pOut++ = 0;
+                    } else {
+                        *pOut++ = 0;
+                        *pOut = 0;
+                        pOut++;
+                        t->pText154 = pOut;
+                        nLines++;
+                    }
+                } else if (v != 10) {
+                    *pOut++ = 10;
+                    t->pText154 = pOut;
+                    nLines++;
+                }
+                i++;
+                if (i >= nCount) {
+                    pTop = t->pText154;
+                    goto done;
+                }
+                pSrc = ppSrc[i];
+                c = pSrc[0];
+                if (((c << 16) | (pSrc[1] << 8) | pSrc[2]) != 0) {
+                    continue;
+                }
+                *pOut++ = 0;
+                *pOut++ = 0;
+                t->pText154 = pOut;
+                nFirst = i + 1;
+                pTop = pOut;
+                goto done;
+            }
+        }
+    }
+done:
+    {
+        int n = t->b57 * 10;
+
+        v = n + 56;
+        if (t->pText148 != 0) {
+            v = n + 136;
+        }
+        if (t->h0C < v) {
+            t->h0C = v;
+        }
+    }
+    {
+        int *pLine = (int *)((((unsigned int)pTop + 3) >> 2) * 4);
+
+        t->ppLine144 = (unsigned char **)pLine;
+        t->pText154 = (unsigned char *)(pLine + nLines);
+        for (j = 0; j < nLines; j++) {
+            t->ppLine144[j] = t->pText154;
+            *t->pText154 = 0;
+            t->pText154 = t->pText154 + t->b57 + 32;
+        }
+    }
+    t->b141 = nLines;
+    t->b142 = 0;
+    t->b143 = 0;
+    t->h0E = t->h0E + nLines * 24 + 24;
+    if (nFirst > 0) {
+        for (i = nFirst; i < nCount; i++) {
+            TMENU_addItem(t, ppSrc[i]);
+        }
+    }
 }
