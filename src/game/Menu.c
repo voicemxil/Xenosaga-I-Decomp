@@ -605,7 +605,7 @@ void MenuSystem2Init(void)
 }
 
 extern void subMenuSystemMain(void);
-extern void endPrintExtFunc(int, int, int);
+extern void endPrintExtFunc(int, int, void *);
 extern unsigned char D_0036C191[];
 
 /* Run one sub-menu-system tick, then report whether the end-print sequence is not yet done */
@@ -2754,13 +2754,25 @@ int MenuShopNoSaleCheck(int nId)
    the original's movz/movn shapes; what remains is an a1/a2 + v1/a1 rename
    pair (the `v` flags word lands in $v1 instead of $v0, cascading into the
    ternary temps). Pins on nRet ($5) change length, pins on v ($2) are
-   ignored. Parked. */
+   ignored.
+   Second sweep: the register shift is one global pseudo deep -- retail has
+   nRet in $a1 with the two ternary alternates as BLOCK-LOCAL $v1, we have
+   nRet in $a2 with the alternates in $a1. A shared function-scope `nAlt`
+   used by both arms DOES move nRet onto $a1 (retail's register) but then
+   takes $a2 for itself instead of $v1, so the count stays 8 -- it only
+   trades which half of the pair is wrong. Also swept: `nRet = 36` as the
+   compare constant (one-local-two-roles, 10 diffs), block-scoping `v`
+   (no change), hoisting `v & 0x2000` into a named local and per-arm
+   `int nAlt = -1/1` block locals (gcc folds them back to literals).
+   The real difference is that retail's arm-A `ld` lands its VALUE in $v0
+   and its BASE in $v1, so $v1 dies at the load and the -1 reuses it; ours
+   lands base in $v0 and value in $v1, leaving no early register free.
+   No source spelling found that flips that pair. Parked. */
 /* Classify how an item can be used from the menu (0 no, 1/2 use-type, 10 event) */
 int MenuItemUseCheck(short nId)
 {
     char *p;
     int nRet;
-    unsigned short v;
 
     if (nId == 0) {
         return 0;
@@ -2769,13 +2781,17 @@ int MenuItemUseCheck(short nId)
     if ((*(unsigned short *)(p + 4) & 0x8000) == 0) {
         return 0;
     }
-    nRet = 36;
-    if (nId == nRet) {
-        nRet = (GameLoopState.f10 & 0x20400000) ? 2 : -1;
+    if (nId == 36) {
+        int nAlt = -1;
+
+        nRet = (GameLoopState.f10 & 0x20400000) ? 2 : nAlt;
     } else {
-        v = *(unsigned short *)(p + 12);
+        unsigned short v = *(unsigned short *)(p + 12);
+
         if ((v & 0x1E43) != 0) {
-            nRet = (*(unsigned char *)(p + 8) & 0x10) ? 2 : 1;
+            int nAlt = 1;
+
+            nRet = (*(unsigned char *)(p + 8) & 0x10) ? 2 : nAlt;
         } else {
             nRet = 0;
             if ((v & 0x2000) != 0) {
@@ -3816,6 +3832,114 @@ typedef struct {
 } SHOPWINSP;
 extern SHOPWORK *MenuShopWork;
 extern SHOPWINSP *MenuShopWinSP;
+
+/* One gouraud vertex of the shop underline strip */
+typedef struct {
+    short nX;                  /* 0x00 */
+    short nY;                  /* 0x02 */
+    int nColor;                /* 0x04 */
+    unsigned char b;           /* 0x08 */
+    unsigned char g;           /* 0x09 */
+    unsigned char r;           /* 0x0A */
+    unsigned char a;           /* 0x0B */
+} SHOPLINEVTX;
+
+/* The animated strip drawn under the shop list */
+typedef struct {
+    char pad00[3];
+    unsigned char nAlpha;      /* 0x03: fade counter, 0..0x78 */
+    int nColor;                /* 0x04 */
+    SHOPLINEVTX vtx[5];        /* 0x08 */
+    short h44;                 /* 0x44 */
+    char pad46[2];
+    int f48;                   /* 0x48 */
+} SHOPLINE;
+
+/* The owning frame: only its state byte is read here */
+typedef struct {
+    char pad00[0x10];
+    unsigned char nState;      /* 0x10 */
+} SHOPLINEWIN;
+
+extern void MoveSlide(short *pPos, short *pTarget, float fSpeed);
+
+/* Draw callback for the shop underline strip: build it flat on entry,
+   then slide the four right-hand vertices onto the current page's stops
+   and fade the whole strip with the page mode. */
+void MenuShopLine(SHOPLINEWIN *pWin, SHOPLINE *p)
+{
+    short aTarget[4];
+    short nSlideY;
+    SHOPLINEVTX *v;
+    short *pT;
+    PIN(int nY0, "$2");
+    SHOPWORK *sw;
+    int i;
+
+    switch (pWin->nState) {
+    case 0:
+        p->nColor = 0x00FFFFF0;
+        for (i = 0; i < 5; i++) {
+            p->vtx[i].r = 0x60;
+            p->vtx[i].g = 0x60;
+            p->vtx[i].b = 0x60;
+            p->vtx[i].a = 0x80;
+            p->vtx[i].nX = 0;
+            p->vtx[i].nY = 48;
+            p->vtx[i].nColor = p->nColor;
+        }
+        p->f48 = 0;
+        break;
+    case 2:
+        /* launder: gcc CSEs this 48 with the `case 0x30` page-id compare
+           below and keeps it in a callee-saved register; the original
+           materialises the two constants independently. */
+        nY0 = 48;
+        LAUNDER_V(nY0);
+        sw = MenuShopWork;
+        LAUNDER_V(sw);
+        nSlideY = nY0;
+        LAUNDER_V(sw);
+        aTarget[0] = sw->nSel * 21 + 294;
+        aTarget[1] = sw->nSel * 21 + 298;
+        aTarget[2] = sw->nSel * 21 + 302;
+        aTarget[3] = 512;
+        switch (sw->nPage) {
+        case 0x30:
+        case 0x90:
+        case 0xA0:
+        case 0xA2:
+        case 0xA4:
+            if (aTarget[0] == p->vtx[1].nX) {
+                nSlideY = 40;
+            }
+            if (p->nAlpha != 0x78) {
+                p->nAlpha = p->nAlpha + 8;
+            }
+            break;
+        default:
+            if (p->nAlpha != 0) {
+                p->nAlpha = p->nAlpha - 8;
+            }
+            break;
+        }
+        p->vtx[0].nX = 0;
+        p->h44 = 512;
+        pT = aTarget;
+        v = &p->vtx[1];
+        for (i = 0; i < 4; i++) {
+            MoveSlide(&v->nX, pT, 3.0f);
+            pT++;
+            v->a = p->nAlpha;
+            v++;
+        }
+        p->vtx[0].a = p->nAlpha;
+        MoveSlide(&p->vtx[2].nY, &nSlideY, 8.0f);
+        endPrintExtFunc(p->nColor, 0, &p->vtx[0]);
+        break;
+    }
+}
+
 /* Shop sort-list source table: one entry per sort id -- the id list, the
    category tag folded into the high half of each sort word, and the cap. */
 typedef struct {
@@ -6144,6 +6268,22 @@ typedef struct {
     PRINTBOX box;              /* 0x3C0 */
 } MENU_FILE_PAS_WORK;
 
+/* TODO: near-miss (11 of 229) - every case arm matches except the three
+   stores of `case 132/134/135`. The instruction multiset is identical; the
+   difference is which of the last statement's two chains issues first.
+       retail: lhu a1,20(sp) ... addiu a1,a1,16 / sh v0,0(v1) / sh a2,42(sp)
+               / lw v0,36(a3) / sll / addu / [sh a1,4(v0)]   (VALUE first)
+       ours:   lw a1,36(a3) / sll / addu a1,a1,s1 ... / addiu a2,a2,16
+               / sh v0,0(v1) / sh t0,42(sp) / [sh a2,4(a1)]  (ADDRESS first)
+   expand_assignment always lays the destination address down before the
+   RHS, so the retail order needs the scheduler to sink the p->nSlot2 load
+   below both stores and it does not. Swept: hoisting the value into an
+   `int` local (turns the retail `lhu` into `lw` -- the narrowing only
+   survives when the expression is written inline at the short store) and
+   into a `short` local (keeps the lhu, does not move it), `2 + p->nSlot2`
+   for integer-first addition, and a LAUNDER(p) barrier between the second
+   and third store. Store ORDER is fixed at 1/2/3 by the retail sh
+   sequence, so no statement permutation is legal here. */
 void MenuFilePas(MENU_TSK *pTask, MENU_FILE_PAS_WORK *w)
 {
     static char *msg[] = { 0, 0, 0, 0, 0, 0 };
