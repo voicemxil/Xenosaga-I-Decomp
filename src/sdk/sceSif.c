@@ -759,3 +759,41 @@ int sceSifSearchModuleByName(const char *name)
         return (int)0xfffeffff;
     return _senddata.arg;
 }
+
+/* sceSifGetIopAddr: loadfile RPC opcode 3 -- ask the IOP for the address
+ * of an exported symbol and store it into *dest at the caller's width.
+ * `width` is 0/1/2 for byte/halfword/word; anything else is rejected
+ * before the RPC, which is why the trailing `else` below is unreachable
+ * in practice but still emitted (the original tests it too). */
+int sceSifGetIopAddr(int nAddr, void *pDest, int width)
+{
+    /* $s3/$s2 for the two saved arguments: gcc's global-alloc ranks the
+     * destination pointer above the address and hands them out the other
+     * way round, which then also pushes the _senddata base off $s1. */
+    PIN(int addr, "$19");
+    PIN(void *dest, "$18");
+
+    addr = nAddr;
+    dest = pDest;
+    if (_lf_bind(addr) < 0)
+        return (int)0xffff0000;
+    if ((unsigned int)width >= 3)
+        return (int)0xfffefffe;
+
+    _senddata.arg = addr;
+    _senddata.pad = width;
+    if (sceSifCallRpc(&cd_00994A40, 3, 0, &_senddata, 32,
+                      &_senddata, 32, 0, 0) < 0)
+        return (int)0xfffeffff;
+
+    if (width == 0)
+        *(unsigned char *)dest = (unsigned char)_senddata.arg;
+    else if (width == 1)
+        *(unsigned short *)dest = (unsigned short)_senddata.arg;
+    else if (width == 2)
+        *(int *)dest = _senddata.arg;
+    else
+        return (int)0xfffefffe;
+
+    return 0;
+}
