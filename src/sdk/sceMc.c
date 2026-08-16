@@ -514,3 +514,92 @@ int sceMcGetDir(int port, int slot, const char *name, int flags,
         SignalSema(semaidRegFunc);
     return rc;
 }
+
+/* sceMcGetInfo: command 1.  Each of the three optional out-pointers
+ * turns into a "please fetch this" flag in the payload and is also
+ * parked in a module global, because the reply is scattered by the RPC
+ * end function mceGetInfoApdx rather than by this function.  The flags
+ * are written with real branches, not a materialised comparison. */
+
+int sceMcGetInfo(int port, int slot, int *type, int *free, int *format)
+{
+    int rc;
+
+    if (PollSema(semaidRegFunc) < 0)
+        return -200;
+    if (mcClientID[9] == 0) {
+        SignalSema(semaidRegFunc);
+        return -100;
+    }
+    sifParamOrd[1] = port;
+    sifParamOrd[2] = slot;
+    sifParamOrd[7] = (int)sifParamNext;
+    if (type != 0)
+        sifParamOrd[5] = 1;
+    else
+        sifParamOrd[5] = 0;
+    if (free != 0)
+        sifParamOrd[4] = 1;
+    else
+        sifParamOrd[4] = 0;
+    if (format != 0)
+        sifParamOrd[3] = 1;
+    else
+        sifParamOrd[3] = 0;
+    typeAddr = type;
+    freeAddr = free;
+    formAddr = format;
+    sceSifWriteBackDCache(sifParamNext, 192);
+    rc = sceSifCallRpc(mcClientID, 1, 1, sifParamOrd, 48, &retval, 4,
+                       (void *)mceGetInfoApdx, sifParamNext);
+    if (rc == 0)
+        mcRunCmdNo = 1;
+    else
+        SignalSema(semaidRegFunc);
+    return rc;
+}
+
+/* sceMcRename: command 14 -- but the in-flight command code recorded is
+ * 19, not 14.  Two names: the path goes in the usual 1024-byte field,
+ * the new name into the 32-byte tail of buffFileInfo, whose base is
+ * reached backwards from the strncpy destination the same way the
+ * pathname commands reach their header. */
+
+extern char buffFileInfo[64];       /* 0x00996F80 */
+extern void FlushCache(int mode);
+
+int sceMcRename(int port, int slot, const char *name, const char *newname)
+{
+    int *p;
+    char *q;
+    int rc;
+
+    if (PollSema(semaidRegFunc) < 0)
+        return -200;
+    if (mcClientID[9] == 0) {
+        SignalSema(semaidRegFunc);
+        return -100;
+    }
+    if (name == 0 || *name == 0 || newname == 0) {
+        SignalSema(semaidRegFunc);
+        return -210;
+    }
+    p = sifParamFname;
+    p[0] = port;
+    p[1] = slot;
+    p[2] = 16;
+    strncpy((char *)p + 20, name, 1023);
+    q = buffFileInfo + 32;
+    ((char *)p)[1043] = 0;
+    strncpy(q, newname, 32);
+    q -= 32;
+    q[63] = 0;
+    p[4] = (int)q;
+    FlushCache(0);
+    rc = sceSifCallRpc(mcClientID, 14, 1, p, 1044, &retval, 4, 0, 0);
+    if (rc == 0)
+        mcRunCmdNo = 19;
+    else
+        SignalSema(semaidRegFunc);
+    return rc;
+}
