@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* JNT - the joint/skeleton layer of the model system.
  *
  * The whole layer works out of a single fixed work area that lives in the
@@ -644,13 +646,29 @@ int JNT_startProduction(JNT_PRODUCER *pProducer, void *pUnit, float fFrame)
  * thing separating them is the four TI-mode quadword stores, and
  * -fstrict-aliasing says a `mode(TI)` store cannot touch an `int` load.
  *
- * The JVAL/JSVALUE union trick that fixes the same class of CSE in
- * Java_Chr.c and JS.c does NOT reach this one -- wrapping the quadword in
- * a union (so the stores take the union's alias set), and separately
- * reading nIndex through a union that also contains a JNT_QUAD member,
- * both leave the count unchanged at 100.  Three copy shapes (a JNT_QUAD*
- * source cursor, the fully inlined form, and a char* cursor with explicit
- * byte offsets) were also swept, all identical.
+ * The LAUNDER_V below is what restores that third read, and it is worth
+ * exactly one word plus 19 instructions: with it the function is the
+ * original's length (99 words) and 52 diffs, without it 100 words and 71.
+ * It introduces no new differing word -- the two diff sets are nested.
+ *
+ * Everything else tried does NOT reach the CSE: the JVAL/JSVALUE union
+ * trick that fixes this class in Java_Chr.c and JS.c (both wrapping the
+ * quadword in a union so the stores take the union's alias set, and
+ * reading nIndex through a union with a JNT_QUAD member); three copy
+ * shapes (a JNT_QUAD* source cursor, the fully inlined form, and a char*
+ * cursor with byte offsets); reading the index through a
+ * `volatile int *`, in both cast-in-place and named-local form; and
+ * building the whole file with -fno-strict-aliasing, which is strictly
+ * worse -- it costs three other functions in JNT.c and leaves this one
+ * at 51 diffs.
+ *
+ * WHAT IS LEFT (52 diffs, all in two clumps, indices 3-33 and 60-88) is a
+ * register tie-break, not an aliasing problem: gcc puts pWork->pMatrix in
+ * $a1 where the original uses $v1, which forces `move $4,$5` for the
+ * xglMatrixUnit4s argument and pushes `move s3,a1` out of that call's
+ * delay slot into the prologue.  Fencing before the call does not move
+ * it (swept: LAUNDER/LAUNDER_V on pWork, on pSrc, a named pMat local,
+ * and the fully direct copy form -- all 52).
  *
  * Also worth keeping: pWork->pModel has to be re-read after the first walk
  * (the `nTotal += pModel->nHairNum` line) or gcc parks it in a callee-saved
@@ -711,6 +729,10 @@ JNT_ELEMENT *JNT_resetMatrix(JNT_WORK *pWork, JNT_ELEMENT *pElement)
             ((JNT_QUAD *)pDst)[1] = ((JNT_QUAD *)aMul)[1];
             ((JNT_QUAD *)pDst)[2] = ((JNT_QUAD *)aMul)[2];
             ((JNT_QUAD *)pDst)[3] = ((JNT_QUAD *)aMul)[3];
+            /* gcc CSEs this reload of nIndex with the one that built
+             * pDst above: -fstrict-aliasing says the four TI stores in
+             * between cannot touch an int. The original reloads. */
+            LAUNDER_V(pWork);
             i = pWork->nIndex + 1;
             pWork->nIndex = i;
         } while (i < nTotal);
