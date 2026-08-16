@@ -1994,3 +1994,35 @@ a valid symbol name, and turns into `.extern ;, 4` -- which gas rejects,
 failing the WHOLE file -- as soon as anything else in the file changes.
 If a file suddenly stops assembling after an unrelated addition, look
 for `extern` inside a function body and hoist it to file scope.
+
+**Nested `if (n >= 0) { if (n < 3) ... }` instead of `n >= 0 && n < 3`.**
+On a value loaded with `lbu`, the `&&` form folds to a single `bnez` --
+gcc drops the sign test when the two comparisons are adjacent -- while
+the nested form keeps the original's `bltz` + `slti` pair. Worth 30
+diffs on xglCdStreamOpen and the same again on xglCdStreamClose.
+
+**A tiny counted search loop must have its first iteration PEELED by
+hand.** `i = 0; do { ...; i++; } while (i <= 0);` is a two-iteration
+loop whose back edge gcc 2.96 proves dead and deletes, collapsing ~14
+words. The original build kept both the peel and the (unreachable)
+second iteration. Writing `if (a[0] == X) { a[0] = Y; } else { pp = a;
+while (*pp != X) { i++; if (i > 0) goto done; pp++; } *pp = Y; }`
+recovers the shape. Costs one pointer copy that the original does not
+have -- still open.
+
+**A bare `extern char` scalar is addressed through `$gp` at -G8.** When
+the original uses an absolute `lui`/`sb` for a flag byte, declare the
+object as an array bigger than the small-data threshold
+(`extern char D_0093CC30[0x10];`) so it lands outside sdata. Same
+trick as the padding already used to keep `mw` out of sdata.
+
+**Two fixer passes were added for things no source shape reaches:**
+`--short-loop-pad FUNC:N:COUNT` (gcc pads a short loop to a fixed TOTAL
+-- 8 here, 10 in the original build; N counts ALL-NOP `.set noreorder`
+blocks in the function, read off the POST-fix_cc_asm stream) and
+`--byte-move-andi FUNC:N` (a register copy of a just-`lbu`'d byte where
+the original zero-extends it explicitly). Both are provably
+value-preserving by construction. `--short-loop-pad` closed
+FileSelectListReload; `--byte-move-andi` closed xglMcSetMapName.
+Note that the same function can want the copy in one loop and the
+zero-extend in another, so the pass is site-keyed, not whole-function.
