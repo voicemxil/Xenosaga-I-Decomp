@@ -2886,3 +2886,4 @@ xglMenuDrawType1Sub = 0x0021C968, 0x178; // xglMenu.c
 RSsdSifRpcThread = 0x0023FB90, 0x24; // ssd.c
 FileSelectListReload = 0x0021EC50, 0x120; // xglCd.c
 tskUmnDataBaseExWin = 0x00A0A8F8, 0x3E4; // tskUmn.c
+CharListMake_Acc = 0x00295748, 0x144; // Char.c

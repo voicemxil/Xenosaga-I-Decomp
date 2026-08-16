@@ -1,5 +1,7 @@
 /* Char* - character status/equip-menu logic */
 
+#include "matching.h"
+
 typedef struct {
     unsigned short field_0;   /* 0x00 */
     unsigned short field_2;   /* 0x02 */
@@ -230,5 +232,14 @@ void CharListMake_Acc(void)
     p->f10 = 0;
     p->f1C = (int)MenuListGet(0);
     WindowSPItemChange(p);
-    WindowSPSetSelect(p, D_0036C200[MenuWork.b4F]);
+    /* The tail-call's message argument: retail keeps the MenuWork base in
+       $v0 and the slot byte in $v1; ee-gcc picks the opposite tie-break,
+       and neither a named `char *` for the message nor a named `int` for
+       the index moves it, so the base is pinned. */
+    {
+        PIN(MENUWORK *pWork, "$2");
+
+        pWork = &MenuWork;
+        WindowSPSetSelect(p, D_0036C200[pWork->b4F]);
+    }
 }
