@@ -13,20 +13,12 @@ typedef struct {
 void nmlModelSetFilterGunosys(LAYOUT_FILTER *pLayout, int nFlag, void *pTag);
 void nmlModelSetFilterStealth(LAYOUT_FILTER *pLayout, int nFlag);
 
-/* TODO: near-miss (LENGTH, 54 orig vs 27 built words) - control flow/logic
- * verified correct against the original disasm (loop tests bit i against the
- * literal constants 1 and 2, so it only ever resolves at i=0 or i=1, but that
- * is not something gcc's register allocator can see). The original spills
- * BOTH parameters (pLayout, pTag) plus 5 loop constants into callee-saved
- * s0-s7/ra, conservatively treating them as live across all 31 possible loop
- * iterations before a call. Neither the 2.96 game compiler nor the 2.9-ee SDK
- * compiler reproduces this: both keep everything in caller-saved temps and
- * emit a much shorter function (tested both -- see mpeg.c's _sequenceHeader
- * for where the 2.9-ee guess DID pay off elsewhere in this session). Also
- * missing: the original's `bnezl` annulled-loop-header shape (mine emits
- * plain `bnez`/`beqz`). Left unregistered; a register-pinning or asm-barrier
- * approach may be needed, not attempted within budget. */
-/* Dispatch the active filter flag bit to its Gunosys/Stealth handler */
+/* Dispatch the active filter flag bit to its Gunosys/Stealth handler.
+ * The loop has no early exit: every bit 0..30 is tested, and nFlags stays
+ * live across the calls, which is why the original parks pLayout/pTag and
+ * the four loop constants in s0-s7. A switch (not an if/else-if chain) is
+ * what emits the two forward beq-to-case-body branches plus the trailing
+ * `b` to the loop test. */
 void nmlFilterSetPacket(LAYOUT_FILTER *pLayout, void *pTag)
 {
     int i;
@@ -36,12 +28,12 @@ void nmlFilterSetPacket(LAYOUT_FILTER *pLayout, void *pTag)
     nFlags = pLayout->nFilterFlag;
     for (i = 0; i < 31; i++) {
         v = nFlags & (1 << i);
-        if (v == 1) {
+        switch (v) {
+        case 1:
             nFlags &= ~1;
             nmlModelSetFilterGunosys(pLayout, nFlags, pTag);
             break;
-        }
-        if (v == 2) {
+        case 2:
             nFlags &= ~2;
             nmlModelSetFilterStealth(pLayout, nFlags);
             break;

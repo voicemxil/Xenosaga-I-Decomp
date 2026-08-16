@@ -40,17 +40,22 @@ void *srsGetEffectData(int id)
 extern int _loadComboData[];
 
 /* Look up a combo-data entry, or 0 if out of range / unset */
+/* Look up a combo-data entry, or 0 if out of range / unset.
+ * Guard-clause shape (not a single `ret` accumulator): with the
+ * accumulator gcc parks the result in $a1 and adds a tail `move v0,a1`;
+ * the early returns let it build the movn straight into $v0. */
 void *srsGetComboData(int idx)
 {
-    void *ret;
+    int *p;
 
-    ret = 0;
-    if (idx < 0xC3) {
-        if (_loadComboData[idx] != 0) {
-            ret = &_loadComboData[idx];
-        }
+    if (idx >= 0xC3) {
+        return 0;
     }
-    return ret;
+    p = &_loadComboData[idx];
+    if (*p == 0) {
+        return 0;
+    }
+    return p;
 }
 
 int sprintf(char *buf, const char *fmt, ...);
