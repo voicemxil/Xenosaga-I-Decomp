@@ -148,10 +148,14 @@ exec {shlex.quote(AS)} {asflags} -o "$OUTPUT" "$S"
     open(bpath, "w").write(body)
     if "__asm__" in body or re.search(r'\basm\s*\(', body):
         print("NOTE: %s still contains raw inline asm after preprocessing.\n"
-              "      pycparser cannot parse it, so the permuter will fail to\n"
-              "      load. Move that asm behind PS2_ASM, or permute a copy of\n"
-              "      the file with the unrelated asm functions deleted."
-              % os.path.relpath(src, ROOT))
+              "      pycparser cannot parse it, so the permuter will not load\n"
+              "      base.c as-is. This is WORKABLE, not fatal -- an agent has\n"
+              "      done it: edit %s/base.c and delete the asm-bearing\n"
+              "      function bodies that are not the one you are permuting\n"
+              "      (PS2_ASM blocks included). The permuter only scores the\n"
+              "      function named in settings.toml, so the rest just has to\n"
+              "      parse."
+              % (os.path.relpath(src, ROOT), os.path.relpath(out, ROOT)))
     # The permuter hunts for mips-linux-gnu-objdump and friends; ours is
     # the EE-specific one, so name it explicitly or setup fails at load.
     open(os.path.join(out, "settings.toml"), "w").write(

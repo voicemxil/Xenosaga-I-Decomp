@@ -129,6 +129,12 @@ of `&p->vtx[i+1]` produces that base. `char *q = (char *)&p->vtx[0].nColor`
 does — and it frees the counter so gcc reverses it into a `bgez`
 down-counter.
 
+**Indexed vs walked table reads.** `pOfs[i]` makes LSR build a giv whose
+init is a separate pseudo, giving the `addiu`+`move` pair; `*pOfs++`
+folds them and is TWO WORDS SHORTER. The mirror image of the block-local
+pointer entry — a third instance of this same axis, so always read the
+original's address arithmetic first.
+
 **Let LSR build the giv.** `arr[i].field` yields `%hi/%lo(arr)` plus a
 separate `addiu +off` for the giv's initial value; a hand-walked pointer
 folds the offset into the `%lo` and comes out ONE WORD SHORTER — and
@@ -231,6 +237,13 @@ both `&&` and `||` let gcc fold it to `(x-32) < 2`. Conversely "state is
 branch itself and gets the original's register roles; writing it above
 the guard by hand does not. One function went 10 diffs -> match.
 
+**Get the frame size right FIRST.** Until the stack frame matches, every
+other diff is noise — one buffer was 6 quadwords though the code only
+uploads 5, and nothing else could be judged until the frame was 144.
+
+**Arm order reads off the source condition** — a `bnezl` past a call
+means that call is the THEN arm.
+
 **Read the delay slots first.** A non-annulled delay slot always
 executes, so whatever gcc puts in one is UNCONDITIONAL in the source.
 
@@ -271,6 +284,11 @@ directly, 2.96 knows the `lbu` result is 0..255 and narrows `slti` to
 **Struct-copy alignment picks the move idiom.** align 1 → all `lwl/lwr`;
 align 4 → `ldl/ldr` for 8-byte chunks plus a `lw/sw` tail; align 8 (the
 `union {...; long long ll[2];}` idiom) → `ld/sd`.
+
+**A short-truncated sum of an `int` field needs its own `int` local**, or
+combine narrows the load to `lhu`. Worth 4 words.
+
+**`(T *)(n + (u_int)p)` is the only way to get `addu rd,<int>,<ptr>`.**
 
 **Integer-first addition.** C pointer arithmetic ALWAYS normalises
 `int + ptr` to `ptr + int`, so no spelling of pointer arithmetic yields
@@ -529,6 +547,16 @@ first question is *which revision*, never *which flag*.
 ---
 
 ## Hazard-pad flags: which one
+
+**`--unfill-gcc-slots` only sees `.set noreorder/nomacro` blocks.** When
+gcc emits a branch in REORDER mode, *gas* fills that slot, not gcc, so
+the flag cannot touch it — and applied whole-function it will unfill the
+`bgez`/`bltz`/`jal` slots the original genuinely does fill. `--pin-slot-nop
+FUNC:N` is the right flag there. A related freebie: once the slot holds
+a nop, gcc's own `.p2align 3,,7` emits any needed trailing pad without a
+flag at all.
+
+
 
 Classic gas masks the low bit off both sides when comparing FP registers
 (`(op & ~1) == (dest & ~1)`), because with 32-bit FPRs `$fN` and
