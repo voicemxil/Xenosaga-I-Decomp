@@ -2874,3 +2874,4 @@ SEQ_transCNSUnitChr = 0x0031F760, 0x108; // SEQ.c
 _lf_version = 0x00207868, 0x8C; // sceSif.c
 _lf_bind = 0x00207768, 0x100; // sceSif.c
 xglRenderMove = 0x0022DC78, 0x170; // xglRender.c
+SEQ_rotYCNSUnitChr = 0x0031F630, 0x12C; // SEQ.c
