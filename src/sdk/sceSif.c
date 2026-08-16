@@ -868,3 +868,53 @@ int sceSifLoadIopHeap(const char *name, int addr)
         return -1;
     return rdata_009946C0;
 }
+
+extern void *memcpy(void *dst, const void *src, unsigned int n);
+
+/* sceSifStopModule: loadfile RPC opcode 7.  The caller's argument block is
+ * copied into the send block's second 252-byte buffer, clamped to 252
+ * bytes; the clamped branch passes the constant 252 so gcc expands that
+ * copy inline (the aligned ld/sd and unaligned ldl/ldr variants both come
+ * from that one constant-size memcpy).  The reply's second word is handed
+ * back through `result` and its first word is the return value. */
+int sceSifStopModule(int nModId, int nArgLen, const void *args, int *result)
+{
+    PIN(int arglen, "$17");
+    PIN(int modId, "$19");
+    int r, n;
+
+    arglen = nArgLen;
+    modId = nModId;
+    if (_lf_bind(modId) < 0)
+        return (int)0xffff0000;
+    if (_lf_version() != 0)
+        return (int)0xfffefffc;
+
+    _senddata.arg = modId;
+    if (args != 0)
+    {
+        if (arglen >= 253)
+        {
+            memcpy(_senddata.sec, args, 252);
+            _senddata.pad = 252;
+        }
+        else
+        {
+            memcpy(_senddata.sec, args, arglen);
+            _senddata.pad = arglen;
+        }
+    }
+    else
+    {
+        _senddata.pad = 0;
+    }
+
+    if (sceSifCallRpc(&cd_00994A40, 7, 0, &_senddata, 512,
+                      &_senddata, 8, 0, 0) < 0)
+        return (int)0xfffeffff;
+
+    n = _senddata.pad;
+    r = _senddata.arg;
+    *result = n;
+    return r;
+}
