@@ -208,6 +208,13 @@ int xglMpeg2Close(XGLMOVIEINFO *pInfo)
 
 /* Carve the fixed MPEG/IPU work buffers out of one linear block, each
  * rounded up to a 64-byte boundary, and hand back the end of the block. */
+/* The nLenA4 store sits with nLenAC, not after the nBufB0 pointer bump:
+   the EE scheduler pairs the two `li 16` stores by source distance, and
+   this is the only one of the 120 orderings of the six constant stores
+   that leaves just the nBufB0/`and`/nBase78 rotation. That rotation is
+   a pure scheduler tie-break -- source order, LAUNDER, LAUNDER2,
+   LAUNDER_V, SCHED_NOP and moving nBase78 past every following store
+   all leave it -- so it is spelled as two --rotate-seq steps. */
 void *xglMpeg2InfoInit2(void *pInfo, void *pData, int nSize)
 {
     XGLMPEG2INIT *p = (XGLMPEG2INIT *)pInfo;
@@ -225,12 +232,12 @@ void *xglMpeg2InfoInit2(void *pInfo, void *pData, int nSize)
     nPtr = (nPtr + 0x8003F) & ~0x3F;
     p->nLen7C = 0xFD768;
     p->nLenA0 = 0x80000;
+    p->nLenA4 = 0x10;
     p->nLenAC = 0x10;
     p->nLenB4 = 0x20000;
     p->nBufB0 = nPtr;
     nPtr = (nPtr + 0x2003F) & ~0x3F;
     p->nBase78 = nAddr;
-    p->nLenA4 = 0x10;
     p->nPosA8 = 0;
     p->nPosB8 = 0;
     p->nPosBC = 0;
