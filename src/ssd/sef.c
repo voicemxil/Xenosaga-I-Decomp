@@ -1018,11 +1018,17 @@ void sefDestroyEffectCf(void)
  * at a negative offset. --- */
 typedef struct
 {
-    char pad000[0x6B0];
+    char pad000[0xB0];
+    char aEffect[32][48];    /* 0x0B0 -- 32 effect-data records */
     int  nUsed;              /* 0x6B0 */
-    char pad6B4[0xA78 - 0x6B4];
+    char pad6B4[0x6E0 - 0x6B4];
+    int  nSoundHandle;       /* 0x6E0 */
+    char pad6E4[0xA74 - 0x6E4];
+    short nEtParam;          /* 0xA74 */
+    short padA76;
     short nActorID;          /* 0xA78 */
-    char padA7A[0xA92 - 0xA7A];
+    char padA7A[0xA90 - 0xA7A];
+    short nState;            /* 0xA90 */
     short nScriptA;          /* 0xA92 */
     short nScriptB;          /* 0xA94 */
     char padA96[0xAB0 - 0xA96];
@@ -1101,4 +1107,34 @@ void sefGetWeaponPosition(SEF_VEC4 *pDst, char *pAct, int nIdx)
                 ".set reorder" : : "r"(pDst), "r"(pMtx) : "$8", "memory");
         }
     }
+}
+
+/* --- sefIsFinishEffect2: true when no live scheduler slot is still
+ * running this effect number. The hit counter is a movz, and the "any
+ * hits at all" answer comes back as sltiu count,1. The loop counter is
+ * dead (only the slot pointer is used), so gcc turns the forward loop
+ * into the down-counter the original has. --- */
+/* sefCnvEtEffectNo really takes two arguments; sefLoadEffect above calls
+ * it with one (the original does too), so the two-argument view is
+ * declared under an alias rather than by widening that prototype. */
+extern int sefCnvEtEffectNo2(int nActorID, int nParam) __asm__("sefCnvEtEffectNo");
+
+int sefIsFinishEffect2(int nEftNo)
+{
+    unsigned int nHits;
+    int i;
+
+    nHits = 0;
+    if (nEftNo <= 0) {
+        return 1;
+    }
+    for (i = 0; i < 128; i++) {
+        if (_schedSlots[i].nUsed != 0) {
+            if (sefCnvEtEffectNo2(_schedSlots[i].nActorID,
+                                  _schedSlots[i].nEtParam) == nEftNo) {
+                nHits++;
+            }
+        }
+    }
+    return nHits < 1U;
 }

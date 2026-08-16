@@ -193,6 +193,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "sdv.c": "--branch-unlikely sdvScheduleSound:1",
     "File.c": "--branch-unlikely FileObjectJpegDecChange:1 --swap-adjacent FileObjectJpegDecChange:3",
     "xglRender.c": "--fp-pair-hazard xglRenderGlobalFadeSet",
     "Calc.c": "--mtc1-nop CalcNearCrossPointCircle:0",

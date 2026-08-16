@@ -2662,3 +2662,4 @@ sceMcDelete = 0x0020FAA0, 0x128; // sceMc.c
 sceMcRead = 0x0020F0D8, 0x11C; // sceMc.c
 sceMcChdir = 0x0020F888, 0x150; // sceMc.c
 sceMcGetDir = 0x0020F6A8, 0x158; // sceMc.c
+sefIsFinishEffect2 = 0x002E7AA8, 0x88; // sef.c

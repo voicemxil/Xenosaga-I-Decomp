@@ -12,7 +12,9 @@ void sdvSetAmbState(int a, int b) { sdvSetAmbStateSub(a, b, 0); }
 void sdvSetAmbState2(int a, int b) { sdvSetAmbStateSub(a, b, 1); }
 
 extern void xglSoundEffectNormalID(int id, int a);
-void sdvPlaySound(int id) { xglSoundEffectNormalID(id, 0); }
+/* b and c are dead here, but sdvScheduleSound really does pass three
+ * arguments, so the prototype has to carry them. */
+void sdvPlaySound(int id, int b, int c) { xglSoundEffectNormalID(id, 0); }
 
 extern void sefMemZero(void *p, int size);
 void sdvInitAlter(void *p) { sefMemZero(p, 0x1280); }
@@ -168,6 +170,55 @@ void sdvExecAlters(void)
     for (i = 0; i < 16; i++) {
         if (_sdvAlter[i].nUsed != 0) {
             sdvExecAlter(&_sdvAlter[i]);
+        }
+    }
+}
+
+/* --- scheduled (sequence-table driven) sound playback --- */
+
+typedef struct
+{
+    short *pTbl;     /* 0x00 -- table of 2-byte cells */
+    char pad04[0x10 - 0x4];
+    int nStride;     /* 0x10 -- cells per record */
+    int nLastSound;  /* 0x14 */
+} SDV_SEQ;
+
+extern int sdvExecSeqTbl(SDV_SEQ *p);
+
+/* Advance the sequence table and, if the record it lands on names a
+ * sound, play it. The record's flag short is read in the blez delay
+ * slot -- unconditionally -- so it has to be loaded before the "is there
+ * a sound" test; the write-back of the sound id is annulled into the
+ * bgtzl, so it is the flag>0 arm.
+ *
+ * One fixer flag (--branch-unlikely sdvScheduleSound:1): gcc annuls the
+ * `p->pTbl == 0` branch while the original leaves it a plain beqz with
+ * the same epilogue load stolen into the slot. Swept for a source shape
+ * first -- early returns, shared `goto ret`, and fully nested ifs all
+ * produce the identical annulled branch, and the very next branch in
+ * the same function comes out plain either way. */
+void sdvScheduleSound(SDV_SEQ *p)
+{
+    int nCell;
+    int nSound;
+    int nFlag;
+    char *pRec;
+
+    if (p != 0) {
+        if (p->pTbl != 0) {
+            nCell = sdvExecSeqTbl(p);
+            if ((unsigned int)nCell < 1024) {
+                pRec = (char *)((nCell * p->nStride) * 2 + (int)p->pTbl);
+                nSound = *(int *)(pRec + 4);
+                nFlag = *(short *)(pRec + 2);
+                if (nSound > 0) {
+                    sdvPlaySound(nSound, 0, 0);
+                    if (nFlag > 0) {
+                        p->nLastSound = nSound;
+                    }
+                }
+            }
         }
     }
 }
