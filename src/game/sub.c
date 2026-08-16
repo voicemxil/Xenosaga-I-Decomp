@@ -600,6 +600,70 @@ void subJoutoPosSet(void)
     root->nChildren = n;
 }
 
+
+/* --- Ether tree "lamp" sprite --- */
+
+typedef struct {
+    short nX;                   /* 0x00 */
+    short nY;                   /* 0x02 */
+    int nId;                    /* 0x04 */
+    short nW;                   /* 0x08 */
+    short nH;                   /* 0x0A */
+    char pad0C[0x03];
+    unsigned char nAlpha;       /* 0x0F */
+    short nFlags;               /* 0x10 */
+    char pad12[0x0E];
+} ETSPR;
+
+typedef struct {
+    char pad00[0x30];
+    short nX;                   /* 0x30 */
+    short nY;                   /* 0x32 */
+    int nId;                    /* 0x34 */
+    char pad38[0x0E];
+    unsigned short nPhase;      /* 0x46 */
+    unsigned short nStep;       /* 0x48 */
+    char pad4A[0x06];
+    ETSPR spr;                  /* 0x50 */
+} ETLAMP;
+
+extern void endSpriteSet(ETSPR *pSpr, int nAlpha);
+
+/* Pulse the selection lamp: the phase walks between 0 and 128 and
+   reverses at either end, then the sprite is placed at the tree's scale.
+   The scale is read twice because the alpha store between the two groups
+   is a char store, and a char store aliases every load in gcc's model. */
+void sub2ObjectLampDraw(ETLAMP *p)
+{
+    float *pBase;
+    unsigned short nStep;
+    int nPhase;
+
+    pBase = &EtherTreeSystem->fBaseX;
+    nStep = p->nStep;
+    /* The sum is stored UNTRUNCATED; only the test sees the (short) cast,
+       which is why the original has one sll/sra feeding both branches and
+       stores the raw addu result. */
+    nPhase = p->nPhase + nStep;
+    p->nPhase = nPhase;
+    if ((short)nPhase < 0) {
+        p->nStep = -nStep;
+        p->nPhase = 0;
+    } else if ((short)nPhase >= 129) {
+        p->nPhase = 128;
+        p->nStep = -nStep;
+    }
+    p->spr.nFlags = 4611;
+    endSpriteSet(&p->spr, 255);
+    p->spr.nW = (short)((float)p->spr.nW * pBase[3]);
+    p->spr.nH = (short)((float)p->spr.nH * pBase[3]);
+    p->spr.nAlpha = (unsigned char)p->nPhase;
+    p->spr.nId = p->nId + 1;
+    p->spr.nX = (short)((float)p->nX + pBase[3] * 27.0f - 2.0f);
+    p->spr.nY = (short)((float)p->nY + pBase[3] - 3.0f);
+    endPrintExtFunc(0, 2, &p->spr);
+}
+
 /* --- Ether tree "line2" (the animated connector to the target node) --- */
 
 /* One drawn quad of the connector: two transformed endpoints, each
