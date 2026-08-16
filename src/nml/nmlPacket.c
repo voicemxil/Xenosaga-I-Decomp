@@ -784,15 +784,13 @@ void nmlPacketTextureTrans(void *pModel)
     char *pList;
     int *pOfs;
     TEXTRANS *p;
-    int nOfs;
     int nTbp;
     int i;
 
     s_pPacket = xglPacketGetCurrent();
     pTex = *(char **)((char *)pModel + 0x254);
-    nOfs = *(int *)(pTex + 0x6C);
-    pList = pTex + nOfs;
-    if (nOfs != 0) {
+    if (*(int *)(pTex + 0x6C) != 0) {
+        pList = (char *)(*(int *)(pTex + 0x6C) + (u_int)pTex);
         pOfs = (int *)(pList + 0x30);
         for (i = 0; i < *(int *)pList; i++) {
             p = (TEXTRANS *)(pOfs[i] + (u_int)pList);
