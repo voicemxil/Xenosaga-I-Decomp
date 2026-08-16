@@ -90,18 +90,12 @@ typedef struct {
 
 extern MCREQUEST queue[8];
 
-/* TODO: near-miss (21/56, was 23). Wave 3 solved: queue_end staged
- * through a single unsigned local (orig keeps it in $t2 across the
- * whole body and re-uses it for the final increment), pName tested in
- * $v1 then copied into pinned pSrc=$5 via the zero-code tied
- * passthrough, pDst/i pinned to $4/$6, and a passthrough on c after
- * each lbu keeps the (c << 24) test unfolded (all verified). The copy
- * loop is also store-first (the original writes the NUL terminator: the
- * sb sits in the bottom bnez's always-executed delay slot). Remaining:
- * gcc copies the loop header (peels the first test: lbu/sll/beqz + li
- * $a2,1 at entry) where the original keeps one bottom test entered via
- * b-to-bottom with i=0 in the b's slot; volatile passthroughs, plain
- * while, and for(;;)+breaks all still peel. */
+/* Register shape: queue_end staged through a single unsigned local
+ * (the original keeps it in $t2 across the whole body and re-uses it
+ * for the final increment), pName tested in $v1 then copied into pinned
+ * pSrc=$5 via the zero-code tied passthrough, pDst/i/c pinned to
+ * $4/$6/$2, and a passthrough on c after each lbu keeps the (c << 24)
+ * test unfolded. */
 int sceMcGetInfo(int, int, int *, int *, int *);
 int sceMcSync(int, int *, int *);
 int sceMcOpen(int, int, char *, int);
