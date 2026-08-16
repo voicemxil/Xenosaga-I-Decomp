@@ -901,6 +901,27 @@ of all 120 permutations. Search, do not assume.
 
 ## From the task/screen state machines (wave 4)
 
+**Hand the loop's initial value to LSR instead of writing the
+accumulator.** When a loop-invariant constant is materialised in the
+wrong place among the hoisted invariants, the fix is not another
+statement order -- it is to stop writing the accumulator by hand.
+`nX = -45; ... p[i].nX = nX; nX += 573;` makes gcc hoist the -45 AHEAD
+of the loop's address bases; `p[i].nX = i * 573 - 45;` lets loop
+strength reduction build the giv, and it emits the init LAST, which is
+where the original has it. (`tskUmnDataBaseExWin`, 17 -> 13.)
+
+**The `(unsigned short)` cast is what keeps a widened value alive across
+a store.** Retail loading a halfword and then `andi 0xffff`-ing it is
+not redundant work: the extension is a separate pseudo, and that pseudo
+is what survives an intervening store to another object. Read the field
+into an `int` local and compare through an explicit `(unsigned short)`
+cast (or `& 0xffff`) and you get both the `andi` and the register that
+crosses the store; drop the cast and gcc proves the value already fits,
+deletes the extension, and then has to RELOAD the halfword after the
+store. Its companion: if the original loads the same field twice with a
+store in between, that reload is real -- the store may alias the global,
+so the source really does read it again inside that arm.
+
 **A field read that the original hoists ABOVE a run of stores has to be
 written as a local.** gcc cannot move a load above a store to the same
 object -- it must assume they alias -- so `w->win.nColor = w->nColor;`
