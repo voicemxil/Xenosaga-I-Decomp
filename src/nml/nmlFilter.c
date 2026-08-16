@@ -276,3 +276,68 @@ void _WeightToGlobalPlaceVec(void *pDst, void *pMtx, void *pSrc)
             : : "r"(pDst), "r"(pMtx), "r"(pSrc)
             : "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "memory");
 }
+
+/* Queue the buffer-render pass: a twelve-entry A+D block (TEX0 pointing
+ * at the draw buffer, an ALPHA/TEST setup and two sprites) whose PRIM
+ * depends on whether the blend factor is below 1.0, then flush. */
+/* TODO: near-miss, 4 diffs of 124 words, NOT registered.  Right length,
+ * right instructions, right registers everywhere except one pair: the
+ * original puts the %hi of sRender in $v1 and the loaded nDrawFbp in
+ * $v0, we get the opposite (and the two dependent sll/or inherit it).
+ * Swept and REJECTED: both operand orders of the `| 0x24020000`, a u_int
+ * local for the field, `* 32` instead of `<< 5`, a `FRENDER *` local, a
+ * raw `*(u_short *)((char *)&sRender + 0x14)`, an alias array symbol at
+ * the same address (all exactly 4); writing the 0x70000010 entry before
+ * the 0x70000000 one (24); PIN($v0) + LAUNDER_V on the field (126 words).
+ * Load-bearing and NOT to be re-derived: the 0x24020000 must be ORed
+ * with the shifted field FIRST and the 64-bit constant added after, or
+ * gcc folds the two constants together and the function is a word short.
+ */
+/* Queue the buffer-render pass: a twelve-entry A+D block (TEX0 pointing
+ * at the draw buffer, an ALPHA/TEST setup and two sprites) whose PRIM
+ * depends on whether the blend factor is below 1.0, then flush. */
+void nmlFilterSetBufferRender(float fLevel)
+{
+    GSENTRY *p;
+    int i;
+
+    ((GSENTRY *)0x70000000)->lData = 0;
+    ((GSENTRY *)0x70000000)->uReg.l = 63;
+    ((GSENTRY *)0x70000010)->lData =
+        (u_int)((sRender.nDrawFbp << 5) | 0x24020000)
+        | (((u_long)0x20000006 << 32) | 0x40000000);
+    ((GSENTRY *)0x70000010)->uReg.l = 6;
+    ((GSENTRY *)0x70000020)->lData = 0;
+    ((GSENTRY *)0x70000020)->uReg.l = 20;
+    ((GSENTRY *)0x70000030)->lData = 0;
+    ((GSENTRY *)0x70000030)->uReg.l = 8;
+    ((GSENTRY *)0x70000040)->lData = 0x31001;
+    ((GSENTRY *)0x70000040)->uReg.l = 71;
+    ((GSENTRY *)0x70000050)->lData =
+        ((u_long)(int)(fLevel * 128.0f) << 32) | 100;
+    ((GSENTRY *)0x70000050)->uReg.l = 66;
+    ((GSENTRY *)0x70000060)->lData = ((u_long)0x3F800000 << 32) | 0x80808080;
+    ((GSENTRY *)0x70000060)->uReg.l = 1;
+    ((GSENTRY *)0x70000070)->lData = 278;
+    if (fLevel < 1.0f) {
+        ((GSENTRY *)0x70000070)->lData = 342;
+    }
+    ((GSENTRY *)0x70000070)->uReg.l = 0;
+    ((GSENTRY *)0x70000080)->lData = 0;
+    ((GSENTRY *)0x70000080)->uReg.l = 3;
+    ((GSENTRY *)0x70000090)->lData = 0x72007000;
+    ((GSENTRY *)0x70000090)->uReg.l = 4;
+    ((GSENTRY *)0x700000A0)->lData = 0x1C102000;
+    ((GSENTRY *)0x700000A0)->uReg.l = 3;
+    ((GSENTRY *)0x700000B0)->lData = 0x8E009000;
+    ((GSENTRY *)0x700000B0)->uReg.l = 4;
+    p = (GSENTRY *)0x70000000;
+    nmlPacketGsInit();
+    i = 11;
+    do {
+        packet_gs_entry64(p->uReg.w[0], (u_long *)p);
+        p++;
+        i--;
+    } while (i >= 0);
+    nmlPacketAddGsFlush();
+}
