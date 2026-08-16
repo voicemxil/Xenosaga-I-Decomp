@@ -1020,3 +1020,54 @@ int _sceSifLoadModuleBuffer(int nAddr, int nArgLen, const void *args,
     return r;
 }
 
+
+/* ------------------------------------------------------------------
+ * The three built-in SIF system command handlers and the RPC server-side
+ * lookup.  Each handler takes the received packet and the handler
+ * argument installed with it, which for these is the SIF data table.
+ * ------------------------------------------------------------------ */
+
+/* A system command packet: the four-word SIF command header followed by
+ * this command's two payload words. */
+typedef struct SifCmdSRegPacket {
+    int hdr[4];     /*  0..15 */
+    int index;      /* 16 */
+    int value;      /* 20 */
+} SifCmdSRegPacket;
+
+/* SIF_CMD_CHANGE_SADDR: remember the IOP's new command-buffer address. */
+void _change_addr(SifCmdSRegPacket *pkt, int *tbl)
+{
+    tbl[2] = pkt->index;
+}
+
+/* SIF_CMD_SET_SREG: write one of the eight shared software registers. */
+void _set_sreg(SifCmdSRegPacket *pkt, int *tbl)
+{
+    int *sreg = (int *)tbl[7];
+
+    sreg[pkt->index] = pkt->value;
+}
+
+/* The from-interrupt entry of sceSifSendCmd. */
+unsigned int isceSifSendCmd(unsigned int fid, void *pkt, int pktsize,
+                            void *src, void *dest, int size)
+{
+    return _sceSifSendCmd(fid, 1, pkt, pktsize, src, dest, size);
+}
+
+/* _search_svdata: find the server registered for `sid` by walking every
+ * queue in the global list and every server on each queue. */
+SifRpcServerData *_search_svdata(int sid, void **tbl)
+{
+    SifRpcDataQueue *q;
+    SifRpcServerData *sd;
+
+    for (q = (SifRpcDataQueue *)tbl[10]; q != 0; q = q->next) {
+        for (sd = q->link; sd != 0; sd = sd->link) {
+            if (sd->sid == sid)
+                return sd;
+        }
+    }
+    return 0;
+}

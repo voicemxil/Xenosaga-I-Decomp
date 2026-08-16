@@ -2861,3 +2861,7 @@ sresFreeMemoryRes = 0x002E90C0, 0x4C; // srsGet.c
 is_shadow_map_parts = 0x00230DD8, 0x50; // nmlModel.c
 is_parts_transparency = 0x00230E28, 0x58; // nmlModel.c
 is_block_last_entry = 0x00230E80, 0x58; // nmlModel.c
+_change_addr = 0x00202748, 0xC; // sceSif.c
+_set_sreg = 0x00202728, 0x1C; // sceSif.c
+isceSifSendCmd = 0x00202C58, 0x3C; // sceSif.c
+_search_svdata = 0x002033E0, 0x4C; // sceSif.c
