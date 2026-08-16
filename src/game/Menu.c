@@ -3164,12 +3164,14 @@ typedef struct {
 } TECRANGETBL;
 extern TECRANGETBL D_004D92E8;
 
-/* TODO: near-miss (LENGTH, 66 orig vs 67 built) - the original materializes
-   &MenuWork into caller-saved $a1 AFTER the table block copy and then does
-   `move s2,a1` entering the loop (a live-range split); ours constant-props
-   the address straight into $s2 and the scheduler hoists it above the copy.
-   Tried single-pointer, w2=w split, and direct-global precheck forms; the
-   split move appears unreachable while the address is a foldable constant. */
+/* TODO: near-miss (57 diffs, was 59; 66 orig vs 67 built). Laundering
+   &MenuWork stops the constant propagation the old note blamed, and the
+   address is now materialised after the table block copy. What is left:
+   gcc hoists the `w->bChr` the loop passes to func_A197E8 out of the loop
+   as an lbu and sign-extends it per iteration, where the retail build
+   re-loads it with lb inside the loop (both builds hoist the two table
+   element addresses, so only the call argument differs). Reading the
+   global directly instead of through w is worse (276 bytes). */
 /* Rebuild sort chain 0 from the current character's technique id range */
 void MenuTecSortSet00(void)
 {
@@ -3180,7 +3182,12 @@ void MenuTecSortSet00(void)
 
     pSort = MenuSortAddrGet(0);
     tbl = D_004D92E8;
+    /* launder: while &MenuWork stays a foldable constant gcc propagates it
+       into $s2 and the scheduler hoists it above the table block copy; the
+       retail build materialises it into caller-saved $a1 after the copy and
+       splits the live range with `move s2,a1` at loop entry. */
     w = &MenuWork;
+    LAUNDER(w);
     nId = tbl.r[w->bChr - 1].lo;
     if (tbl.r[w->bChr - 1].hi < nId) {
         *pSort = 0;
@@ -6705,4 +6712,96 @@ void MenuSkillSetListMain(void)
     default:
         return;
     }
+}
+
+extern char fname[64];
+extern void RES_GetMdlFileName(char *pDst, int nId);
+
+/* TODO: near-miss (109 diffs, length exact at 171) - the outer switch (the
+   retail bounds check falls out of a plain 6-way switch whose default is
+   the bare `return fname`), the nested sparse switch on the sub-type
+   (0/2/4, which gcc turns into the same == 2 / < 3 / == 4 comparison tree),
+   the three-digit patch into the monster-motion template and both string
+   tables are recovered. What is left is one register rotation: the retail
+   build holds the type argument in $s0 and its scaled index in $s1, ours
+   uses $s1/$s2, and every buffer pointer shifts with them. Pinning the type
+   to $s0 works but then gcc stops CSEing the scaled index and the function
+   grows eight bytes. */
+/* Build the resource path for a model/motion id into the shared file-name
+   buffer: the base directory and the extension both depend on the resource
+   type, and the monster-motion case patches three decimal digits into its
+   own name template */
+char *MenuFileNameGet(short nId, int nType)
+{
+    static char *f_base[] = {
+        "data\\motion\\",
+        "data\\yamamoto\\mot\\",
+        "data\\robo\\etc\\"
+    };
+    static char *f_exten[] = { ".lex", ".xtx", ".jnt", ".fpk", ".bin" };
+    static char *f_ukn_name[] = { "ukunS", "ukunB" };
+    static char *f_char_mot[] = { "mtn_meqp", "ukn_g", "menuagws" };
+    static char *f_mons_mot[] = { "guno_000" };
+    char *pExt;
+    char *pName;
+    int nSub;
+    int n;
+    switch (nType) {
+    case 0:
+    case 1:
+    case 2:
+        if (nId == 8705) {
+            strcpy(fname, f_base[2]);
+            strcat(fname, f_ukn_name[0]);
+        } else {
+            RES_GetMdlFileName(fname, nId);
+        }
+        pExt = f_exten[nType];
+        break;
+    case 3:
+        nSub = (nId >> 12) & 0xF;
+        switch (nSub) {
+        case 0:
+            strcpy(fname, f_base[0]);
+            strcat(fname, f_char_mot[0]);
+            pExt = f_exten[3];
+            break;
+        case 2:
+            if (nId == 8705) {
+                strcpy(fname, f_base[0]);
+                strcat(fname, f_char_mot[1]);
+            } else {
+                strcpy(fname, f_base[0]);
+                strcat(fname, f_char_mot[2]);
+            }
+            pExt = f_exten[3];
+            break;
+        case 4:
+            n = (nId != 0x4037) ? nId - 16384 : 114;
+            pName = f_mons_mot[0];
+            strcpy(fname, f_base[1]);
+            pName[7] = n % 10 + '0';
+            pName[6] = n / 10 % 10 + '0';
+            pName[5] = n / 100 % 10 + '0';
+            strcat(fname, pName);
+            pExt = f_exten[4];
+            break;
+        default:
+            return fname;
+        }
+        break;
+    case 4:
+    case 5:
+        RES_GetMdlFileName(fname, nId + 0x10000);
+        if (nType == 4) {
+            strcat(fname, f_exten[0]);
+        } else {
+            strcat(fname, f_exten[2]);
+        }
+        return fname;
+    default:
+        return fname;
+    }
+    strcat(fname, pExt);
+    return fname;
 }
