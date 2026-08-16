@@ -810,3 +810,51 @@ void nmlPacketTextureTrans(void *pModel)
         }
     }
 }
+
+int xglPacketTextureTrans(void *pTex);
+
+/* Queue the model's texture upload, unless the same texture is already
+ * cached or the packet has no room left. Returns 1 when the packet is
+ * (or would be) over 2MB. */
+int nmlPacketAddTexture(void *pModel)
+{
+    u_int *pk;
+    u_int nSizeQw;
+    void *pTex;
+    void *p;
+    u_int nOfs;
+
+    pTex = *(void **)((char *)pModel + 0x260);
+    if (*(void **)((char *)pModel + 0x264) != 0) {
+        pTex = *(void **)((char *)pModel + 0x264);
+    }
+    s_pPacket = xglPacketGetCurrent();
+    nSizeQw = sceVif1PkSize(s_pPacket);
+    pk = s_pPacket;
+    if (0x200000 < (nSizeQw << 4) + (pk[8] - pk[9]) + 0x10000) {
+        return 1;
+    }
+    if ((*(int *)((char *)pModel + 0x250) & 0x800) != 0) {
+        p = *(void **)((char *)pTex + 0x1C0);
+        if (p != 0 && s_pCacheTexture != p) {
+            s_pCacheTexture = p;
+            xglPacketTextureTrans(p);
+        }
+    } else {
+        nOfs = *(u_int *)(*(char **)((char *)pModel + 0x254) + 0x6C);
+        if (nOfs - 1 <= 0x7FFFFE) {
+            if (s_pCacheTexture != (void *)nOfs) {
+                nmlPacketTextureTrans(pModel);
+                s_pCacheTexture =
+                    *(void **)(*(char **)((char *)pModel + 0x254) + 0x6C);
+            }
+        } else if (*(void **)((char *)pModel + 0x240) != 0
+                   && s_pCacheTexture != *(void **)((char *)pModel + 0x240)) {
+            s_pCacheTexture = *(void **)((char *)pModel + 0x240);
+            xglPacketTextureTrans(*(void **)((char *)pModel + 0x240));
+        }
+    }
+    nSizeQw = sceVif1PkSize(s_pPacket);
+    return 0x200000 < (nSizeQw << 4)
+                      + (s_pPacket[8] - s_pPacket[9]) + 0x10000;
+}
