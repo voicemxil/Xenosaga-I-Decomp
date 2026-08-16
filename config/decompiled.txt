@@ -2757,3 +2757,4 @@ _sliceB = 0x00213D98, 0x64; // mpeg.c
 setLoadImageTags = 0x002222F0, 0x134; // xglMovie.c
 nmlPacketTextureTrans = 0x00237C38, 0x148; // nmlPacket.c
 HitCheckNyuru = 0x002C0FF0, 0xF4; // Hit.c
+xglMpeg2Open = 0x002221A0, 0x14C; // xglMovie.c

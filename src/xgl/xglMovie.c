@@ -3,14 +3,21 @@
 /* MPEG/IPU initialization wrappers */
 
 typedef struct {
-    char pad00[0x40];
+    char pad00[0x24];
+    int nStreamSize;     /* 0x24 */
+    char pad28[4];
+    int nUnk2C;          /* 0x2C */
+    char pad30[0x10];
     short nWidth;        /* 0x40 */
     short nHeight;       /* 0x42 */
     short pad44;         /* 0x44 */
     short nUnk46;        /* 0x46 */
     int pad48;           /* 0x48 */
     int nUnk4C;          /* 0x4C */
-    char pad50[0x38];
+    char pad50[0x28];
+    int nMpegArg0;       /* 0x78 */
+    int nMpegArg1;       /* 0x7C */
+    char pad80[8];
     char *pBuf;          /* 0x88 */
     int nLeft;           /* 0x8C */
     int nAudioTotal;     /* 0x90 */
@@ -243,6 +250,9 @@ int errorCallback(int nCode, char **ppMsg, XGLMOVIEINFO *pInfo)
 }
 
 int fileRead(XGLMOVIEINFO *pInfo);
+/* fillBuff has no return statement of its own: the original leaves the
+ * sceMpegDemuxPss result in $v0 and xglMpeg2Open loops on it. */
+int fillBuff(XGLMOVIEINFO *pInfo, int nWait);
 int sceMpegDemuxPss(void *pMpeg, void *pSrc, int nSize);
 
 /* TODO: near-miss (42 words built vs 44; every instruction present is
@@ -262,7 +272,7 @@ int sceMpegDemuxPss(void *pMpeg, void *pSrc, int nSize);
 /* Top the demux up: if the last read still has bytes left carry on from
  * where it stopped, otherwise pull fresh data (optionally spinning until
  * some arrives), then feed the PSS demuxer */
-void fillBuff(XGLMOVIEINFO *pInfo, int nWait)
+int fillBuff(XGLMOVIEINFO *pInfo, int nWait)
 {
     char *pSrc;
     int nRead;
@@ -421,4 +431,52 @@ void setLoadImageTags(u_int nPacket, u_int nSrc, int nHeight, int nWidth)
         }
     }
     ((u_int *)p)[-4] &= 0x0FFFFFFF;
+}
+
+int xglCdStreamOpen(XGLMOVIEINFO *pInfo, char *pName);
+int xglCdStreamReadRing(XGLMOVIEINFO *pInfo, int nBytes);
+void sceMpegInit(void);
+int sceMpegCreate(void *pMpeg, int nArg0, int nArg1);
+int sceMpegAddStrCallback(void *pMpeg, int nId, int nSub, void *pFunc, void *pArg);
+int sceMpegAddCallback(void *pMpeg, int nId, void *pFunc, void *pArg);
+int nodataCallback(int, void *, XGLMOVIEINFO *);
+int SsdInitVagStreamStereo(int nSize, int nChannels);
+int SsdGetResultValue(int *pResult);
+
+/* Open a movie stream, bring the MPEG decoder up with its four
+ * callbacks, prime the demux buffer and start the VAG audio stream */
+int xglMpeg2Open(XGLMOVIEINFO *pInfo, char *pName)
+{
+    int nResult;
+    int i;
+
+    if (xglCdStreamOpen(pInfo, pName) < 0) {
+        return -1;
+    }
+    i = 0;
+    xglCdStreamReadRing(pInfo, pInfo->nStreamSize / 2);
+    pInfo->nUnk2C = 0;
+    sceMpegInit();
+    sceMpegCreate((char *)pInfo + 48, pInfo->nMpegArg0, pInfo->nMpegArg1);
+    sceMpegAddStrCallback((char *)pInfo + 48, 0, 0, videoCallback, pInfo);
+    sceMpegAddStrCallback((char *)pInfo + 48, 3, 0, audioCallback, pInfo);
+    sceMpegAddCallback((char *)pInfo + 48, 1, nodataCallback, pInfo);
+    sceMpegAddCallback((char *)pInfo + 48, 0, errorCallback, pInfo);
+    pInfo->nLeft = 0;
+    pInfo->nAudioInit = 0;
+    pInfo->nAudioTotal = 0;
+    pInfo->nErrCount = 0;
+    pInfo->nUnk99 = 0;
+    pInfo->nUnk9A = 0;
+    pInfo->nVideoCount = 0;
+    do {
+        if (i > 0xFFFFFF) {
+            break;
+        }
+        i++;
+    } while (fillBuff(pInfo, 1) != 0);
+    SsdInitVagStreamStereo(4096, 4);
+    while (SsdGetResultValue(&nResult) < 0) {
+    }
+    return 0;
 }
