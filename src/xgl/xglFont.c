@@ -339,8 +339,8 @@ int xglFontGetProportionalSize(int nCode)
     PIN(u_int nLow, "$3");
     int n;
 
-    __asm__("" : "=r"(nSize)
-        : "0"((*(u_short *)(FS.nLoadAddr + 0x78040 + nCode * 2) + 255) & 0xFFFF));
+    PASSTHRU(nSize,
+             (*(u_short *)(FS.nLoadAddr + 0x78040 + nCode * 2) + 255) & 0xFFFF);
     PASSTHRU(nLow, nSize & 0xFF);
     if (nLow == 255) {
         nSize = FS.nPropBase << 8;
