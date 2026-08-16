@@ -2773,3 +2773,28 @@ int check_occlusion(OCCLUSION *pOcc, void *pCam, void *pPos)
 done:
     return nRet;
 }
+
+extern void xglVectorOuter(void *pDest, void *pA, void *pB);
+extern void xglVectorNormal(void *pDest, void *pSource);
+
+/* Plane through the three points pP0/pP1/pP2: pPlane gets the unit normal
+ * in xyz and the plane offset in w. */
+void plane_from_points(float *pP0, float *pP1, float *pP2, float *pPlane)
+{
+    VEC4 vA;
+    VEC4 vB;
+    VEC4 vN;
+
+    vA.f[0] = pP1[0] - pP0[0];
+    vA.f[1] = pP1[1] - pP0[1];
+    vA.f[2] = pP1[2] - pP0[2];
+    vB.f[0] = pP2[0] - pP0[0];
+    vB.f[1] = pP2[1] - pP0[1];
+    vB.f[2] = pP2[2] - pP0[2];
+    xglVectorOuter(&vN, &vA, &vB);
+    xglVectorNormal(&vN, &vN);
+    pPlane[0] = vN.f[0];
+    pPlane[1] = vN.f[1];
+    pPlane[2] = vN.f[2];
+    pPlane[3] = -(vN.f[0] * pP0[0] + vN.f[1] * pP0[1] + vN.f[2] * pP0[2]);
+}

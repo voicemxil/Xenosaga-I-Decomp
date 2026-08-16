@@ -2821,3 +2821,6 @@ sevAllocPtAllocator = 0x002E1600, 0x58; // sef.c
 subRightDraw = 0x002BADF0, 0x114; // sub.c
 SEQ_moveSPL = 0x00309E68, 0x164; // SEQ.c
 check_occlusion = 0x0023E7E8, 0x184; // nmlModel.c
+smPrintInfo = 0x002EEE80, 0x3C; // sdv.c
+smFree = 0x002EEDF0, 0x90; // sdv.c
+plane_from_points = 0x0023E480, 0xF0; // nmlModel.c
