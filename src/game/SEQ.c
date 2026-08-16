@@ -302,6 +302,56 @@ void SEQ_moveUnitSPL(UNIT *u)
     }
 }
 
+/* dst = *pTo - *pFrom, xyz only (VU0) */
+#define VEC_SUB(dst, from, to)                          \
+    __asm__ __volatile__(                               \
+        "lqc2 $vf3, 0x0(%1)\n"                          \
+        "lqc2 $vf2, 0x0(%2)\n"                          \
+        "vsub.xyz $vf2xyz, $vf2xyz, $vf3xyz\n"          \
+        "sqc2 $vf2, 0x0(%0)\n"                          \
+        : : "r"(dst), "r"(from), "r"(to) : "memory")
+
+extern void xglVectorLength(float *pDest, const float *pVector);
+
+/* Advance the actor's spline-driven translation channel: face along the
+   path, measure how far the actor travelled this step, and mark the
+   animation block as moving. */
+void SEQ_moveSPL(ACTOR *a)
+{
+    SEQUENCE *p = &actSequence[a->nSerial];
+    SEQ_SPL *m = &p->mov.spl;
+    void *pSpl = m->pSpl;
+    float v[4];
+    float d[4];
+    float fLen;
+
+    if ((p->nState & 0x1) == 0) {
+        p->nState |= 0x1;
+        m->nTime = 0;
+    }
+    SPL_getValueXYZ(v, pSpl, (float)m->nTime);
+    if ((p->nFlags & 0x4) == 0) {
+        if ((m->nMode & 0x10) != 0) {
+            a->fRot[1] = xglAtan2(v[0] - a->fPos[0], v[2] - a->fPos[2]);
+        }
+    }
+    if ((p->nFlags & 0x10) == 0) {
+        ANM *w = &a->anim;
+
+        VEC_SUB(d, a->fPos, v);
+        xglVectorLength(&fLen, d);
+        if ((w->nFlags & 0x8) == 0) {
+            w->nFlags |= 0x8;
+        }
+    }
+    a->fPos[0] = v[0];
+    a->fPos[1] = v[1];
+    a->fPos[2] = v[2];
+    if (m->nEnd < ++m->nTime) {
+        p->nFlags &= ~0x1;
+    }
+}
+
 /* Hand a unit's queued motion to the map layer, in seconds */
 void SEQ_motionUnit(UNIT *u)
 {
