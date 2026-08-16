@@ -565,27 +565,37 @@ void MAP_initUnitSequance(void)
  * lose a word), (char*)pTarget+0x10 (42 diffs, 47 words), and computing
  * pTargetPos inside the else (10 diffs). */
 /* Update an enemy marker from its linked map unit */
+/* TODO: near-miss (4 of 49 words). Everything matches except which of the
+   two address temporaries gets $v0: the original computes `nOffset + 0x10`
+   into $a1 and lets `MapUnit + nOffset` reuse $v0 (killing nOffset), we do
+   the reverse. Both instructions and both registers are the original's --
+   only the roles are crossed, which also flips their order because the two
+   are anti-dependent through $v0. Sinking pTargetPos into the else arm (as
+   here) got this from 5 to 4 and put the pTargetPos add in the bnez delay
+   slot as the original has. Swept: array-indexed MapUnit[nIndex] for either
+   or both accesses, nOffset16 at block vs function scope, pTarget derived
+   from pTargetPos, statement order both ways, and pinning nOffset/nOffset16/
+   pTarget to $2/$5 singly and in the successive-locals pair form (all 11-33
+   diffs, worse). The remaining question is how to make the allocator give
+   pTarget the register nOffset dies in. */
 void MAP_updateUnitEnemy(MAPUNIT *pUnit)
 {
     int nIndex;
-    int nOffset;
     int nEnemy;
+    int nOffset;
+    int nOffset16;
     MAPUNIT *pTarget;
-    float *pTargetPos;
 
     nEnemy = pUnit->nUnk080;
     nIndex = D_0037915B[nEnemy * 0x38B0];
     nOffset = nIndex * 0x300;
-    {
-        int nOffset16 = nOffset + 0x10;
-
-        pTargetPos = (float *)((char *)MapUnit + nOffset16);
-    }
+    nOffset16 = nOffset + 0x10;
     pTarget = (MAPUNIT *)((char *)MapUnit + nOffset);
     if (pTarget->nUnk0A2 == 0) {
         pUnit->nFlags |= 8;
     } else {
         float fAngle;
+        float *pTargetPos = (float *)((char *)MapUnit + nOffset16);
 
         *(unsigned long long *)&pUnit->fPos[0] =
             *(unsigned long long *)&pTargetPos[0];
@@ -615,10 +625,10 @@ void MAP_initUnit(void)
 
     for (i = 0; i < 0x40; i++, pUnit++) {
         pUnit->nFlags = 0;
-        pWork = (char *)pUnit + 8;
         pUnit->nAlive = -1;
         pUnit->pUpdate = 0;
         pUnit->nUnk008 = 0;
+        pWork = (char *)pUnit + 8;
         pUnit->pDraw = 0;
         pUnit->nUnk0D4 = 0;
         pUnit->nUnk0D0 = 0;
@@ -642,8 +652,8 @@ void MAP_initUnit(void)
         pUnit->fUnk23C = 0.5f;
         pUnit->nUnk2EC = 0;
         pUnit->nUnk0A6 = 0;
-        p = &pUnit->nUnk0D8[1];
         j = 1;
+        p = &pUnit->nUnk0D8[1];
 clear_d8:
         j--;
         *p = 0;
@@ -651,8 +661,9 @@ clear_d8:
         if (j >= 0) {
             goto clear_d8;
         }
-        p = &pUnit->pModel[1];
         j = 1;
+        p = &pUnit->pModel[1];
+        SCHED_NOP(); /* loop-head alignment pad the original assembler emitted */
 clear_model:
         j--;
         *p = 0;
@@ -660,8 +671,9 @@ clear_model:
         if (j >= 0) {
             goto clear_model;
         }
-        p = (int *)(pWork + 0xE8);
         j = 2;
+        p = (int *)(pWork + 0xE8);
+        SCHED_NOP(); /* loop-head alignment pad the original assembler emitted */
 clear_e8:
         j--;
         *p = 0;
