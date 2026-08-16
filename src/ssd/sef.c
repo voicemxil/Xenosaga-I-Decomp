@@ -1977,3 +1977,71 @@ void sefFreeScheduler(int nIdx)
         _schedSlots[nIdx].nState = 0;
     }
 }
+
+/* --- sev* particle-handle allocator: a 1024-entry free-index ring in
+ * front of a 1024 x 0x280 pool.  sevInitPtAllocator seeds the ring with
+ * the identity permutation; alloc pops at nRead, free pushes at nWrite. */
+
+typedef struct
+{
+    char pad0000[0x280];
+} SEV_PT;
+
+typedef struct
+{
+    SEV_PT pt[1024];      /* 0x000000 */
+    short  nFree[1024];   /* 0x0A0000 */
+    int    nRead;         /* 0x0A0800 */
+    int    nWrite;        /* 0x0A0804 */
+    int    pad0A0808[2];
+} SEV_PTALLOC;
+
+extern SEV_PTALLOC _ptAllocTbl __asm__("_ptAlloc");
+
+void *sevGetPtAllocator(int nIdx) { return &_ptAllocTbl.pt[nIdx]; }
+void *sevGetPtAllocator2(int nIdx) { return &_ptAllocTbl.pt[nIdx]; }
+
+void sevInitPtAllocator(void)
+{
+    short *q;
+    int i;
+
+    q = &_ptAllocTbl.nFree[1023];
+    memset(&_ptAllocTbl, 0, sizeof(SEV_PTALLOC));
+    memset(_battleData, 0, 560);
+    for (i = 1023; i >= 0; i--) {
+        *q = i;
+        q--;
+    }
+}
+
+int sevAllocPtAllocator(void)
+{
+    /* A pointer local, not the plain symbol: the member address would
+     * otherwise fold into the relocation and lose retail's held base. */
+    SEV_PTALLOC *p = &_ptAllocTbl;
+    int nRead = p->nRead;
+    int nNext = (nRead + 1) & 0x3FF;
+
+    if (nNext == p->nWrite) {
+        return -1;
+    }
+    p->nRead = nNext;
+    return p->nFree[nRead];
+}
+
+void sevFreePtAllocator(int nHandle)
+{
+    SEV_PTALLOC *p = &_ptAllocTbl;
+    int nWrite;
+
+    if ((unsigned int)nHandle >= 1024) {
+        return;
+    }
+    nWrite = p->nWrite;
+    if (p->nRead == nWrite) {
+        return;
+    }
+    p->nFree[nWrite] = nHandle;
+    p->nWrite = (nWrite + 1) & 0x3FF;
+}

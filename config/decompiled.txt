@@ -2815,3 +2815,6 @@ _ModelCalcClip = 0x0023F250, 0x108; // nmlModel.c
 _ModelCalcClipMat1 = 0x0023F118, 0x134; // nmlModel.c
 _ModelCalcClipMat2 = 0x0023EF78, 0x19C; // nmlModel.c
 RSRC_info = 0x0026D500, 0x21C; // RSRC.c
+sevGetPtAllocator = 0x002E7E60, 0x20; // sef.c
+sevGetPtAllocator2 = 0x002E7E80, 0x20; // sef.c
+sevAllocPtAllocator = 0x002E1600, 0x58; // sef.c
