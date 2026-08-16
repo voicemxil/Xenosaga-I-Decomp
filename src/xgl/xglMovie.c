@@ -378,3 +378,47 @@ int audioCallback(int nCode, XGLMPEGPKT *pPkt, XGLMOVIEINFO *pInfo)
     pInfo->nAudioWrite = (pInfo->nAudioWrite + nSize) % pInfo->nAudioSize;
     return 1;
 }
+
+typedef unsigned long u_long;
+typedef unsigned int u_int;
+
+/* Build the DMA/GIF tag chain that uploads one decoded frame to VRAM as
+ * a grid of 16x16 blocks, then mask the final tag's address word */
+void setLoadImageTags(u_int nPacket, u_int nSrc, int nHeight, int nWidth)
+{
+    u_long *p;
+    int y;
+    int x;
+
+    p = (u_long *)((nPacket & 0x0FFFFFFF) | 0x20000000);
+    p[0] = 0x10000003;
+    p[2] = 0x1000000000008002UL;
+    p[3] = 14;
+    p[4] = 0x000E000000000000UL;
+    p[5] = 80;
+    p[6] = 0x0000001000000010UL;
+    p[7] = 82;
+    p[1] = 0;
+    p += 8;
+    for (y = 0; y < nHeight; y += 16) {
+        for (x = 0; x < nWidth; x += 16) {
+            p[1] = 0;
+            p[0] = 0x10000004;
+            p[2] = 0x1000000000008002UL;
+            p[3] = 14;
+            p[4] = ((u_long)y << 32) | ((u_long)x << 48);
+            p[5] = 81;
+            p[6] = 0;
+            p[7] = 83;
+            p[8] = 0x0800000000008040UL;
+            p[9] = 0;
+            p += 10;
+            ((u_int *)p)[1] = nSrc;
+            nSrc += 1024;
+            ((u_int *)p)[0] = 0x30000040;
+            p[1] = 0;
+            p += 2;
+        }
+    }
+    ((u_int *)p)[-4] &= 0x0FFFFFFF;
+}
