@@ -447,7 +447,9 @@ struct SifRpcPacket {
     unsigned int  rec_id;       /* 16  bit 0 = allocated */
     SifRpcPacket *pkt_addr;     /* 20 */
     int           pid;          /* 24 */
-    int           pad1[9];      /* 28..63 */
+    void         *client;       /* 28  binding client data */
+    unsigned int  sid;          /* 32  server id being bound */
+    int           pad1[7];      /* 36..63 */
 };
 
 typedef struct SifRpcHeader {
@@ -1116,6 +1118,67 @@ int _lf_bind(int unused)
             for (i = 0x100000; i != -1; i--)
                 ;
         }
+    }
+    return 0;
+}
+
+/* sceSifBindRpc: allocate a request packet, point it at the client data
+ * and the wanted server id, and send the bind command.  Bit 0 of `mode`
+ * selects the non-blocking form: the blocking one creates a semaphore
+ * and waits on it for the IOP's reply. */
+struct SemaParam {
+    int          currentCount;
+    int          maxCount;
+    int          initCount;
+    int          numWaitThreads;
+    unsigned int attr;
+    unsigned int option;
+};
+
+extern int CreateSema(struct SemaParam *param);
+extern int DeleteSema(int id);
+extern int WaitSema(int id);
+
+int sceSifBindRpc(SifRpcClientData *cd, unsigned int sid, int mode)
+{
+    SifRpcPacket *pkt;
+
+    cd->command = 0;
+    cd->serve = 0;
+    pkt = _sceRpcGetPacket((SifRpcData *)_data_table_00993280);
+    if (pkt == 0)
+        return -1;
+
+    cd->hdr.pkt_addr = pkt;
+    cd->hdr.rpc_id = pkt->pid;
+    pkt->sid = sid;
+    pkt->pkt_addr = pkt;
+    pkt->client = cd;
+
+    if ((mode & 1) == 0) {
+        struct SemaParam sema;
+
+        sema.maxCount = 1;
+        sema.initCount = 0;
+        cd->hdr.sema_id = CreateSema(&sema);
+        if (cd->hdr.sema_id < 0) {
+            _sceRpcFreePacket(pkt);
+            return -3;
+        }
+        if (sceSifSendCmd(0x80000009, pkt, 64, 0, 0, 0) == 0) {
+            _sceRpcFreePacket(pkt);
+            DeleteSema(cd->hdr.sema_id);
+            return -2;
+        }
+        WaitSema(cd->hdr.sema_id);
+        DeleteSema(cd->hdr.sema_id);
+        return 0;
+    }
+
+    cd->hdr.sema_id = -1;
+    if (sceSifSendCmd(0x80000009, pkt, 64, 0, 0, 0) == 0) {
+        _sceRpcFreePacket(pkt);
+        return -2;
     }
     return 0;
 }
