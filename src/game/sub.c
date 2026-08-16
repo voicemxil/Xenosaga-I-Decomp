@@ -134,7 +134,16 @@ extern ETNODE *EtherTreeObjectWorkGet(void);
 extern unsigned char *MenuEtherDataGet(int nId);
 
 /* Place every branch node halfway between its first child and whichever of
-   the other two children its node type selects. */
+   the other two children its node type selects.
+
+   PARKED at 13 diffs -- pure register rotation, right instructions in the
+   right order. Original: a=$v0, b=$v1, p=$a0; we get a=$a0, b=$v0, p=$v1,
+   and the prologue schedules `lw p,gp` before the 0.5f `lui/mtc1` instead
+   of after. Swept: swapping the a/b declaration order, scoping a and b
+   inside the loop body, both leave the 13 diffs untouched -- the switch
+   shape (beql pair with the pChild[0] load duplicated into both likely
+   delay slots) is already exactly right, so this is a global_alloc
+   priority tie-break, permuter territory. */
 void subPosSet3(void)
 {
     ETNODE *p;
