@@ -748,3 +748,60 @@ int stream_check(int nArg, XGL_STREAM *pStr)
 one:
     return 1;
 }
+
+int xglSoundLoadSwd(char *pName, void *pBuf);
+
+/* TODO: near-miss (24 words, 116/116). Everything is structurally right;
+ * the residue is a register tie-break -- the original puts pName in $s0
+ * and pBuf in $s1, gcc here does the reverse, which renames every use of
+ * both -- plus the guard branch being `bnez` where the original has the
+ * branch-likely `bnezl` with `move a1,sp` annulled, and the second copy
+ * loop's entry `lbu` sitting one slot later (a `nop` in its place).
+ * Swept: swapping the `char *p; char *q;` declaration order; the guard
+ * as nested ifs with a goto (111); hoisting `p = szPath` above the
+ * guard (118 words); no spelling changes which parameter wins $s0. */
+/* Load one effect's wave bank and effect bank into a slot: first
+ * "sed\<name>" through the SWD loader, then
+ * "data\sound\sed\<name>.SED" straight off the disc */
+void xglSoundLoadEffect(char *pName, void *pBuf, int nNo)
+{
+    static char ext[8] = ".SED";
+    char szPath[256];
+    char *p;
+    char *q;
+
+    if (pName == 0 || pBuf == 0) {
+        xglSoundSendSwd(0, nNo);
+        xglSoundSendSed(0, nNo);
+        return;
+    }
+    p = szPath;
+    for (q = SoundEffectPath; *q != '\0'; q++) {
+        *p++ = *q;
+    }
+    for (q = pName; (*p = *q) != '\0'; q++) {
+        p++;
+    }
+    if (xglSoundLoadSwd(szPath, pBuf) > 0) {
+        xglSoundSendSwd(pBuf, nNo);
+        while (SsdSpuDmaCompleted(0) != 0) {
+            ;
+        }
+    }
+    p = szPath;
+    for (q = SoundDataPath; *q != '\0'; q++) {
+        *p++ = *q;
+    }
+    for (q = SoundEffectPath; *q != '\0'; q++) {
+        *p++ = *q;
+    }
+    for (q = pName; *q != '\0'; q++) {
+        *p++ = *q;
+    }
+    for (q = ext; (*p = *q) != '\0'; q++) {
+        p++;
+    }
+    if (xglCdReadFile(szPath, pBuf, 0, 0) > 0) {
+        xglSoundSendSed(pBuf, nNo);
+    }
+}
