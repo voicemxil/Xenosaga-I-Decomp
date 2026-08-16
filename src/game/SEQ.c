@@ -81,8 +81,20 @@ typedef struct {
     u8 pad30[0x50];                 /* 0x30 */
 } SEQ_MOVE;
 
+/* Constraint view of the translation channel: follow a bone of another
+   character's skeleton at a fixed local offset */
+typedef struct {
+    void *pTarget;                  /* 0x00 */
+    u8 pad04[0xC];                  /* 0x04 */
+    float fOffset[4];               /* 0x10 */
+    u8 pad20[0x20];                 /* 0x20 */
+    int nBone;                      /* 0x40 */
+    u8 pad44[0x3C];                 /* 0x44 */
+} SEQ_CNS;
+
 typedef union {
     SEQ_SPL spl;                    /* 0x00 */
+    SEQ_CNS cns;                    /* 0x00 */
     SEQ_LIN lin;                    /* 0x00 */
     SEQ_MOVE mv;                    /* 0x00 */
 } SEQ_WORK;
@@ -993,6 +1005,40 @@ void SEQ_rotateUnit(UNIT *u)
             pRot[2] = pRot[2] + pDelta[2];
         }
     }
+}
+
+
+/* Pin the unit's position to a bone of the constraint target's skeleton,
+   at the channel's fixed local offset. */
+void SEQ_transCNSUnitChr(UNIT *u)
+{
+    SEQUENCE *p = &unitSequence[u->nSerial];
+    SEQ_CNS *c = &p->mov.cns;
+    float *pPos = u->fPos;
+    int nBone = p->mov.cns.nBone;
+    float *pMtx;
+    float v[4];
+    float o[4];
+    float x;
+    float y;
+    float z;
+
+    x = c->fOffset[0];
+    y = c->fOffset[1];
+    z = c->fOffset[2];
+    pMtx = (float *)((nBone << 6) + *(int *)((char *)c->pTarget + 0x824));
+    v[0] = x;
+    v[1] = y;
+    v[2] = z;
+    v[3] = 1.0f;
+    p->nFlags = 1;
+    o[0] = x * pMtx[0] + y * pMtx[4] + z * pMtx[8] + pMtx[12];
+    o[1] = x * pMtx[1] + y * pMtx[5] + z * pMtx[9] + pMtx[13];
+    o[2] = x * pMtx[2] + y * pMtx[6] + z * pMtx[10] + pMtx[14];
+    pPos[3] = v[3];
+    pPos[0] = o[0];
+    pPos[1] = o[1];
+    pPos[2] = o[2];
 }
 
 /* Advance a unit's spline-driven rotation channel (degrees to radians) */
