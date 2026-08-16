@@ -1010,3 +1010,33 @@ void sefDestroyEffectCf(void)
     memset(&_battleActor, 0, 3488);
     sdvDestroyAlters();
 }
+
+/* --- sefKillEffect: free every live scheduler slot whose actor id
+ * matches, or all of them when nID is negative. The walker anchors on
+ * &e->nActorID (the first address the body forms), which is why the
+ * base pointer starts at _scheduler+0xA70 and the "used" flag is read
+ * at a negative offset. --- */
+typedef struct
+{
+    char pad000[0x6B0];
+    int  nUsed;              /* 0x6B0 */
+    char pad6B4[0xA78 - 0x6B4];
+    short nActorID;          /* 0xA78 */
+    char padA7A[0xAB0 - 0xA7A];
+} SEF_SCHED_SLOT;
+
+extern SEF_SCHED_SLOT _schedSlots[] __asm__("_scheduler");
+extern void sefFreeScheduler(int nSlot);
+
+void sefKillEffect(int nID)
+{
+    int i;
+
+    for (i = 0; i < 128; i++) {
+        if (_schedSlots[i].nUsed != 0) {
+            if (nID < 0 || _schedSlots[i].nActorID == nID) {
+                sefFreeScheduler(i);
+            }
+        }
+    }
+}

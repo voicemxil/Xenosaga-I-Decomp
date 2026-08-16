@@ -2621,3 +2621,4 @@ sefDestroyEffect = 0x002E7010, 0x74; // sef.c
 sefDestroyEffectCf = 0x002E7088, 0x74; // sef.c
 sceCdNcmdDiskReady = 0x0020D3B0, 0x98; // sceCd.c
 sceCdStatus = 0x0020E058, 0xB8; // sceCd.c
+sefKillEffect = 0x002E7B80, 0x78; // sef.c
