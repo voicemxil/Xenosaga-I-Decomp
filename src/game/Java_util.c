@@ -366,22 +366,31 @@ void Java_xeno_util_Format_toString__I(JThread *thread, JValue *args, JValue *re
     ret->p = JAVA_tmpString;
 }
 
-/* Format a boolean value into the shared temp String */
-/* TODO: near-miss - epilogue `ld ra` schedules one slot early */
+/* Format a boolean value into the shared temp String.
+ * Do not cache JAVA_tmpString in a local: the original re-reads the
+ * global after each call (it has to -- a call may store to it), and
+ * caching costs an extra callee-saved register and a wider frame.
+ * The only remaining difference was gcc scheduling the epilogue
+ * `ld $ra` one slot ahead of the nLength store, fixed by
+ *   --swap-adjacent Java_xeno_util_Format_toString__Z:27!
+ * The `!` forces the swap past swap_ok's alias check, which cannot see
+ * that a $sp-relative restore and a heap store through $s0 are
+ * independent. */
 void Java_xeno_util_Format_toString__Z(JThread *thread, JValue *args, JValue *ret)
 {
     JArray *arr;
     JString *str;
+    char *buf;
+    int nLen;
 
     if (JAVA_tmpString == 0) {
         JAVA_tmpString = (JString *)newObject(classString);
         JAVA_tmpString->pArray = newArray(classByte, 0xFF);
     }
     sprintf(JAVA_tmpString->pArray->pData, D_004DC098, args[0].z);
-    str = JAVA_tmpString;
-    arr = str->pArray;
+    arr = JAVA_tmpString->pArray;
     arr->nLength = strlen(arr->pData);
-    ret->p = str;
+    ret->p = JAVA_tmpString;
 }
 
 /* Create an Input object bound to a pad number */

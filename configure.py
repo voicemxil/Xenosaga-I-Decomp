@@ -186,6 +186,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "tskMenuPausePage.c": "--swap-adjacent PauseMenuPage0:12 --rotate PauseMenuPage0:21:3",
     "xglCd.c": "--swap-adjacent xglCdReadCancel:41!",
     "xglDma.c": "--barrier-return-store xglDmaMFIFOKick --swap-adjacent xglDmaMFIFOKick:14",
     "Font.c": "--branch-likely FontTestP1:2",
@@ -241,7 +242,7 @@ FILE_FIX_FLAGS = {
     "Ether.c": ("--branch-unlikely EtherTreeRightDraw:2,"
                 "EtherTreeLine2SelectChange:1"),
     # many util natives do lwc1->cvt.s.w with no hazard nop in the original
-    "Java_util.c": ("--omit-hazard cvt.s.w --mtc1-nop Java_xeno_util_Spline_getValue__I:0 --swap-adjacent Java_xeno_util_Runtime_jumpCF__II:7 --rotate Java_xeno_util_Runtime_setLocation__III:15:2,Java_xeno_util_Runtime_setLocation__III:17:3"),
+    "Java_util.c": ("--omit-hazard cvt.s.w --mtc1-nop Java_xeno_util_Spline_getValue__I:0 --swap-adjacent Java_xeno_util_Runtime_jumpCF__II:7,Java_xeno_util_Format_toString__Z:27! --rotate Java_xeno_util_Runtime_setLocation__III:15:2,Java_xeno_util_Runtime_setLocation__III:17:3"),
     "xglVector.c": ("--omit-hazard mul.s --omit-hazard sub.s "
                     "--omit-hazard c.lt.s --omit-hazard mov.s"),
     # EXM's original object schedules independent FP work into load-delay
