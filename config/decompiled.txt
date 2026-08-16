@@ -2352,3 +2352,6 @@ UnduParamInit = 0x003223B0, 0x54; // Undu.c
 CalcVerticalVector = 0x002C89D8, 0x70; // Calc.c
 CalcLength = 0x002C8A48, 0x64; // Calc.c
 CalcCrossPoint = 0x002C8AB0, 0x108; // Calc.c
+nmlModelSetGlobalPointLightPos = 0x0022F488, 0x44; // nmlModel.c
+nmlModelSetMatOffset = 0x0022FF98, 0x64; // nmlModel.c
+nmlModelLexDataCheck = 0x00231028, 0xE0; // nmlModel.c

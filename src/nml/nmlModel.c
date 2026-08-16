@@ -382,12 +382,9 @@ void nmlModelSetFadeInDispose(void)
 }
 
 /* Start a fade-in over the given time with the given color (x255 scale) */
-/* TODO: near-miss (SCHEDULING, 2 diffs) -- instruction sequence matches the
- * original exactly, but gas's automatic delay-slot fill swaps the final
- * swc1 into the jr $ra delay slot (original leaves the delay slot as a
- * genuine nop, with the swc1 issued before the branch). Same class of
- * issue as the TI-mode lq/sq near-misses above -- a trailing independent
- * store before a leaf return keeps getting pulled into the delay slot. */
+/* gas's automatic delay-slot fill wants the final swc1 in the jr $ra delay
+ * slot; the original issues it before the branch and leaves a genuine nop.
+ * Held off by --barrier-return-store in this file's FILE_FIX_FLAGS. */
 void nmlModelSetFadeInInterrupt(int time, float r, float g, float b)
 {
     s_inFadeIn.nUnkC = 0;
@@ -1094,7 +1091,10 @@ void nmlModelSetGlobalPointLightReset(void)
         : : "r"(s_inGblPointC) : "memory");
 }
 
-/* Set one global point-light position */
+/* Set one global point-light position.
+ * The original leaves the beqz delay slot empty and issues the array-index
+ * `addu` before the branch; gcc fills the slot with it. Held off by
+ * --pin-slot-nop nmlModelSetGlobalPointLightPos:0 in FILE_FIX_FLAGS. */
 void nmlModelSetGlobalPointLightPos(int no, void *pPos)
 {
     VEC4 *p;
@@ -1244,7 +1244,15 @@ void nmlModelSetMatOffset(void *pName, void *pOffset)
 {
     *(NAMEBUF *)s_aMatName = *(NAMEBUF *)pName;
     s_aMatName[31] = 0;
-    s_inMatOffset.q = ((VEC4 *)pOffset)->q;
+    /* Real quadword move, and the source of this function's register
+     * shape: a TImode struct assignment lets gcc pick the scratch, which
+     * lands the pair on $v1 and pushes the name-buffer pointer to $v0. */
+    PS2_ASM("lq $2, 0x0(%1)\n sq $2, 0x0(%0)"
+        : : "r"(&s_inMatOffset), "r"(pOffset) : "$2", "memory");
+    /* The original left the jr delay slot empty here; our gas is in
+     * reorder mode and hoists the sq above the jr unless something
+     * unmovable sits between them. */
+    SCHED_NOP();
 }
 
 /* Set the texture-map mode flags, alpha (clamped to [0,128]) and Z */
@@ -1572,18 +1580,13 @@ char *strstr(const char *, const char *);
 
 /* Validate a lex model block: address range, alignment, "lex" magic and
  * (for named variants) the MagicCarpetCome marker; 0 means valid */
-/* TODO: near-miss (1 word, REGISTER) -- the aOfs[n] index address add is
- * addu v0,s0,v0 in the original vs addu v0,v0,s0 here; every source
- * shape tried (index expr, int-cast base, accumulate) keeps the mult
- * operand first. Same class as Menu.c's jump-table base-pointer-add
- * one-word near-miss. Everything else (56 words) matches, including the
- * empty-asm nRet opacity that restores the slt+movn tail. */
 int nmlModelLexDataCheck(void *pData)
 {
     char *p;
     int nRet;
     int n;
     int nOfs;
+    int *aOfs;
     char *q;
     char *pStr;
 
@@ -1596,7 +1599,12 @@ int nmlModelLexDataCheck(void *pData)
         LAUNDER_V(nRet);
         if (p[63] != 0 && *(int *)(p + 0x6C) == 0) {
             n = *(int *)(p + 0x44);
-            nOfs = *(int *)((int)p + n * 4 + 0xAC);
+            /* Binding the table base to its own pointer before indexing
+             * is what emits `addu v0,s0,v0` (base first); folded into one
+             * address expression gcc canonicalises the multiply first and
+             * emits `addu v0,v0,s0`. */
+            aOfs = (int *)(p + 0xAC);
+            nOfs = aOfs[n];
             q = p + nOfs;
             pStr = q + *(int *)(q + 0x24);
             if (*(int *)(p + 0xA0) != 0) {
