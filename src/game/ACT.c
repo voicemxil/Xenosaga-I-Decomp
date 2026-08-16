@@ -994,3 +994,53 @@ void ACT_setDrawEnv(ACTOR *a)
         }
     }
 }
+
+/* Freeze every live actor's motion for a paused frame: raise the pause bit
+   in each animation block, run the paused motion update, then clear it.
+
+   PARKED at 19 diffs, right length (50 words), right loop shapes. What is
+   left: the original recomputes `lui %hi(actor)` at the top of all three
+   loops, while gcc hoists it into a spare register once and reaches each
+   loop base with an addiu from it, which also rotates the pointer/mask
+   registers ($a0/$v1 swapped against the original's $v1/$a0).
+
+   Swept: the plain ACTOR walker with `*(int *)a->anim` (31 diffs -- the
+   giv anchors on the actor base and folds 0x6F0 into every load/store
+   offset, where the original anchors at actor+0x6F0 with offset 0); a
+   free-standing `int *p` walker seeded from `actor[0].anim` (52 -- folds
+   the +0x6F0 into %lo and drops an addiu); the same walker with a
+   file-scope `p` (52 -- loop 2 then inherits the +1776 anchor and backs
+   off it with `addiu s1,v0,-1776`); and block-scoping the ACTOR pointer
+   in each loop, with and without a nested block for `p` (53 each). The
+   19-diff form below -- function-scope `a`, block-scope `p` seeded as
+   `(int *)a->anim` -- is the only one that reproduces both the
+   `addiu base,actor,1776` anchor and the 50-word length. */
+void ACT_pauseUpdate(void)
+{
+    ACTOR *a;
+    int i;
+
+    xglStudioFlushActiveCamera();
+    a = actor;
+    {
+        int *p = (int *)a->anim;
+
+        for (i = 0x3F; i >= 0; i--, p += 668) {
+            *p |= 0x80000;
+        }
+    }
+    a = actor;
+    for (i = 0x3F; i >= 0; i--, a++) {
+        if (a->nAlive != 0 && (a->nFlags & 8) == 0) {
+            ACT_updateMotionPause(a);
+        }
+    }
+    a = actor;
+    {
+        int *p = (int *)a->anim;
+
+        for (i = 0x3F; i >= 0; i--, p += 668) {
+            *p &= ~0x80000;
+        }
+    }
+}
