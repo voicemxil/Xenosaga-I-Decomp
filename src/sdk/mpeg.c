@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* IPU-assisted MPEG2 sequence-layer bitstream parsing */
 
 typedef unsigned char u_char;
@@ -42,35 +44,34 @@ void _extensionAndUserData(MPEGSTREAM *pStream);
 void _initSeq(int *pUnk858);
 void _ipuSetMPEG1(int flag);
 
-/* TODO: near-miss (LOGIC, 10/73 words) - built with the 2.9-ee SDK compiler
- * (-O2 -G0 -fno-schedule-insns, confirmed via mpeg.c's SDK_FILES entry in
- * configure.py: it reproduces the original's 16-byte-per-saved-register
- * frame padding that the 2.96 game compiler cannot). Placing the dead
- * `p->nUnk0D4 = 0;` store before the first _nextBit() call (rather than
- * after, which the natural statement order would suggest) fixed the
- * prologue delay-slot filler and cut diffs from 15 to 10 -- confirmed
- * exhaustively via tools/permute.py. Remaining diffs: (1) the `v0 >= 2801`
- * check's slti target register is v0 here vs a0 in the original -- tried
- * comparing p->nUnk128 instead of the local, no change; (2) an analogous
- * swap on the `(v1>>1)&0x3FF` / `v1>>12` pair; (3) the two _setDefaultQM
- * calls' argument-setup instruction order (li a1,<cmd> vs the QM pointer
- * lui/addiu) is reordered relative to the original. All three look like
- * the same class of register/scheduling tie-break as the store-order fix
- * above, just not reachable with the source shapes tried in budget. */
+/* Levers, all of them register tie-breaks the SDK compiler (2.9-ee, -O2 -G0
+ * -fno-schedule-insns) resolves the other way round:
+ *   - the dead `p->nUnk0D4 = 0;` store goes BEFORE the first _nextBit() call,
+ *     which is what fills the prologue delay slot;
+ *   - the `v0 >= 2801` test is named in its own $a0-pinned local so it is
+ *     evaluated BEFORE `p->nUnk128 = v0`.  That keeps $v0 live across the
+ *     compare, which is exactly why the original puts the sltu result in $a0
+ *     and the nUnk128 store in the branch delay slot.
+ * Two pure post-reload reorders are left to FILE_FIX_FLAGS: an andi/srl
+ * transpose at site 26 and the two _setDefaultQM calls, whose delay slot the
+ * original fills with the `li $a1,cmd` rather than the quantiser-matrix
+ * `addiu` (--swap-into-slot sites 7 and 12). */
 /* Parse the MPEG2 sequence_header(), pick default quant matrices, kick the IPU */
 void _sequenceHeader(MPEGSTREAM *pStream)
 {
     MPEGSTREAM *p;
     u_int v1;
     int v0;
+    PIN(int lt, "$4");
 
     p = pStream;
     p->nUnk0D4 = 0;
     v1 = _nextBit(p, 32);
     v0 = (v1 >> 8) & 0xFFF;
     p->nUnk124 = v1 >> 20;
+    lt = (v0 < 2801);
     p->nUnk128 = v0;
-    if (v0 >= 2801) {
+    if (!lt) {
         _Error(p, D_004D5A58);
     }
 
@@ -103,48 +104,75 @@ void _sequenceHeader(MPEGSTREAM *pStream)
     _initSeq(p->pUnk858);
 }
 
-/* TODO: near-miss (LOGIC, 39/76 words) - SDK-compiler (2.9-ee) prologue and
- * the delay-slot store of nUnk848=1 already match exactly. The 4-way bit
- * extraction from the 28-bit read gets the right VALUES but wrong temp
- * registers (v0/a0 instead of v1/v0 for nExtH/nChroma); tools/permute.py
- * swept all 24 statement orderings of the four extractions and the best is
- * 37 diffs (2 orderings tie), not a full match, so this is a register-
- * allocation tie-break rather than a source-order issue. The tail (field
- * update block combining old/new bits) is also unverified against the
- * original's exact store order/registers. */
+/* Shape notes.  Three things had to be right:
+ *   1. `nHigh = v1 >> 0x14` is computed BEFORE the 16-bit _nextBit() call --
+ *      the original puts it in that call's delay slot, which is also what
+ *      keeps nHigh in $s0 and lets $s2 be reused for nExtBit.
+ *   2. The tail reads all four fields and computes all four shifted deltas
+ *      before combining, then stores 138/124/128/134 in that order.  Writing
+ *      it as read-modify-write per field interleaves the loads with the
+ *      arithmetic and costs 17 words.
+ *   3. The four bit extractions and the two field reads are a register
+ *      permutation gcc gets wrong; the temps are pinned to the original's
+ *      $v1/$v0/$a0 and $a0/$v1.  Only these five pins are load-bearing --
+ *      the shifted deltas fall into $t0/$t1/$a3/$a1 on their own. */
 /* Parse sequence_extension(): chroma format, size/rate extensions, MPEG1 sanity */
 void _sequenceExtension(MPEGSTREAM *pStream)
 {
-    u_int v0, v1, v2;
-    u_int nChroma, nHigh, nExtV, nExtH, nExtRate, nExtBit;
+    u_int v1, v2;
+    u_int nHigh, nExtV, nExtH, nExtRate, nExtBit;
+    PIN(u_int o124, "$4");
+    PIN(u_int o128, "$3");
+    u_int o134, o138;
+    u_int n124, n128, n134, n138;
+    u_int sH;
+    u_int sB;
+    u_int sV;
+    PIN(u_int sR, "$5");
+    PIN(u_int th, "$3");
+    PIN(u_int tc, "$2");
+    PIN(u_int tr, "$4");
 
     pStream->nUnk848 = 1;
     _ipuSetMPEG1(0);
 
     v1 = _nextBit(pStream, 28);
-    nExtH = (v1 >> 1) & 0xFFF;
-    nChroma = (v1 >> 0x11) & 3;
-    nExtRate = (v1 >> 0xd) & 3;
+    th = v1 >> 1;
+    nExtH = th & 0xFFF;
+    tc = v1 >> 0x11;
+    tc = tc & 3;
+    tr = v1 >> 0xd;
+    nExtRate = tr & 3;
     nExtV = (v1 >> 0xf) & 3;
-    pStream->nUnk140 = nChroma;
-    if (nChroma != 1) {
+    pStream->nUnk140 = tc;
+    if (tc != 1) {
         _Error(pStream, D_004D5A10);
     }
 
     pStream->nUnk13C = (v1 >> 0x13) & 1;
-    v2 = _nextBit(pStream, 16);
     nHigh = v1 >> 0x14;
+    v2 = _nextBit(pStream, 16);
     nExtBit = v2 >> 8;
     if (nHigh != 0x48 && nHigh != 0x58 && nHigh != 0x44) {
         _Error(pStream, D_004D5A38);
     }
 
-    v0 = pStream->nUnk124;
-    v1 = pStream->nUnk128;
-    pStream->nUnk138 += nExtBit << 0xa;
-    pStream->nUnk124 = (nExtV << 0xc) | (v0 & 0xFFF);
-    pStream->nUnk128 = (nExtRate << 0xc) | (v1 & 0xFFF);
-    pStream->nUnk134 += nExtH << 0x12;
+    sH = nExtH << 0x12;
+    sB = nExtBit << 0xa;
+    sV = nExtV << 0xc;
+    sR = nExtRate << 0xc;
+    o124 = pStream->nUnk124;
+    o128 = pStream->nUnk128;
+    o134 = pStream->nUnk134;
+    o138 = pStream->nUnk138;
+    n124 = sV | (o124 & 0xFFF);
+    n128 = sR | (o128 & 0xFFF);
+    n134 = o134 + sH;
+    n138 = o138 + sB;
+    pStream->nUnk138 = n138;
+    pStream->nUnk124 = n124;
+    pStream->nUnk128 = n128;
+    pStream->nUnk134 = n134;
 }
 
 /* Parse sequence_display_extension(): optional colour description + display size */
