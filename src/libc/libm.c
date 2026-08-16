@@ -1781,10 +1781,6 @@ __ieee754_pow (double x, double y)
   if ((((__uint32_t) hx >> 31) - 1 | yisint) == 0)
     return (x - x) / (x - x);
 
-  s = one_p;			/* s (sign of result -ve**odd) = -1 else = 1 */
-  if ((((__uint32_t) hx >> 31) - 1 | (yisint - 1)) == 0)
-    s = -one_p;			/* (-ve)**(odd int) */
-
   /* |y| is huge */
   if (iy > 0x41e00000)
     {				/* if |y| > 2**31 */
@@ -1797,12 +1793,12 @@ __ieee754_pow (double x, double y)
 	}
       /* over/underflow if x is not close to one */
       if (ix < 0x3fefffff)
-	return (hy < 0) ? s * huge_p * huge_p : s * tiny_p * tiny_p;
+	return (hy < 0) ? huge_p * huge_p : tiny_p * tiny_p;
       if (ix > 0x3ff00000)
-	return (hy > 0) ? s * huge_p * huge_p : s * tiny_p * tiny_p;
+	return (hy > 0) ? huge_p * huge_p : tiny_p * tiny_p;
       /* now |1-x| is tiny <= 2**-20, suffice to compute
          log(x) by x-x^2/2+x^3/3-x^4/4 */
-      t = ax - one_p;		/* t has 20 trailing zeros */
+      t = x - 1;		/* t has 20 trailing zeros */
       w = (t * t) * (0.5 - t * (0.3333333333333333333333 - t * 0.25));
       u = ivln2_h * t;		/* ivln2_h has 21 sig. bits */
       v = t * ivln2_l - w * ivln2;
@@ -1812,7 +1808,7 @@ __ieee754_pow (double x, double y)
     }
   else
     {
-      double ss, s2, s_h, s_l, t_h, t_l;
+      double s2, s_h, s_l, t_h, t_l;
       n = 0;
       /* take care subnormal number */
       if (ix < 0x00100000)
@@ -1837,11 +1833,11 @@ __ieee754_pow (double x, double y)
 	}
       SET_HIGH_WORD (ax, ix);
 
-      /* compute ss = s_h+s_l = (x-1)/(x+1) or (x-1.5)/(x+1.5) */
+      /* compute s = s_h+s_l = (x-1)/(x+1) or (x-1.5)/(x+1.5) */
       u = ax - bp[k];		/* bp[0]=1.0, bp[1]=1.5 */
       v = one_p / (ax + bp[k]);
-      ss = u * v;
-      s_h = ss;
+      s = u * v;
+      s_h = s;
       SET_LOW_WORD (s_h, 0);
       /* t_h=ax+bp[k] High */
       t_h = zero_p;
@@ -1850,24 +1846,24 @@ __ieee754_pow (double x, double y)
       t_l = ax - (t_h - bp[k]);
       s_l = v * ((u - s_h * t_h) - s_h * t_l);
       /* compute log(ax) */
-      s2 = ss * ss;
+      s2 = s * s;
       r = s2 * s2 * (L1 + s2 * (L2 + s2 * (L3 + s2 * (L4 + s2 * (L5 +
 								 s2 * L6)))));
-      r += s_l * (s_h + ss);
+      r += s_l * (s_h + s);
       s2 = s_h * s_h;
       t_h = 3.0 + s2 + r;
       SET_LOW_WORD (t_h, 0);
       t_l = r - ((t_h - 3.0) - s2);
-      /* u+v = ss*(1+...) */
+      /* u+v = s*(1+...) */
       u = s_h * t_h;
-      v = s_l * t_h + t_l * ss;
-      /* 2/(3log2)*(ss+...) */
+      v = s_l * t_h + t_l * s;
+      /* 2/(3log2)*(s+...) */
       p_h = u + v;
       SET_LOW_WORD (p_h, 0);
       p_l = v - (p_h - u);
       z_h = cp_h * p_h;		/* cp_h+cp_l = 2/(3*log2) */
       z_l = cp_l * p_h + p_l * cp + dp_l[k];
-      /* log2(ax) = (ss+..)*2/(3*log2) = n + dp_h + z_h + z_l */
+      /* log2(ax) = (s+..)*2/(3*log2) = n + dp_h + z_h + z_l */
       t = (double) n;
       t1 = (((z_h + z_l) + dp_h[k]) + t);
       SET_LOW_WORD (t1, 0);
@@ -1875,6 +1871,10 @@ __ieee754_pow (double x, double y)
     }
 
   /* split up y into y1+y2 and compute (y1+y2)*(t1+t2) */
+  s = one_p;			/* s (sign of result -ve**odd) = -1 else = 1 */
+  if ((((__uint32_t) hx >> 31) - 1 | (yisint - 1)) == 0)
+    s = -one_p;			/* (-ve)**(odd int) */
+
   y1 = y;
   SET_LOW_WORD (y1, 0);
   p_l = (y - y1) * t1 + y * t2;
@@ -2908,7 +2908,17 @@ static const float
   pi_o_4f = 7.8539820015e-01,	/* 0x3f490fdb */
   pi_o_2f = 1.5707964003e+00,	/* 0x3fc90fdb */
   pif = 3.1415925622e+00,	/* 0x40490fda */
-  pi_lof = 1.5099579187e-07;	/* 0x34222168 */
+  pi_lof = 1.5099579187e-07,	/* 0x34222168 */
+  /* pi_o_2f + (float) 0.5 * pi_lof, already folded.  The original build
+     rounded that fold to nearest and got 0x3fc90fdc; this ee-gcc 2.96
+     truncates EVERY float constant conversion and fold toward zero
+     (probes: 0.1f -> 0x3dcccccc, 1.0f/3.0f -> 0x3eaaaaaa, 16777219.0f
+     -> 16777218.0f, and the tell-tale pif above, which is the plain
+     truncation of pi rather than fdlibm's 0x40490fdb), so it drops the
+     half-ulp addend and yields 0x3fc90fdb.  Naming the folded result
+     puts both builds on the original's bits and is independent of the
+     host compiler's rounding mode. */
+  pi_o_2_hif = 1.570796489715576171875e+00;	/* 0x3fc90fdc, exact */
 
 float
 __ieee754_atan2f (float y, float x)
@@ -2983,7 +2993,7 @@ __ieee754_atan2f (float y, float x)
   /* compute y/x */
   k = (iy - ix) >> 23;
   if (k > 60)
-    z = pi_o_2f + (float) 0.5 * pi_lof;	/* |y/x| >  2**60 */
+    z = pi_o_2_hif;		/* |y/x| >  2**60: pi_o_2f + 0.5f*pi_lof */
   else if (hx < 0 && k < -60)
     z = 0.0;			/* |y|/x < -2**60 */
   else
