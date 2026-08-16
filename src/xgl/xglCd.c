@@ -821,14 +821,29 @@ void xglCdArcInitSub0(XGLCDFILEPOS *pPos, char *pBuf, int nCount)
 int sceCdStStop(void);
 int sceSifFreeIopHeap(void *);
 extern XGLCDSTREAM *listnow[2];   /* active-stream slots (.sbss) */
-extern char D_0093CC30;          /* stream-busy flag (uncached mirror) */
+extern char D_0093CC30[0x10];    /* stream-busy flag (uncached mirror) */
 
-/* TODO: WIP (~30 diffs, built 148 vs orig 224 bytes). Two blockers:
- * (1) the one-and-a-bit-iteration slot-search loop collapses (gcc folds
- * i<=0 after i++ and deletes the back edge; the original keeps a peeled
- * first compare + live loop); (2) `nType >= 0` on the int copy of the
- * u_char field folds away (orig emits a real bltz), and the built picks
- * beql/bnezl likely forms where orig has plain branches. */
+/* TODO: near-miss -- 54 of 56 words (was 37 of 56).  Three levers moved
+ * it: the hand-written PEEL of the first slot test (ee-gcc folds
+ * `i <= 0` after `i++` and deletes the back edge otherwise), the nested
+ * `if (n >= 0) { if (n < 3) ... }` in place of `&&` (which folds to one
+ * `bnez` on a byte-loaded value), and making the type-0 arm the `else`
+ * so gcc jumps FORWARD to it the way the original does.  Declaring
+ * D_0093CC30 as a >8-byte array is what gets it out of small data and
+ * back to the original's absolute lui/sb -- as a bare `extern char` at
+ * -G8 gcc addresses it through $gp, which the original never does.
+ * Residue: (a) `addiu $v1,$gp` is scheduled BEFORE the stack adjust
+ * instead of after it, so the whole prologue is rotated by one;
+ * (b) three branches come out likely (bgtzl/beql/beql) where the
+ * original has plain forms -- --branch-unlikely strips the annul bits
+ * but leaves gcc's fill in place, and the fill is the real difference:
+ * gcc hoists the `lw $a0,16($s0)` of the following `pStream->nFd != -1`
+ * test into the loop-exit branch's delay slot, where the original loads
+ * it after the loop (--unfill-gcc-slots just moves it one earlier).
+ * Fix (b) in C -- something that stops nFd being loaded before the loop
+ * exits -- and the pad flag
+ *   --short-loop-pad xglCdStreamClose:0:4,xglCdStreamClose:1:0,xglCdStreamClose:2:0
+ * takes the length the rest of the way. */
 /* Close a CD stream: drop it from the active slots, stop/close the
  * underlying transport and clear the busy flag */
 int xglCdStreamClose(XGLCDSTREAM *pStream)
@@ -839,27 +854,35 @@ int xglCdStreamClose(XGLCDSTREAM *pStream)
 
     i = 0;
     pp = listnow;
-    do {
-        if (*pp == pStream) {
-            *pp = 0;
-            break;
+    if (*pp == pStream) {
+        *pp = 0;
+    } else {
+        while (*pp != pStream) {
+            i++;
+            if (i > 0) {
+                goto done;
+            }
+            pp++;
         }
-        i++;
-        pp++;
-    } while (i <= 0);
-
+        *pp = 0;
+    }
+done:
     if (pStream->nFd != -1) {
         nType = pStream->nType;
-        if (nType == 0) {
+        if (nType != 0) {
+            if (nType >= 0) {
+                if (nType < 3) {
+                    sceClose(pStream->nFd);
+                }
+            }
+        } else {
             sceCdStStop();
             if (pStream->nUnk00 != 0) {
                 sceSifFreeIopHeap((void *)pStream->nUnk00);
             }
             pStream->nFd = -1;
-        } else if (nType >= 0 && nType < 3) {
-            sceClose(pStream->nFd);
         }
-        D_0093CC30 = 0;
+        D_0093CC30[0] = 0;
     }
     return 0;
 }
