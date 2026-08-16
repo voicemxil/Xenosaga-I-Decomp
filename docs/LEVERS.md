@@ -1248,3 +1248,33 @@ moves are unaffected -- this only bites hand-written asm text.
 **Five pointer arguments arrive in `$a0-$a3` plus `$t0`** in this
 image's ABI, so a whole-body-asm leaf with a fifth operand needs no
 stack load (`_FacePoint`).
+
+**Which of two `x | c` values reuses the shared temp's register is decided
+by which variable you SEED with the temp.** When two constants are OR'd
+onto the same value, gcc computes the zero-extend/copy once and folds one
+of the two ORs in place over it; the other gets a fresh register. Writing
+both as independent expressions off `n` lets gcc pick (it picks whichever
+target is already a hard register, e.g. a `PIN`). To choose, write
+`gt = (unsigned long)n; eop = gt | C1; gt |= C2;` -- the `|=` variable is
+the in-place one. (sceVif1PkRefLoadImage.)
+
+**An empty asm is the only way to keep a combine-folded compare temp
+alive -- and it buys the register at the price of the schedule.**
+`PIN(unsigned int ne,"$5"); ne = n ^ qwc; if (ne == 0) ...` is silently
+IGNORED: combine merges the xor into the `movz`, the pseudo dies, and the
+register variable evaporates. Adding LAUNDER / LAUNDER_V / PASSTHRU /
+PASSTHRU_V does make the PIN stick (triage flips REGISTER -> SCHEDULING,
+i.e. the multiset becomes exact) but every asm form is a hard scheduling
+barrier for ee-gcc 2.9, costing 9-14 words of order. Only worth it when
+nothing downstream needs to move.
+
+**A whole-file scheduling fingerprint means a TU boundary, and
+`tools/tu_boundaries.py` will tell you.** Sony's SDK archives are one
+object file per function, so a single function can legitimately have been
+built with flags none of its siblings used -- which one .c file cannot
+express. Split it into its own .c (auto-discovered by configure.py) and
+sweep flags with `tools/set_flags.py --cflags`. Confirmed twice: mpeg.c ->
+sceMpegDec.c (four matches, no source change) and sceVif1Pk.c ->
+sceVif1PkRefLoadImage.c (20 -> 14 diffs on the flag alone, then 4 once the
+register levers could land). Both wanted `-O2 -G0`, i.e. the SDK default
+`-fno-schedule-insns` removed.
