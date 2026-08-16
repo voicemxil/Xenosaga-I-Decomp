@@ -330,6 +330,15 @@ took a function 61 diffs -> 11.
 fixed by making the second path fall through to the first, or `goto` a
 shared label.
 
+**Write a `switch` by OMITTING the dead cases.** gcc spans min..max and
+fills the holes with the default, so six labels reproduce a 16-entry
+retail jump table.
+
+**Scope a pointer local to the switch ARM that uses it.** A
+function-wide `T *p` shared by several arms is one long live range and
+the allocator never gives any arm the original's register. Note this is
+per-arm: the same rewrite in a second arm did nothing.
+
 **Switch node COUNT picks the decision-tree root.** gcc's
 `balance_case_nodes` special-cases exactly three nodes and splits at the
 middle. A dispatch that starts at the LOWEST label means the source has
@@ -448,6 +457,12 @@ directly, 2.96 knows the `lbu` result is 0..255 and narrows `slti` to
 **Struct-copy alignment picks the move idiom.** align 1 → all `lwl/lwr`;
 align 4 → `ldl/ldr` for 8-byte chunks plus a `lw/sw` tail; align 8 (the
 `union {...; long long ll[2];}` idiom) → `ld/sd`.
+
+**`t->shortfield = t->shortfield + 1` keeps the value RAW** —
+`lhu`/`addiu`/`sh`, with the extension deferred to each use. A `short`
+local extends at the definition instead. Which side of the `addiu` the
+`sll/sra` sits on tells you which the source used. Same for `signed
+char` read-modify-write chains: use the member, not a local.
 
 **A short-truncated sum of an `int` field needs its own `int` local**, or
 combine narrows the load to `lhu`. Worth 4 words.
@@ -569,6 +584,16 @@ addresses into locals.
 
 **Read-all / compute-all / store-all** for multi-field
 read-modify-write, or gcc emits load-compute-store triples.
+
+**gcc DELETES the first of two stores to the same member**, even with a
+non-aliasing load between them. Only a `volatile` store keeps both.
+
+**A store through a differently-typed pointer kills a struct member's
+CSE across it.**
+
+**Two `return` arms with identical tails get cross-jumped** — which
+looks like a "length short" bug. Permuting one arm's store order breaks
+the merge.
 
 **Load-before-store source order is load-bearing** — gcc will not
 reorder a store past a possibly-aliasing load.
@@ -700,7 +725,23 @@ of all 120 permutations. Search, do not assume.
 
 ---
 
-## When a lever is not the answer
+## Axes that DON'T work — don't spend runs on these
+
+**Local declaration order does not move gcc 2.96's allocation.** Four
+orders, byte-identical output. Measured, not assumed.
+
+**The five window-header stores ending every Menu list-change function
+are scheduler-ordered** — all 120 permutations give an identical diff.
+
+**`-fno-gcse` has no effect** on the "original recomputes still-live
+subexpressions" class: that is `cse_main`, not gcse. Verified per-file.
+
+**`-fno-optimize-sibling-calls` on Enemy.c** restores one `jal` but
+costs eight other functions in the file (27/2 -> 20/9).
+
+---
+
+## When a lever is not the answer## When a lever is not the answer
 
 Some things are genuinely unreachable from C with this compiler, and
 they are recorded so nobody re-sweeps them:
