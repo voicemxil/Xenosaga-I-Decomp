@@ -186,6 +186,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "sv.c": "--swap-regs svDrawSchedulerBlk:17-18 --swap-regs svDrawScheduler3D:16-17",
     "xglPacket.c": "--rotate-seq xglPacketInterpolate:26:2,xglPacketInterpolate:26:5",
     "tskMenuPausePage.c": "--swap-adjacent PauseMenuPage0:12 --rotate PauseMenuPage0:21:3",
     "xglCd.c": "--swap-adjacent xglCdReadCancel:41!",
