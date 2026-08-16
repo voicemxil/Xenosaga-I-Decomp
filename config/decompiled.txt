@@ -2508,3 +2508,4 @@ _sceRpcFreePacket = 0x002030E0, 0x1C; // sceSif.c
 sceSifSendCmd = 0x00202C18, 0x3C; // sceSif.c
 sceSifRpcLoop = 0x00203D90, 0x40; // sceSif.c
 Check_EnemyFound = 0x002D0B68, 0xA4; // Check.c
+MenuShopEx2 = 0x002A79E8, 0x194; // Menu.c

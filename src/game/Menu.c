@@ -1169,34 +1169,21 @@ extern void *D_0036D7D8[];
 extern int MenuScenarioNoGet(void);
 
 /* Return a character's display-name pointer, special-cased for Shion pre-scenario-108 */
-/* TODO: near-miss (8 diffs). The movn the old note blamed is gone -- the
- * early-return chain plus the LAUNDER_V below give the retail branch shape,
- * and dropping the scenario temp removes its pin. Two things remain, and
- * both resist the reordering passes:
- *   - the prologue order [li 5, sd s0, sd ra, lui, addu, lw] comes out as
- *     [sd s0, li 5, lui, addu, lw, sd ra]. --rotate-seq
- *     MenuCharNameGet:2:2,MenuCharNameGet:4:4 fixes the first four and gets
- *     to 6 diffs, but the last step (rotating `sd ra` back in front of the
- *     lui/addu/lw triple) never fires: that window is not contiguous
- *     instruction lines, so rotate skips it. Not worth two config sites for
- *     a function that still would not match.
- *   - the scenario compare writes its result to $v1; the retail build
- *     overwrites $v0 (the scenario itself, dead after). It is a compiler
- *     temp, so there is nothing to pin, and a whole-function 2-3 swap would
- *     break the `li v1,5` and the return value. */
+/* The single-exit `if (nId == 5 && scenario < 108)` shape is what puts the
+ * name pointer in $s0 and duplicates the `move v0,s0` into both delay slots.
+ * gcc annuls the nId!=5 branch (it filled the slot by copying the merge
+ * point's insn, which is safe to run on fall-through); the original emits
+ * the plain form -- hence --branch-unlikely MenuCharNameGet:0. */
 void *MenuCharNameGet(int nId)
 {
     void *p;
 
     p = D_0036D760[nId];
-    if (nId != 5) {
-        return p;
+    if (nId == 5) {
+        if (MenuScenarioNoGet() < 108) {
+            p = D_0036D7D8[0];
+        }
     }
-    if (MenuScenarioNoGet() >= 108) {
-        return p;
-    }
-    p = D_0036D7D8[0];
-    LAUNDER_V(p);
     return p;
 }
 
@@ -3695,7 +3682,9 @@ typedef struct {
     unsigned char nPage;       /* 0x00: page id the help bar keys off */
     char pad01[0x10];
     unsigned char nSel;        /* 0x11: hint-slot cursor */
-    char pad12[0x48 - 0x12];
+    char pad12[0x20 - 0x12];
+    int nCur;                  /* 0x20: sort-list cursor row */
+    char pad24[0x48 - 0x24];
     signed char b48;           /* 0x48 */
 } SHOPWORK;
 typedef struct {
@@ -4435,6 +4424,52 @@ void MenuAgwsCameraSet(void)
     *(CAMVEC *)(pCam + 0xD0) = *(CAMVEC *)&keep;
     *(int *)(pCam + 4) = 1;
     *(CAMVEC *)(pCam + 0xA0) = *((CAMVEC *)&keep + 1);
+}
+
+/* --- AGWS camera glide --- */
+extern CAMKEEP D_004C71B0;
+extern unsigned char D_0036C183[];
+extern float D_004D7E58;
+
+/* Ease studio camera 0's position toward one of two stored AGWS view
+   vectors; a handful of map ids keep the first vector, everything else
+   uses the second */
+/* TODO: near-miss (2 words short, 50 vs 52). Everything is reproduced --
+   the switch decision tree (test 0x22, then 0x10/0xC2 either side of
+   0x23), the ld/sd block copy, the single $gp rate load, the three
+   pCam floats held in $f1/$f2/$f3 -- except that retail keeps THREE
+   copies of &keep[nIdx] alive (addu v1,sp,v0 / addu a0,v0,sp / move
+   v0,a0) and reads offsets 0/4/8 off a different one each. That is a
+   CSE-copy/reload artifact: gcc 2.96 coalesces them into one base.
+   Swept: pointer local, pVec[nIdx*4+k] index form, per-statement
+   (char*)pVec + nIdx*16 + k recomputation -- all give the same single
+   base.  Note D_0036C183 must be declared as an incomplete array or it
+   is reached off $gp instead of lui/%lo. */
+void MenuAgwsCameraMove(void)
+{
+    CAMKEEP keep;
+    float *pCam;
+    float *pVec;
+    float rate;
+    int nIdx;
+
+    pCam = (float *)(xglStudioGetCamera2_2(0) + 0xD0);
+    keep = D_004C71B0;
+    rate = D_004D7E58;
+    nIdx = 0;
+    switch (D_0036C183[0]) {
+    case 0x10:
+    case 0x22:
+    case 0xC2:
+        break;
+    default:
+        nIdx = 1;
+        break;
+    }
+    pVec = (float *)((char *)&keep + nIdx * 16);
+    pCam[0] = pCam[0] + (pVec[0] - pCam[0]) * rate;
+    pCam[1] = pCam[1] + (pVec[1] - pCam[1]) * rate;
+    pCam[2] = pCam[2] + (pVec[2] - pCam[2]) * rate;
 }
 
 /* --- AGWS parameter window set --- */
@@ -6819,4 +6854,125 @@ char *MenuFileNameGet(short nId, int nType)
     }
     strcat(fname, pExt);
     return fname;
+}
+
+/* ================= Wave 7: Shop screens ================= */
+
+/* The shop's global work block. The AGWS trade-in list is four unsigned
+   short ids at 0x168; a zero entry is an empty slot. */
+typedef struct {
+    char pad000[0x168];
+    unsigned short agws[4];    /* 0x168: AGWS units offered for trade-in */
+} SHOPDATA;
+
+extern SHOPDATA ShopData;
+extern int PartyTakeAgwsCheck(int nId);
+
+/* Drop any AGWS the party already owns from the trade-in list, then close
+   the holes so the remaining entries sit at the front. */
+void MenuShopAgwsListChange(void)
+{
+    SHOPDATA *w;
+    unsigned short *p;
+    int i;
+    int j;
+
+    w = &ShopData;
+    p = w->agws;
+    for (i = 3; i >= 0; i--) {
+        if (*p != 0) {
+            if (PartyTakeAgwsCheck(*p) != 0) {
+                *p = 0;
+            }
+        }
+        p++;
+    }
+    for (i = 0; i < 3; i++) {
+        if (ShopData.agws[i] == 0) {
+            for (j = i + 1; j < 4; j++) {
+                if (ShopData.agws[j] != 0) {
+                    ShopData.agws[i] = ShopData.agws[j];
+                    ShopData.agws[j] = 0;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/* Shop item record (func_A1A3D8), note-text view: bit 8 of the flag word
+   says the item carries a special note, and 0x1A names the note string */
+typedef struct {
+    char pad00[6];
+    unsigned short hFlag;      /* 0x06 */
+    char pad08[0x1A - 8];
+    short hNote;               /* 0x1A */
+} SHOPITEMREC;
+
+/* The shop's small note window: a framed one-line message parked off the
+   left edge that slides in whenever the item under the cursor has a note */
+typedef struct {
+    char pad000[4];
+    int nColor;                /* 0x004 */
+    WINDOWDX win;              /* 0x008 */
+    EMESSAGE msg;              /* 0x19C */
+} MENU_SHOP_EX2_WORK;
+
+extern char D_004DB230[];
+extern void *func_A2C738(int nId);
+
+void MenuShopEx2(MENU_TSK *pTask, MENU_SHOP_EX2_WORK *w)
+{
+    SHOPWORK *p;
+    SHOPITEMREC *rec;
+    short nTarget;
+    int nSel;
+    short nNote;
+
+    switch (pTask->nState) {
+    case 0:
+        w->nColor = 0x00FFFF00;
+        WindowDXSet(&w->win);
+        w->win.nX = -182;
+        w->win.nColor = w->nColor;
+        w->win.nY = 256;
+        w->win.nW = 166;
+        w->win.nH = 30;
+        w->win.pTitle = D_004DB230;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        eMessageSet(&w->msg, 0);
+        w->msg.nFont = 32;
+        w->msg.nColor = w->nColor + 2;
+        break;
+    case 2:
+        nTarget = -182;
+        p = MenuShopWork;
+        if (p->nPage == 48) {
+            if (p->nSel == 4) {
+                nSel = p->nCur;
+                if (nSel >= 0) {
+                    rec = (SHOPITEMREC *)func_A1A3D8((short)MenuSortGet(0, nSel));
+                    if (rec != 0) {
+                        if (rec->hFlag & 0x100) {
+                            nNote = rec->hNote;
+                            if (nNote != 0) {
+                                w->msg.pText = *(char **)func_A2C738(nNote);
+                                nTarget = 16;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        MoveSlide(&w->win.nX, &nTarget, 3.0f);
+        WindowDXMain(&w->win);
+        w->msg.nX = w->win.nX + 3;
+        w->msg.nY = w->win.nY + 3;
+        eMessageMain(&w->msg);
+        break;
+    default:
+        return;
+    }
 }
