@@ -66,7 +66,9 @@ next:
  * addresses land in the mirror-image pair of $a0/$a1, and `addiu a0,s2,4`
  * schedules one slot late. All 12 load/store orderings swept (floor 6),
  * plus inlining either load (10/12) and an `int next = index+1` local
- * (34). GameResourceRealloc below has the identical residue. */
+ * (34). Also swept: three placements of the rounding among the two field
+ * reads, and LAUNDER/LAUNDER_V/LAUNDER2 fences on nSize and index (33-35).
+ * GameResourceRealloc below has the identical residue. */
 unsigned int GameResourceAlloc(unsigned int nSize)
 {
     int index = resource_get_free();
