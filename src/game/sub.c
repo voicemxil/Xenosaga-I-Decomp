@@ -432,14 +432,18 @@ typedef struct {
 
 typedef struct {
     unsigned char bFlags;       /* 0x00 */
-    char pad01[0x0F];
+    char pad01;
+    unsigned short wId;         /* 0x02 */
+    char pad04[0x0C];
     float fCenterX;             /* 0x10 */
     float fCenterY;             /* 0x14 */
     char pad18[0x18];
     float fBaseX;               /* 0x30 */
     float fBaseY;               /* 0x34 */
     float fBaseZ;               /* 0x38 */
-    char pad3C[0x44];
+    char pad3C[0x18];
+    ETNODE *pJouto;             /* 0x54 */
+    char pad58[0x28];
 } ETSYSTEM;
 
 extern ETSYSTEM *EtherTreeSystem;
@@ -512,6 +516,62 @@ void subEtherTreeRightMain(ETRIGHT *p)
             }
         }
     }
+}
+
+extern int MenuEtherWhoCheck(int nIndex);
+extern int func_A19578(unsigned short wId, int nIndex);
+extern void sub2JoutoYGet(void *data, float *result);
+
+/* Lay out the "jouto" (transfer) grid: every ether whose owner is not the
+   tree's own character and which passes func_A19578 gets a slot in a
+   four-wide grid, 57 pixels across and 72 down. */
+void subJoutoPosSet(void)
+{
+    float fY;
+    ETNODE *root;
+    ETNODE *p;
+    float *pBase;
+    unsigned short wId;
+    float fX0;
+    float fDX;
+    float fDY;
+    float fRow;
+    unsigned char nFlags;
+    int n;
+    int i;
+
+    /* Three separate float locals, not three literals: cse turns the
+       second 57.0 into `mov.s f22,f20` and the 72.0 step into a copy of
+       the temp that added it to fY. Spelling the constants inline instead
+       gives one register each and the function comes out three words
+       short. */
+    fX0 = 57.0f;
+    fDX = 57.0f;
+    n = 0;
+    /* Held member address again -- the base group survives both calls. */
+    pBase = &EtherTreeSystem->fBaseX;
+    wId = EtherTreeSystem->wId;
+    root = EtherTreeObjectWorkGet();
+    EtherTreeSystem->pJouto = root;
+    p = root;
+    sub2JoutoYGet(EtherTreeObject, &fY);
+    fY = fY + 72.0f;
+    fDY = 72.0f;
+    for (i = 1; i < 80; i++) {
+        if (wId != (unsigned short)MenuEtherWhoCheck(i) &&
+            func_A19578(wId, i) != 0) {
+            nFlags = p->bFlags;
+            fRow = (float)(n / 4) * fDY;
+            p->bFlags = nFlags | 8;
+            p->nId = i;
+            p->pos.x = fX0 + (float)(n % 4) * fDX;
+            p->pos.y = fY + fRow;
+            p->pos.z = pBase[2];
+            n++;
+            p++;
+        }
+    }
+    root->nChildren = n;
 }
 
 /* --- Ether tree "line2" (the animated connector to the target node) --- */
