@@ -1094,20 +1094,14 @@ void nmlModelSetFadeIn(int time, int n20)
 
 /* --- Active (script) fades --- */
 
-/* TODO: both nmlModelSetActive* below are near-misses and are NOT
- * registered. The logic is verified: every non-nop word matches, the
- * fade_set argument slots are confirmed against the disassembly
- * (nUnk18=0, nTime, nUnk1C, nUnk20=1, nUnk2C=third arg) and the colour
- * scale is 1/128 (lui at,0x3c00 -> mtc1, not a .lit4 load).
- * What is left is padding only, in the three unsigned-int-to-float
- * conversion blocks: the original leaves the `b` delay slot after each
- * `cvt.s.w` EMPTY and adds a trailing pad nop, where gcc fills the slot
- * with the cvt.s.w. FadeOut is short by 16 bytes (4 insns), FadeIn by 24
- * (6 insns), and the shortfall is entirely those slots. This is the same
- * ee-as COP1 stall-pad class already handled in this file for
- * nmlModelSetFadeIn / nmlModelFogPara -- try --unfill-gcc-slots and/or
- * --mtc1-nop nmlModelSetActiveFadeOut:N,nmlModelSetActiveFadeIn:N before
- * touching the C, which is very unlikely to be wrong.
+/* Both nmlModelSetActive* below MATCH. The only difference from stock
+ * gcc output was padding in the three unsigned-int-to-float conversion
+ * blocks: gas fills the `b` delay slot after each `cvt.s.w`, where the
+ * original leaves it empty. Pinning a nop into those three slots per
+ * function (--pin-slot-nop nmlModelSetActiveFadeOut:0,1,2 and the same
+ * for FadeIn, in FILE_FIX_FLAGS) is the whole fix: the trailing pad nop
+ * that also differed is emitted by gcc's own `.p2align 3,,7` after the
+ * branch, so it appears by itself once the slot holds a nop.
  * Note the unsigned->float dance (bltz / andi 1 / srl 1 / or / add.s) is
  * gcc's UNSIGNED conversion: the colour argument must stay `unsigned
  * int` or the whole block collapses to a plain cvt.s.w. */
