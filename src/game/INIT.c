@@ -998,3 +998,13 @@ void InitCfSystem(void)
     }
     xglRenderCopyDisp2Draw();
 }
+
+/* The six remaining Init* functions in this game -- InitTLB,
+ * InitTLB32MB, InitTLBFunctions, InitAlarm, InitThread and InitExecPS2
+ * -- are Sony libkernel, NOT game code, and cannot be built here. Two
+ * independent tells: their prologues save callee-saved registers on a
+ * 16-byte stride (2.9-ee) rather than 8 (2.96), and InitTLB ends in
+ * `jal InitTLB32MB` + return where 2.96 turns the same C into a
+ * sibling call (`j InitTLB32MB`). They need the SDK compiler, which
+ * configure.py selects only for files named sce*; see the report.
+ */
