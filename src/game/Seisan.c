@@ -49,15 +49,33 @@ int SeisanNumberCount(int nCur, int nTarget, int nStep, int *pBusy)
 }
 
 typedef struct SEISAN_ITEM {
-    int field_00;
+    int field_00;                   /* 0x00 */
     int nPrice;                     /* 0x04 */
+    char pad_08[4];
+    int field_0C;                   /* 0x0C */
+    int field_10;                   /* 0x10 */
+    int field_14;                   /* 0x14 */
 } SEISAN_ITEM;
 
+/* One party member's before/after snapshot. */
+typedef struct SEISAN_CNREC {
+    int field_00;
+    int field_04;
+    int field_08;
+    int field_0C;
+    int field_10;
+    int field_14;
+    int field_18;
+    int field_1C;
+} SEISAN_CNREC;                     /* 0x20 */
+
 typedef struct SEISAN_CN {
-    char pad_00[0x70];
+    int  field_00;                  /* 0x00 */
+    SEISAN_CNREC aRec[3];           /* 0x04 */
+    long field_68;                  /* 0x68 */
     int  aPrice[12];                /* 0x70 */
     char pad_A0[0x10];
-} SEISAN_CN;
+} SEISAN_CN;                        /* 0xB0 */
 
 extern SEISAN_CN SeisanCN;
 extern SEISAN_ITEM *func_A19210(int nId);
@@ -208,4 +226,78 @@ void SeisanFadeMain(void)
         p->aElem[1].c[3] = nAlpha;
     }
     endPrintExtFunc(0x02FFFFFF, 3, (int)&p->field_04);
+}
+
+/* The battle-result record the tally counts down from. */
+typedef struct SEISAN_RESULT {
+    int nId;                        /* 0x00 */
+    int field_04;                   /* 0x04 */
+    int field_08;                   /* 0x08 */
+    int field_0C;                   /* 0x0C */
+    int field_10;                   /* 0x10 */
+    unsigned char field_14;         /* 0x14 */
+    char pad_15[3];
+    unsigned short field_18;        /* 0x18 */
+    char pad_1A[2];
+    unsigned short field_1C;        /* 0x1C */
+    char pad_1E[0x1E];
+} SEISAN_RESULT;                    /* 0x3C */
+
+typedef struct SEISAN_HERO {
+    short field_00;                 /* 0x00 */
+    short field_02;                 /* 0x02 */
+    char  pad_04[0x10];
+    signed char field_14;           /* 0x14 */
+    char  pad_15[3];
+} SEISAN_HERO;
+
+extern SEISAN_RESULT *SeisanResult;
+extern SEISAN_HERO *func_A191C0(int nId);
+
+/* Snapshot the three party members' pre-battle stats and roll the award
+ * back out of their live records, so the tally can count it up again.
+ *
+ * TODO near-miss (2 instructions short of 98).  The original's gcc runs
+ * PRE on the `SeisanResult` global-pointer load: a copy is inserted in
+ * the loop preheader so the loop-top `SeisanResult[i].nId` reuses the
+ * value the previous iteration's post-call reload left in $a2.  gcc here
+ * loads it fresh at the loop top instead, and the record giv comes out
+ * based at the record start rather than record+28.  Hoisting the pointer
+ * into a local instead costs a callee-saved register and a bigger frame,
+ * which is further away. */
+void SeisanCountInit2(void)
+{
+    SEISAN_CNREC *r;
+    SEISAN_HERO *h;
+    SEISAN_ITEM *item;
+    int nId;
+    int i;
+
+    SeisanCN.field_00 = 0;
+    r = SeisanCN.aRec;
+    for (i = 0; i < 3; i++) {
+        nId = SeisanResult[i].nId;
+        if ((unsigned int)(nId - 1) < 12) {
+            h = func_A191C0(nId);
+            item = func_A19210(nId);
+            r->field_00 = h->field_14;
+            r->field_04 = h->field_00;
+            r->field_08 = h->field_02;
+            r->field_0C = item->nPrice;
+            r->field_10 = item->field_00;
+            r->field_14 = item->field_0C;
+            r->field_18 = item->field_10;
+            r->field_1C = item->field_14;
+            item->field_0C -= SeisanResult[i].field_08;
+            h->field_00 -= SeisanResult[i].field_18;
+            h->field_02 -= SeisanResult[i].field_1C;
+            item->field_10 -= SeisanResult[i].field_0C;
+            item->field_14 -= SeisanResult[i].field_10;
+            h->field_14 -= SeisanResult[i].field_14;
+            item->field_00 -= SeisanResult[i].field_04;
+            item->nPrice = SeisanCN.aPrice[nId - 1];
+        }
+        r++;
+    }
+    SeisanCN.field_68 = 0;
 }
