@@ -61,6 +61,12 @@ typedef struct {
     int nUnk230;               /* 0x230 */
     u8 pad234[0x240 - 0x234];
     TIWORD quad240;             /* 0x240 */
+    u8 pad250[0x29F40 - 0x250];
+    u8 nCfEventLock;            /* 0x29F40 */
+    u8 pad29F41[0x29F50 - 0x29F41];
+    GAME_QUAD quad29F50;        /* 0x29F50 */
+    u8 pad29F60_[0x29F60 - 0x29F60];
+    unsigned short nUnk29F60;   /* 0x29F60 */
 } GAME_LOOP_STATE;
 
 typedef struct {
@@ -769,4 +775,77 @@ void DrawBack(int nAlpha)
     BackEnv[8] = ((GAME_U64)nAlpha << 32) | 100;
     FlushCache(0);
     sceVif1PkRef(xglPacketGetCurrent(), BackEnv, 10, 0, 0, 0);
+}
+
+typedef struct {
+    u8 pad00[0x28];             /* 0x00 */
+    unsigned short nButton;     /* 0x28 */
+    unsigned short nPress;      /* 0x2A */
+    u8 pad2C[0x2E - 0x2C];      /* 0x2C */
+    unsigned short nDebugPress; /* 0x2E */
+    u8 pad30[0x68 - 0x30];      /* 0x30 */
+} GAME_PADDATA;
+
+extern GAME_PADDATA PadData[2];
+extern void TWSYS_update(void);
+extern void JTHREAD_cntl(void);
+extern void PLAY_ctrl(void);
+extern void TCAMERA_update(void);
+extern void ACT_update(void);
+extern void MAP_updateUnit(void);
+
+/* Event-scene game mode: L1+L2+SELECT aborts the scene. */
+int GameModeCfEvent(void)
+{
+    int nFlags = GameLoopState.nFlags & ~1;
+
+    GameLoopState.nFlags = nFlags;
+    if (GameLoopState.nCfEventLock == 0 && (PadData[0].nPress & 0x800) &&
+        (PadData[0].nButton & 0x10C) == 0x10C) {
+        GameLoopState.nFlags = nFlags | 0x80000000;
+        return 1;
+    }
+    TWSYS_update();
+    JTHREAD_cntl();
+    PLAY_ctrl();
+    TCAMERA_update();
+    ACT_update();
+    MAP_updateUnit();
+    return 0;
+}
+
+extern void ACT_pauseUpdate(void);
+extern void GameDebugMenu(void);
+
+/* NEAR MISS -- 8 diffs, SCHEDULING (identical multiset). gas's reorder
+   pass hoists the `lw` of nFlags above the quadword-zero store's address
+   macro, and sinks the `and` below the nSaveA load; the original keeps
+   both where gcc emitted them. Swept: all six orderings of the three
+   guarded statements, `&=` vs explicit read-modify-write, a staged int
+   local for the flags, and plain/volatile GAME_QUAD* block-local
+   pointers for the quad store (the pointer forms cost 38 diffs, LENGTH).
+   The gcc -S emission order already matches the original -- the residue
+   is entirely gas, so a source lever cannot reach it; it wants
+   --rotate/--rotate-seq if it is worth a flag later.
+
+   Debug-menu game mode: SELECT re-arms the scene skip, then the debug
+   menu runs on top of a paused actor update. */
+int GameModeDebugMenu(void)
+{
+    if (PadData[0].nDebugPress & 0x100) {
+        GameLoopState.quad29F50 = 0;
+        GameLoopState.nFlags &= ~1;
+        GameLoopState.nSaveA = GameLoopState.nUnk29F60;
+    }
+    TWSYS_update();
+    ACT_pauseUpdate();
+    GameDebugMenu();
+    if (((int *)xglStudioGetCamera2(0))[1] == 4) {
+        void (*pFunc)(void) = (void (*)(void))GameLoopState.nUnk28;
+
+        if (pFunc != 0) {
+            pFunc();
+        }
+    }
+    return 0;
 }
