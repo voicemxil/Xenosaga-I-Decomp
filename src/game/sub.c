@@ -108,12 +108,18 @@ int subSeisanHissatuCheck01(void)
 
 /* 8-byte aligned so a whole-node position copy uses ld/sd rather than the
    unaligned ldl/ldr/sdl/sdr sequence. */
-typedef struct {
+struct EVECS {
     float x;
     float y;
     float z;
     float w;
-} __attribute__((aligned(8))) EVEC;
+};
+typedef struct EVECS __attribute__((aligned(8))) EVEC;
+/* Same struct tag, natural 4-byte alignment: a copy through EVEC4 uses the
+   unaligned ldl/ldr idiom, and because it is a VARIANT of the same record
+   type rather than a second identical struct, it shares gcc's alias set --
+   a distinct type here lets gcc hoist the read above the store. */
+typedef struct EVECS EVEC4;
 
 typedef struct ETNODE {
     unsigned short nId;          /* 0x00 */
@@ -284,4 +290,100 @@ void subMoveSlide(float *pCur, float *pDst, float fRate)
             }
         }
     }
+}
+
+/* --- Ether tree right-hand info panel --- */
+
+typedef struct {
+    unsigned char bFlags;       /* 0x00 */
+    unsigned char nMode;        /* 0x01 */
+    char pad02[0x2E];
+    int nWidth;                 /* 0x30 */
+} ETRIGHT;
+
+typedef struct {
+    unsigned char bFlags;       /* 0x00 */
+    char pad01[0x7F];
+} ETSYSTEM;
+
+extern ETSYSTEM *EtherTreeSystem;
+
+/* Slide the right panel open (mode 1) and shut (mode 3) eight pixels a
+   frame; mode 2 is the held-open state that mode 1 falls through into. */
+void subEtherTreeRightMain(ETRIGHT *p)
+{
+    unsigned char bFlags;
+    int n;
+
+    if ((unsigned char)(EtherTreeSystem->bFlags & 1) != 0) {
+        bFlags = p->bFlags;
+        if ((unsigned char)(bFlags & 1) != 0) {
+            switch (p->nMode) {
+            case 1:
+                n = p->nWidth + 8;
+                p->nWidth = n;
+                if (n < 48) {
+                    break;
+                }
+                p->nMode = 2;
+                /* fallthrough */
+            case 2:
+                p->nWidth = 48;
+                break;
+            case 3:
+                n = p->nWidth - 8;
+                p->nWidth = n;
+                if (n > 0) {
+                    break;
+                }
+                p->nWidth = 0;
+                p->bFlags = bFlags & 0xFE;
+                p->nMode = 0;
+                break;
+            }
+        }
+    }
+}
+
+/* --- Ether tree "line2" (the animated connector to the target node) --- */
+
+/* The base[] copy is 4-aligned where position[] is 8-aligned; that is what
+   picks ldl/ldr for base = position but plain ld/sd for position = node. */
+typedef struct {
+    unsigned char bFlags;       /* 0x00 */
+    unsigned char nMode;        /* 0x01 */
+    unsigned char nState;       /* 0x02 */
+    unsigned char nType;        /* 0x03 */
+    int nSelect;                /* 0x04 */
+    char pad08[0x08];
+    EVEC4 base[3];              /* 0x10 */
+    EVEC position[3];           /* 0x40 */
+    ETNODE *pTarget;            /* 0x70 */
+    char pad74[0xCC];
+} ETLINE2;
+
+/* Grow the connector toward the target's first child; 1 once it arrives. */
+int subLine2_OpenType_0(ETLINE2 *p)
+{
+    ETNODE *node = p->pTarget;
+    float x;
+    float xEnd;
+
+    switch (p->nState) {
+    case 0:
+        p->position[0] = node->pos;
+        p->base[0] = *(EVEC4 *)&p->position[0];
+        p->nState = 1;
+        /* fallthrough */
+    case 1:
+        x = p->position[0].x + 4.0f;
+        p->position[0].x = x;
+        xEnd = node->pChild[0]->pos.x;
+        if (x < xEnd) {
+            return 0;
+        }
+        p->position[0].x = xEnd;
+        return 1;
+    }
+    return 0;
 }

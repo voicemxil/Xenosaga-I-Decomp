@@ -2641,3 +2641,4 @@ PowerOffCB = 0x0020CEA0, 0x64; // sceCd.c
 sceCdPOffCallback = 0x0020CDF0, 0x6C; // sceCd.c
 _sceCdSetTimeout = 0x0020E1C8, 0xD4; // sceCd.c
 sceCdReadClock = 0x0020E410, 0xF8; // sceCd.c
+subLine2_OpenType_0 = 0x002BB5E0, 0xA8; // sub.c
