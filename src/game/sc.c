@@ -559,9 +559,12 @@ void scDestroyScript2(int slot, int a1) {
 typedef struct {
     unsigned short flags;      /* 0x00 */
     char pad02[6];
-    int cmdBuf[15];            /* 0x08 */
+    int cmdBuf[11];            /* 0x08 */
+    int field34;               /* 0x34 */
+    char pad38[0x44 - 0x38];
     short eftNo;               /* 0x44 */
-    char pad46[14];
+    short field46;             /* 0x46 */
+    char pad48[0x54 - 0x48];
     short field54;             /* 0x54 */
     short field56;             /* 0x56 */
     char pad58[2];
@@ -1006,5 +1009,42 @@ int scEFFECT2Script(SCOBJ *o)
                                         D_0041E7D0[_nowScript].pTable, -1);
         sefCreateBattleActorTbl(t->eftNo);
     }
+    return 1;
+}
+
+extern int sefCreateScheduler2(void *pAdr, void *a, void *b, void *pTbl, int nDelay, int e);
+
+/* EFFECT3: two script addresses. Outside an event the first is scheduled
+ * immediately with the task's own slot/frame fields temporarily cleared;
+ * the second is always scheduled, delayed by the operand times the current
+ * event index. */
+int scEFFECT3Script(SCOBJ *o)
+{
+    SCTASK *t = (SCTASK *)o;
+    int nNum = scGetNumScript(o);
+    void *pAdr1 = scGetAdrImmScript(o);
+    void *pAdr2 = scGetAdrImmScript(o);
+    if (_nowEvent == 0) {
+        int nSave34 = t->field34;
+        short nSave46 = t->field46;
+        int nSch;
+        t->field34 = 0;
+        t->field46 = 0;
+        nSch = sefCreateScheduler(pAdr1, (char *)o + 0x30, (char *)o + 0x20,
+                                  _scriptWork[_nowScript].pTable, -1);
+        t->field34 = nSave34;
+        t->field46 = nSave46;
+        if (nSch >= 0) {
+            scSetAmbient((SC_AMB_OBJ *)o);
+            scFreezeCamera(t->eftNo);
+        }
+    }
+    /* Both scheduler calls reach the slot table through _scriptWork rather
+       than the D_0041E7D0 alias, so the +0x400 header offset stays in the
+       load displacement and the two %hi halves share one lui in $s7. */
+    t->field56 = sefCreateScheduler2(pAdr2, (char *)o + 0x30, (char *)o + 0x20,
+                                     _scriptWork[_nowScript].pTable,
+                                     nNum * _nowEvent, -1);
+    sefCreateBattleActorTbl(t->eftNo);
     return 1;
 }
