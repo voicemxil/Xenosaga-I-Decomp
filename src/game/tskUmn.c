@@ -48,7 +48,8 @@ typedef struct {
             signed char nHi;            /* 0x51 */
         } ex;
     } u;
-    char pad54[0x5C - 0x54];
+    int nListNum;                       /* 0x54: rows in the current list */
+    char pad58[0x5C - 0x58];
     signed char nMailSel;               /* 0x5C: mail hint-slot cursor */
     char pad5D[1];
     signed char nDataBaseOpen;          /* 0x5E: pop-up may be opened */
@@ -756,6 +757,8 @@ typedef struct {
             unsigned short h;           /* 0x2A */
         } b;
     } trig;
+    char pad30[0x34 - 0x30];            /* 0x30 */
+    unsigned short nRepeat;             /* 0x34: auto-repeat trigger */
 } PADDATA;
 
 extern PADDATA PadData;
@@ -1036,5 +1039,178 @@ void tskUmnPluginExWin(TSK_TASK *pTask, UMN_EXWIN *w)
         }
         break;
     }
+    }
+}
+
+/* --- Simulation screen: the scrolling script list (WindowSP) --- */
+
+/* One selectable row as WindowSP walks them: twelve bytes, terminated by
+   a null text pointer. */
+typedef struct {
+    char *pText;                        /* 0x00 */
+    int nParam;                         /* 0x04 */
+    char bGray;                         /* 0x08 */
+    char pad09[3];                      /* 0x09 */
+} SPROW;
+
+/* The WindowSP object itself (same header the equip menu builds in
+   Char.c: 0x0C/0x0E size, 0x10 title, 0x14/0x15 style, 0x1C rows). */
+typedef struct {
+    unsigned char nState;               /* 0x00 */
+    unsigned char nRows;                /* 0x01 */
+    char pad02[2];                      /* 0x02 */
+    short nX;                           /* 0x04 */
+    short nY;                           /* 0x06 */
+    int nColor;                         /* 0x08 */
+    short nW;                           /* 0x0C */
+    short nH;                           /* 0x0E */
+    char *pTitle;                       /* 0x10 */
+    char pad14_0[0];
+    unsigned char nStyle;               /* 0x14 */
+    unsigned char nFont;                /* 0x15 */
+    char pad16[0x1C - 0x16];            /* 0x16 */
+    SPROW *pRows;                       /* 0x1C */
+} SPWIN;
+
+typedef struct {
+    unsigned char nState;               /* 0x00 */
+    unsigned char bReady;               /* 0x01 */
+    char pad02[2];                      /* 0x02 */
+    short nX;                           /* 0x04 */
+    short nY;                           /* 0x06 */
+    int nColor;                         /* 0x08 */
+    SPWIN sp;                           /* 0x0C */
+    char pad2C[0x1744 - 0x2C];          /* 0x2C */
+    SPROW row[1];                       /* 0x1744 */
+} UMN_LIST;
+
+typedef struct {
+    char pad00[0x10];                   /* 0x00 */
+    int nFlags;                         /* 0x10 */
+} UMN_GLS;
+
+extern UMN_GLS GameLoopState;
+extern char *ListText[];
+extern void WindowSPSet(SPWIN *pWin);
+extern void WindowSPMain(SPWIN *pWin);
+extern int WindowSPSelect(SPWIN *pWin, int nRepeat);
+
+/* TODO: near-miss (183 of 184 words; the one real divergence is a
+ * register-allocation tie-break).  gcc parks the literal 20 of the
+ * `w->nState != 20' test in a CALLEE-SAVED register ($s2) across the
+ * MoveSlide call and reuses it for the second `w->nState == 20' test
+ * below; the original rematerialises the constant with a second `li'
+ * and never touches $s2 at all.  That one extra saved register costs
+ * `sd $s2'/`ld $s2', saves one `li', and moves every jump-table target
+ * by a word, which is where the missing `.p2align' nops go.  Its knock-on
+ * is the only other diff: $v0/$v1 swap on the 528/0xFFFF00 constants in
+ * the init block, which reschedules the three header stores.
+ *
+ * Swept without moving it: all six source orders of the nX/nY/nColor
+ * stores (the scheduler normalises them); the second test written as
+ * `!= 20' with the arms swapped, as `nTarget == 32', as `w->nState - 20
+ * == 0', and as an early-exit `if (w->nX != nTarget) break;'; nTarget
+ * block-scoped, function-scoped and as a one-element array; the first
+ * test as an if/else that assigns nTarget on both arms (182 words);
+ * a local copy of the state byte for the second test; and LAUNDER on
+ * both the state byte and on a `n20' temporary -- laundering the SECOND
+ * use gets the length to 185 with 25 diffs but only turns the reuse into
+ * `move $v0,$s2' instead of `li $v0,20', and laundering the FIRST drops
+ * to 182.  A permuter run on the case-20/40 body is the next thing to
+ * try.
+ *
+ * Simulation screen: the script list the player scrolls.
+ *
+ * pTask state 0 fills the row table from ListText[] -- greying every row
+ * out unless the "environmental simulator unlocked" bit is set in
+ * GameLoopState -- appends a blank row and the null terminator, then
+ * hands the table to WindowSPSet.
+ *
+ * The window's own nState then runs 0 -> 10 (wait for page 17) -> 20
+ * (slide in) -> 30 (accept input) -> 40 (slide back out), with 20 and 40
+ * sharing one body that picks its slide target from the state. */
+void tskUmnSimulationList(TSK_TASK *pTask, UMN_LIST *w)
+{
+    short nTarget;
+    int i;
+
+    if (UmnWork.nScene != 3) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nX = 528;
+        w->nY = 112;
+        w->nColor = 0xFFFF00;
+        for (i = 0; i < UmnWork.nListNum; i++) {
+            w->row[i].pText = ListText[i];
+            if (GameLoopState.nFlags & 0x400000) {
+                w->row[i].bGray = 0;
+            } else {
+                w->row[i].bGray = 1;
+            }
+            w->row[i].nParam = 0;
+        }
+        w->row[i].pText = "";
+        w->row[i].nParam = 0;
+        w->row[i].bGray = 0;
+        w->row[i + 1].pText = 0;
+        w->sp.nX = w->nX;
+        w->sp.nY = w->nY;
+        w->sp.nColor = w->nColor;
+        w->sp.nRows = 3;
+        w->sp.pTitle = "Information";
+        w->sp.nStyle = 1;
+        w->sp.nFont = 7;
+        w->sp.nW = 422;
+        w->sp.nH = 174;
+        w->sp.pRows = w->row;
+        WindowSPSet(&w->sp);
+        w->sp.nState = 17;
+        w->bReady = 0;
+        w->nState = 0;
+        break;
+    case 2:
+        switch (w->nState) {
+        case 0:
+            w->bReady = 0;
+            w->nState = 10;
+            /* fallthrough */
+        case 10:
+            if (UmnWork.nPage == 17) {
+                w->bReady = 1;
+                w->nState = 20;
+            }
+            break;
+        case 20:
+        case 40:
+            nTarget = 32;
+            if (w->nState != 20) {
+                nTarget = 528;
+            }
+            MoveSlide(&w->nX, &nTarget, 3.0f);
+            if (w->nX == nTarget) {
+                if (w->nState == 20) {
+                    w->nState = 30;
+                } else {
+                    w->nState = 0;
+                }
+            }
+            break;
+        case 30:
+            UmnWork.u.nSimulationScript =
+                WindowSPSelect(&w->sp, PadData.nRepeat);
+            if (UmnWork.nPage != 17) {
+                w->nState = 40;
+            }
+            break;
+        }
+        break;
+    }
+    if (w->bReady) {
+        w->sp.nX = w->nX;
+        w->sp.nY = w->nY;
+        WindowSPMain(&w->sp);
     }
 }
