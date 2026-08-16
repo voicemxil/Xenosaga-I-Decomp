@@ -862,3 +862,59 @@ match in one edit.
 body's FIRST statement, duplicated into the preheader -- i.e. the source
 is `flag = 1; while (flag) { flag = 0; ... }`. Writing it as
 `do { flag = 0; ... } while (flag)` instead costs a word.
+
+---
+
+## From the TMENU run
+
+**The declared RETURN TYPE of a void-result call is a register-allocation
+lever.** `TMENU_init` ends with nine `EW_addComponent(...)` calls whose
+results are unused. Declared `void`, gcc put an unrelated
+read-modify-write value in `$v0`; declared `int`, it moved to `$v1` and
+the function matched outright. Nothing else changed -- same call, same
+arguments, no extra instruction. Nine diffs to zero. When a near-miss is
+pure `$v0`/`$v1` naming around a call, check the prototype's return type
+before reaching for a pin.
+
+**Advance a pointer local immediately after storing it to kill the CSE
+that suppresses a reload.** Retail's `TMENU_init` stores `t+0x198` into
+`t->ppLine144` and then *reloads* `t->ppLine144` for the block copy that
+follows. gcc will not reload while the stored value is still live in a
+register. Writing `t->ppLine144 = pLine; pLine += 3;` -- the same local
+advanced to its next role right after the store -- kills the copy and the
+reload comes back. 69 diffs to 39 in one edit. (The `pLine += 3` is also
+the real source of `t->pText154`, so this is not steering.)
+
+**A constant that must cross a call has to be a local defined before it.**
+`t->nItemMax = 16;` written after `MBUF_create` materialises the 16 in a
+caller-saved register after the call; retail has `li s0,16` in the
+prologue. `int nMax = 16;` declared with the other locals and stored
+after the call reproduces it -- gcc 2.96 does *not* constant-propagate a
+local whose live range spans a call. 78 diffs to 69.
+
+**A byte field read for both the test and the arithmetic wants the local
+INSIDE the arm.** `n = t->b141; if (n) off = n*24+12;` loads straight
+into the multiplicand and drops retail's `move v1,v0`. Written
+`if (t->b141) { n = t->b141; off = n*24+12; }` the field is CSE'd into
+one pseudo, the arm copies it, and the copy plus its `.p2align` pad come
+back -- worth two words of LENGTH, not just registers.
+
+**`li at,0xffff` + `addu` means the source really adds 65535.** A
+16-bit-wrapped state test spelled `(unsigned short)(v - 1) < 2` compiles
+to a single `addiu -1`; retail's two-instruction form only comes from
+writing the addend as `0xFFFF`. Symptom: one word short and a
+LENGTH triage on an otherwise perfect prologue.
+
+**Dual-width access to one struct member is a UNION, never two structs.**
+An EW component's word at +0x10 is written `sw` from one caller and `sh`
+from another, and +0x14 likewise with a `short` at +0x16 inside it.
+`union { int n; short h; struct { short h0, h2; } w; }` keeps every view
+in one alias set; two struct types would let gcc hoist a read above the
+store that fills it.
+
+**Check the struct's own ALIGNMENT when a `char pad[]` stops working.**
+Giving `MSGQUEUE` a leading `int *` raised its alignment to 4, so its
+size rounded 0x12 up to 0x14 and every member after it in the enclosing
+struct moved by four bytes -- diagnosed as IMMEDIATE diffs in three
+*already matching* functions. The pad after an embedded struct has to be
+computed from the ROUNDED end, not the last member's offset.
