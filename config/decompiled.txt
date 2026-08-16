@@ -2837,3 +2837,4 @@ SGsInitGifPacket = 0x002E0DC0, 0x1C; // sef.c
 SGsAddGifXYZ2 = 0x002E0EC8, 0x70; // sef.c
 culling_matrix = 0x0023E0E0, 0x1D8; // nmlModel.c
 SEQ_moveXZ = 0x0030A788, 0x2A4; // SEQ.c
+_sceSifLoadElfPart = 0x002081A8, 0x104; // sceSif.c

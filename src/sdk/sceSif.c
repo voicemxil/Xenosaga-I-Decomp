@@ -275,6 +275,8 @@ typedef struct SifLfSendData {
     int  arg;           /*   0 */
     int  pad;           /*   4 */
     char name[252];     /*   8..259 */
+    char sec[252];      /* 260..511  second name buffer, used only by
+                         *           _sceSifLoadElfPart */
 } SifLfSendData;
 
 extern SifLfSendData _senddata;
@@ -795,5 +797,39 @@ int sceSifGetIopAddr(int nAddr, void *pDest, int width)
     else
         return (int)0xfffefffe;
 
+    return 0;
+}
+
+/* _sceSifLoadElfPart: the loadfile RPC behind sceSifLoadElfPart and
+ * sceSifLoadElf.  Both 252-byte name buffers of the send block are filled
+ * (ELF path, then section name), the RPC function number is the caller's
+ * `mode`, and the 16-byte reply's first two words are copied out to the
+ * caller's result pair.  A zero entry point is reported as 0xfffefffd. */
+int _sceSifLoadElfPart(const char *path, const char *sec, void *dest, int mode)
+{
+    PIN(const char *p, "$16");
+    int *result;
+
+    p = path;
+    if (_lf_bind((int)p) < 0)
+        return (int)0xffff0000;
+    if (_lf_version() != 0)
+        return (int)0xfffefffc;
+
+    strncpy(_senddata.name, p, 252);
+    _senddata.name[251] = 0;
+    strncpy(_senddata.sec, sec, 252);
+    _senddata.sec[251] = 0;
+
+    if (sceSifCallRpc(&cd_00994A40, mode, 0, &_senddata, 512,
+                      &_senddata, 16, 0, 0) < 0)
+        return (int)0xfffeffff;
+
+    if (_senddata.arg == 0)
+        return (int)0xfffefffd;
+
+    result = (int *)dest;
+    result[0] = _senddata.arg;
+    result[1] = _senddata.pad;
     return 0;
 }
