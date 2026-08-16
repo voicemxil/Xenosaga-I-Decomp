@@ -388,3 +388,107 @@ int sceCdGetError(void)
     SignalSema(_sceCd_scmd_semid);
     return r;
 }
+
+/* ------------------------------------------------------------------
+ * The N-command channel.
+ *
+ * Same reply template as the S-command pair above, against the other
+ * SIF client block (_sceCd_cd_ncmd), its own 4-byte reply buffer
+ * (_sceCd_ncmdrdata) and its own semaphore (_sceCd_ncmd_semid).
+ * ------------------------------------------------------------------ */
+
+extern int _sceCd_ncmd_prechk(int cmd);
+extern int _sceCd_ncmdrdata;
+extern int _sceCd_ncmd_semid;
+
+int sceCdNcmdDiskReady(void)
+{
+    int *p;
+    int r;
+
+    if (_sceCd_ncmd_prechk(2) == 0)
+        return 0;
+    p = &_sceCd_ncmdrdata;
+    if (sceSifCallRpc(&_sceCd_cd_ncmd, 14, 0, 0, 0, p, 4, 0, 0) < 0) {
+        SignalSema(_sceCd_ncmd_semid);
+        return 0;
+    }
+    r = *(volatile int *)((int)p | 0x20000000);
+    SignalSema(_sceCd_ncmd_semid);
+    return r;
+}
+
+/* sceCdStatus: the S-command template plus a debug trace on the way
+ * out.  `SCE_CD_debug > 1` (not >= 2 spelled any other way) is what
+ * gives the `slti v0,v0,2` + `bnez` skip; the return value is loaded
+ * before the trace and moved into v0 on both paths. */
+int sceCdStatus(void)
+{
+    int *p;
+    int r;
+
+    if (_sceCd_scmd_prechk(2) == 0)
+        return -1;
+    p = &_sceCd_scmdrdata;
+    if (sceSifCallRpc(&_sceCd_cd_scmd, 12, 0, 0, 0, p, 4, 0, 0) < 0) {
+        SignalSema(_sceCd_scmd_semid);
+        return -1;
+    }
+    r = *(volatile int *)((int)p | 0x20000000);
+    SignalSema(_sceCd_scmd_semid);
+    if (SCE_CD_debug > 1)
+        scePrintf("status called\n");
+    return r;
+}
+
+/* sceCdBreak: S-command 22, with the in-flight command code parked in
+ * sceCdCbfunc_num (8 = "break") for the duration and cleared on both
+ * exits -- but in a different order on each: the failure path releases
+ * the semaphore first and clears afterwards, the success path clears
+ * first and reads the reply in SignalSema's delay slot. */
+int sceCdBreak(void)
+{
+    int *p;
+    int r;
+
+    if (_sceCd_scmd_prechk(30) == 0)
+        return 0;
+    p = &_sceCd_scmdrdata;
+    sceCdCbfunc_num = 8;
+    if (sceSifCallRpc(&_sceCd_cd_scmd, 22, 0, 0, 0, p, 4, 0, 0) < 0) {
+        SignalSema(_sceCd_scmd_semid);
+        sceCdCbfunc_num = 0;
+        return 0;
+    }
+    sceCdCbfunc_num = 0;
+    r = *(volatile int *)((int)p | 0x20000000);
+    SignalSema(_sceCd_scmd_semid);
+    return r;
+}
+
+/* sceCdPause: an asynchronous N-command (mode 1), so there is no reply
+ * buffer -- instead the completion function `_sceCd_cd_callback` and
+ * the address of the in-flight command code are handed to the RPC as
+ * its 8th and 9th arguments, and the "callback armed" flag
+ * _sceCd_c_cb_sem is raised for the duration.  Failure unwinds both
+ * flags before releasing the semaphore. */
+
+extern void _sceCd_cd_callback(void);
+
+int sceCdPause(void)
+{
+    if (sceCdNcmdDiskReady() == 6)
+        return 0;
+    if (_sceCd_ncmd_prechk(12) == 0)
+        return 0;
+    sceCdCbfunc_num = 7;
+    _sceCd_c_cb_sem = 1;
+    if (sceSifCallRpc(&_sceCd_cd_ncmd, 8, 1, 0, 0, 0, 0,
+                      (void *)_sceCd_cd_callback, &sceCdCbfunc_num) < 0) {
+        sceCdCbfunc_num = 0;
+        _sceCd_c_cb_sem = 0;
+        SignalSema(_sceCd_ncmd_semid);
+        return 0;
+    }
+    return 1;
+}

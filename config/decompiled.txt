@@ -2617,3 +2617,7 @@ scONGOSUBScript = 0x002EAAE0, 0x54; // sc.c
 scWaitParseEftScript = 0x002EBDF0, 0x74; // sc.c
 scWaitParseScript = 0x002EBEA0, 0x6C; // sc.c
 scMoveParseScript = 0x002EC2A0, 0x6C; // sc.c
+sefDestroyEffect = 0x002E7010, 0x74; // sef.c
+sefDestroyEffectCf = 0x002E7088, 0x74; // sef.c
+sceCdNcmdDiskReady = 0x0020D3B0, 0x98; // sceCd.c
+sceCdStatus = 0x0020E058, 0xB8; // sceCd.c
