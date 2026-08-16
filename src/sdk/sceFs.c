@@ -819,3 +819,69 @@ int sceLseek(int fd, int offset, int whence)
     DeleteSema(semid);
     return result;
 }
+
+/* The readlink request layout: the caller's buffer and its length, then
+ * the path at +20. */
+typedef struct t_fs_send_link {
+    int   semid;
+    void *dst;
+    int   size;
+    int   len;                  /* +12 */
+    void *buf;                  /* +16 */
+    char  path[1024];           /* +20 */
+} fs_send_link_t;
+
+extern void sceSifWriteBackDCache(void *addr, int size);
+
+/* sceReadlink: the reply DMAs straight into the caller's buffer, so it
+ * is written back out of the data cache first.  The length is clamped
+ * to 1023; gcc hoists the `len < 1024` test into the copy loop's
+ * preheader as loop-invariant and lands the clamp as a movz. */
+int sceReadlink(char *name, void *buf, unsigned int len)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_link_t *sd;
+    int done;
+    int i;
+
+    sd = (fs_send_link_t *)&_send_data;
+    _sceFsWaitS(17);
+    if (_fs_init == 0)
+        sceFsInit();
+    for (i = 0; i < 1024; i++) {
+        sd->path[i] = name[i];
+        if (sd->path[i] == 0)
+            break;
+    }
+    if (i == 1024)
+        sd->path[1023] = 0;
+    if (len >= 1024)
+        len = 1023;
+    sd->buf = buf;
+    sd->len = len;
+    sceSifWriteBackDCache(buf, len);
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->dst = &result;
+    sd->semid = semid;
+    sd->size = 4;
+    if (sceSifCallRpc(&_cd, 25, 0, &_send_data, 2060, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}
