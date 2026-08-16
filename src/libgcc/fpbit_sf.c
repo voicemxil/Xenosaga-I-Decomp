@@ -20,22 +20,13 @@
 #define US_SOFTWARE_GOFAST
 #define FLOAT_BIT_ORDER_MISMATCH
 
+/* Only these three members exist in the original: the R5900 does the
+   float arithmetic and comparisons in the COP1, so fpadd/fpsub/fpmul/
+   fpdiv/fpcmp/sitofp/fptosi/__negsf2 and the float _fpadd_parts and
+   __fpcmp_parts_f are all ABSENT from the shipped ELF. Selecting them
+   anyway emitted ten dead symbols, one of which (_fpadd_parts) collided
+   with fpbit_df.c's real one. */
 #define FINE_GRAINED_LIBRARIES
-#define L_addsub_sf
-#define L_mul_sf
-#define L_div_sf
-#define L_fpcmp_parts_sf
-#define L_compare_sf
-#define L_eq_sf
-#define L_ne_sf
-#define L_gt_sf
-#define L_ge_sf
-#define L_lt_sf
-#define L_le_sf
-#define L_si_to_sf
-#define L_sf_to_si
-#define L_f_to_usi
-#define L_negate_sf
 #define L_make_sf
 #define L_sf_to_df
 #define L_thenan_sf

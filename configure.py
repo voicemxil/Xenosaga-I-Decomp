@@ -186,7 +186,8 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
-    "Check.c": "--lis-hazard-nop CheckDoorDist",
+    "Get.c": "--swap-adjacent Get_Rnd:5",
+    "Check.c": "--mtc1-nop CheckDoorDist:0",
     "Undu.c": "--swap-adjacent UnduParamInit:5",
     "SEQ.c": "--mtc1-nop SEQ_motion:3",
     "xglFont.c": "--swap-adjacent xglFontAscii2Euc:47",
@@ -363,7 +364,7 @@ FILE_FIX_FLAGS = {
     # the original, but gas's reorder pass steals it into the jal's delay
     # slot here. Same RE_RETURN_MOVE fingerprint as fabs/__ieee754_fmod
     # above, just against a `jal` instead of a leaf return.
-    "libc.c": "--barrier-return-store _dtoa_r --expand-sym-loads",
+    "libc.c": "--expand-sym-loads ",
 }
 
 
