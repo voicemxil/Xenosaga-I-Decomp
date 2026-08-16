@@ -39,10 +39,17 @@ typedef struct {
             char pad[2];
             unsigned char nSel;         /* 0x52 */
         } plugin;
+        struct {
+            char pad[2];
+            signed char nSel;           /* 0x52: analysed monster id */
+        } db;
     } u;
     char pad54[0x5C - 0x54];
     signed char nMailSel;               /* 0x5C: mail hint-slot cursor */
-    char pad5D[0x80 - 0x5D];
+    char pad5D[1];
+    signed char nDataBaseOpen;          /* 0x5E: pop-up may be opened */
+    signed char nDataBaseBusy;          /* 0x5F: pop-up must stay open */
+    char pad60[0x80 - 0x60];
 } UMN_WORK;
 
 extern UMN_WORK UmnWork;
@@ -728,5 +735,156 @@ void tskUmnMailPas(TSK_TASK *pTask, UMN_PAS_M *w)
             endPrintExtFunc(w->nColor, 102, 0);
         }
         break;
+    }
+}
+
+/* --- Gnosis-database "analysis" pop-up (eBattleWin3) --- */
+
+/* The pad's trigger doubleword. Bit 21 (0x20 in the halfword at +0x2A)
+ * is the confirm button; the case-12 test masks three buttons at once
+ * and reads the whole doubleword to do it. */
+typedef struct {
+    char pad00[0x28];
+    union {
+        long long q;                    /* 0x28 */
+        struct {
+            char pad[2];
+            unsigned short h;           /* 0x2A */
+        } b;
+    } trig;
+} PADDATA;
+
+extern PADDATA PadData;
+/* Declared as an unsized array so the overlay addresses it with a
+ * %hi/%lo pair: a plain `extern int` is small enough for -G8 to route
+ * through $gp, which the main ELF's data is not reachable from here. */
+extern int BW3BattleOrDataBase[];
+
+/* One Gnosis-database record. */
+typedef struct {
+    char pad00[0x20];
+    unsigned short h20;                 /* 0x20 */
+    unsigned short h22;                 /* 0x22 */
+    unsigned short h24;                 /* 0x24 */
+    char pad26[2];
+    int n28;                            /* 0x28 */
+    int n2C;                            /* 0x2C */
+    int n30;                            /* 0x30 */
+    int n34;                            /* 0x34 */
+    long long d38;                      /* 0x38 */
+    char szStat[0x52 - 0x40];           /* 0x40 */
+    char szName[0x68 - 0x52];           /* 0x52 */
+} GUNO_DATA;
+
+/* The parameter block eBattleWinOpen3 copies its window contents from. */
+typedef struct {
+    int nX;                             /* 0x00 */
+    int nY;                             /* 0x04 */
+    int nColor;                         /* 0x08 */
+    GUNO_DATA *pData;                   /* 0x0C */
+    unsigned short h10;                 /* 0x10 */
+    unsigned short h12;                 /* 0x12 */
+    unsigned short h14;                 /* 0x14 */
+    char pad16[2];
+    int n18;                            /* 0x18 */
+    int n1C;                            /* 0x1C */
+    int n20;                            /* 0x20 */
+    int n24;                            /* 0x24 */
+    long long d28;                      /* 0x28 */
+    char pad30[4];
+    char *pStat;                        /* 0x34 */
+    char *pName;                        /* 0x38 */
+} BW3PARAM;
+
+/* This screen keeps its own two-byte state machine inline in the task
+ * node, right after the standard header. */
+typedef struct {
+    unsigned char nStep;                /* 0x00 */
+    unsigned char bOpen;                /* 0x01 */
+} ANALISIS_WORK;
+
+typedef struct {
+    char pad000[0x10];
+    int nState;                         /* 0x10 */
+    void (*pFunc)(void);                /* 0x14 */
+    void *pParam;                       /* 0x18 */
+    ANALISIS_WORK work;                 /* 0x1C */
+} TSK_ANALISIS;
+
+extern GUNO_DATA *UmnGunoDataBaseGet(int nNo);
+extern void eBattleWinOpen3(BW3PARAM *pParam);
+extern void eBattleWinMain3(void);
+extern void eBattleWinClose3(void);
+extern void xglSoundEffectNormalID(int nCode, int nRand);
+
+/* Database screen: the analysis pop-up over the Gnosis list. Confirm on
+ * page 49 opens the eBattleWin3 window filled from the selected record,
+ * and any of the three cancel/page buttons (or the list moving on)
+ * closes it again. */
+void tskUmnDataBaseAnalisis(TSK_ANALISIS *pTask, void *pParam)
+{
+    BW3PARAM a;
+    GUNO_DATA *p;
+    ANALISIS_WORK *w;
+
+    w = &pTask->work;
+    if (UmnWork.nScene != 2) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (w->nStep) {
+    case 0:
+        w->bOpen = 0;
+        w->nStep = 1;
+        /* fall through */
+    case 1:
+        if (PadData.trig.b.h & 0x20) {
+            if (UmnWork.nPage == 49) {
+                if (UmnWork.nDataBaseOpen != 0) {
+                    w->nStep = 10;
+                    xglSoundEffectNormalID(1, 0);
+                } else {
+                    xglSoundEffectNormalID(5, 0);
+                }
+            }
+        }
+        break;
+    case 10:
+        p = UmnGunoDataBaseGet(UmnWork.u.db.nSel);
+        a.nX = 112;
+        a.nY = 144;
+        a.nColor = 0x00FFFFF0;
+        a.pData = p;
+        a.h10 = p->h20;
+        a.h12 = p->h22;
+        a.h14 = p->h24;
+        a.n18 = p->n28;
+        a.n1C = p->n2C;
+        a.n20 = p->n30;
+        a.n24 = p->n34;
+        a.d28 = p->d38;
+        a.pStat = p->szStat;
+        a.pName = p->szName;
+        BW3BattleOrDataBase[0] = 1;
+        eBattleWinOpen3(&a);
+        w->bOpen = 1;
+        w->nStep = 12;
+        /* fall through */
+    case 12:
+        if (UmnWork.nPage != 49 || UmnWork.nDataBaseBusy != 0 ||
+            (PadData.trig.q & 0x2C0000)) {
+            w->nStep = 20;
+            if (PadData.trig.b.h & 0x20) {
+                xglSoundEffectNormalID(2, 0);
+            }
+        }
+        break;
+    case 20:
+        eBattleWinClose3();
+        w->nStep = 1;
+        break;
+    }
+    if (w->bOpen != 0) {
+        eBattleWinMain3();
     }
 }

@@ -2545,3 +2545,6 @@ sceSifRegisterRpc = 0x00203978, 0xD0; // sceSif.c
 nmlModelRenderCircle = 0x00234A68, 0x108; // nmlModel.c
 _sceRpcGetPacket = 0x00203038, 0xA8; // sceSif.c
 srsChangeSeparator = 0x002E8658, 0x54; // srsGet.c
+xglRenderGlobalFadeSet = 0x0022D958, 0x104; // xglRender.c
+xheap_init = 0x002F1B08, 0x50; // JavaClass.c
+tskUmnDataBaseAnalisis = 0x00A0A3F8, 0x204; // tskUmn.c

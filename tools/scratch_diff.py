@@ -62,8 +62,17 @@ def main():
     built = e.words_at_offset(off, n)
     om, bm, diffs = masked_compare(orig, built, relocs, off)
 
+    # Overlay functions (ov02 and friends) live in their OWN ELF section,
+    # not .text -- hard-coding `-j .text` printed an empty original side
+    # for every one of them and made a length mismatch look like a total
+    # rewrite. Ask the ELF which section actually contains the address.
+    sec = ".text"
+    for s in repo.orig.sections:
+        if s["addr"] and s["addr"] <= addr < s["addr"] + s["size"]:
+            sec = s["name"]
+            break
     orig_lines = disasm_lines(
-        [OBJDUMP, "-d", "-z", "-j", ".text",
+        [OBJDUMP, "-d", "-z", "-j", sec,
          f"--start-address={hex(addr)}",
          f"--stop-address={hex(addr + n)}", ELF], n // 4)
     built_lines = disasm_lines(
