@@ -46,6 +46,11 @@ This is a lever, not steering.
 *ppCns` makes gcc reuse the dying argument register; repeating
 `(*ppCns)->` and letting CSE invent the temporary puts it in `$v0`.
 
+**`PIN(x,"$2")` + `LAUNDER_V` splits a constant gcc has CSEd** between a
+data store and a `switch` case label (e.g. `nSlideY = 48` merged with
+`case 0x30:` into one callee-saved register, where retail materialises
+them independently).
+
 **One local, two roles.** A C local is one pseudo, so reusing it for two
 sequential purposes pins the second value into the first's register.
 
@@ -74,6 +79,13 @@ no missing symbol.
 **Address-form vs value-form givs.** A pointer used only as a VALUE (a
 call argument) becomes its own accumulator plus a hoisted base; used as
 a MEM base it folds into the offset. Worth 6-7 instructions per site.
+
+**A `char *` walk reaches giv anchors no struct-pointer spelling can.**
+When the induction variable anchors at an interior member (`p+12`, i.e.
+`&vtx[0].nColor`) and neighbours are reached at `+8`/`+19`, no spelling
+of `&p->vtx[i+1]` produces that base. `char *q = (char *)&p->vtx[0].nColor`
+does — and it frees the counter so gcc reverses it into a `bgez`
+down-counter.
 
 **Walked tables want a block-local pointer.** `u_char *q = base + 2 +
 i*2;` inside the loop, then `q[0]`/`q[1]`. Writing `base[i*2+2]` puts
@@ -216,6 +228,14 @@ nine-store block is 362,880 orderings, five stores is 120.
 puts stores back in address order, but the order it materialises their
 address/constant operands follows the source — and that fixes register
 assignment.
+
+**Field order in the struct is a store-order lever.** A BGRA-in-memory
+vertex declared BGRA lets `.r/.g/.b` in natural source order emit the
+descending 18/17/16 stores; declared RGBA it cannot.
+
+**Hoisting a constant into a local assigned before a scheduling fence
+moves its `li` earlier** without moving the store that uses it. Written
+inline, the `li` lands after the first field load.
 
 **Decouple address computation from store order** by hoisting the
 addresses into locals.
