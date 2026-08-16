@@ -2368,3 +2368,6 @@ DrillClearContainer = 0x002C9390, 0x58; // Drill.c
 DrillCalcCameraPos = 0x002CAC10, 0xC4; // Drill.c
 DrillResetCameraPos = 0x002CACD8, 0x98; // Drill.c
 DrillResetFlag = 0x002CAD70, 0xA8; // Drill.c
+FontTexReload = 0x0027DF60, 0x60; // Font.c
+FontTexChange = 0x0027DFC0, 0x148; // Font.c
+FontTestLine = 0x00254F28, 0x50; // Font.c

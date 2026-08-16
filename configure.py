@@ -91,6 +91,7 @@ def cc_for(name):
 # stride stays 8 bytes/reg (2.96), ruling out the SDK 2.9-ee compiler --
 # this is a lone -G threshold difference, not a compiler-family swap.
 FILE_CFLAGS_OVERRIDE = {
+    "xglFont.c": "",
     # These SDK translation units were built WITHOUT -fno-schedule-insns:
     # the original pairs independent multiplies onto the R5900's two
     # multiplier units (mult1 + mult), which only the first scheduling
@@ -331,7 +332,7 @@ FILE_FIX_FLAGS = {
                     "--expand-sym-loads "
                     "--war-restore-swap __deregister_frame_info"),
     "_main.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
-    "fpbit_df.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "fpbit_df.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads --branch-likely dpmul:5",
     "fpbit_sf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     # fabs: SET_HIGH_WORD's final `return x` computes the masked result
     # into a4/a1-family regs and needs an explicit copy into $2; gas's
