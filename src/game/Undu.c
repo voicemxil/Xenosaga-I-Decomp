@@ -103,7 +103,18 @@ typedef struct {
     } *pShape;
     char pad_54[0x10];
     WALL_ATTR *pAttrTbl;
-    char pad_68[0x40];
+    char pad_68[0x18];
+    float fX;
+    float fY;
+    float fZ;
+    char pad_8C[4];
+    int nPosValid;
+    char pad_94[4];
+    float fHeight;
+    unsigned short *pWallId;
+    char pad_A0[2];
+    unsigned char nAttrBits;
+    char pad_A3[5];
     WALL_ATTR attr;
     long long attrMask;
     long long attrWant;
@@ -183,4 +194,64 @@ void UnduCheckSubCheckAll(UNDU_CHECK *chk)
         }
         entry += 24;
     }
+}
+
+typedef struct {
+    unsigned short *pWallId;
+    unsigned short *pWallIdPrev;
+    unsigned short nFlags;
+    short nAttrBits;
+    char pad_0C[8];
+    float fHeight;
+    char pad_18[8];
+    WALL_ATTR attr;
+} UNDU_RESULT;
+
+/* Publish one collision result.  Same attribute-slot rule as
+   CheckWallAttr: the 64-bit slot is filled either as two words from the
+   table or as one sd from the id, so both spellings go through the one
+   WALL_ATTR union. */
+float UnduCheckResultCheck(WALL_UNIT *w, UNDU_RESULT *res, float *pos)
+{
+    unsigned short flags;
+
+    /* Statement order is load-bearing: nFlags, then nAttrBits, then
+       fHeight, and pWallId cleared before the attribute slot.  gcc 2.96
+       schedules this run of independent stores, so source order shows in
+       the output -- the other five orders cost 7-13 words. */
+    flags = res->nFlags & 0xEFFF;
+    res->nFlags = flags;
+    res->nAttrBits = w->nAttrBits & 3;
+    res->fHeight = w->fHeight;
+    if (w->pWallId != 0) {
+        WALL_ATTR *tbl;
+
+        res->pWallIdPrev = res->pWallId;
+        tbl = w->pAttrTbl;
+        res->pWallId = w->pWallId;
+        if (tbl != 0) {
+            WALL_ATTR *s;
+            WALL_ATTR *d;
+
+            s = &tbl[*w->pWallId];
+            d = &res->attr;
+            d->w.lo = s->w.lo;
+            d->w.hi = s->w.hi;
+        } else {
+            res->attr.v = *w->pWallId;
+        }
+    } else {
+        res->pWallId = 0;
+        res->attr.v = 0;
+        if ((flags & 7) != 1) {
+            goto done;
+        }
+    }
+    if (w->nPosValid != 0) {
+        pos[0] = w->fX;
+        pos[1] = w->fY;
+        pos[2] = w->fZ;
+    }
+done:
+    return w->fHeight;
 }
