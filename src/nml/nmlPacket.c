@@ -751,3 +751,62 @@ void nmlPacketAddPixelTestPacket(int nReg0, int nData0B, int nData0A,
     sceVif1PkAddUpkData128N(s_pPacket, (u_int *)&sBuf, 3);
     sceVif1PkCloseUpkCode(s_pPacket);
 }
+
+void sceGsSetDefLoadImage(u_long *pImg, short nTbp, short nFbw, short nPsm,
+                          short nX, short nY, short nW, short nH);
+void sceVif1PkOpenDirectCode(u_int *pPk, u_int nFlag);
+void sceVif1PkAddDirectDataN(u_int *pPk, u_long *pData, u_int nNum);
+void sceVif1PkCloseDirectCode(u_int *pPk);
+
+/* One entry of the model's texture-transfer list */
+typedef struct {
+    short nWidth;           /* 0x00 */
+    short pad02;
+    short nHeight;          /* 0x04 */
+    short pad06;
+    short nPsm;             /* 0x08 */
+    short pad0A;
+    short nFbw;             /* 0x0C */
+    short pad0E;
+    int nTbp;               /* 0x10 */
+    int nSize;              /* 0x14 */
+    char pad18[0x28];
+    /* 0x40: the image data itself */
+} TEXTRANS;
+
+/* Upload every texture in the model's transfer list (model+0x254 ->
+ * +0x6C -> a count and a table of self-relative entry offsets at +0x30)
+ * as a GS direct transfer followed by a reference to the pixel data. */
+void nmlPacketTextureTrans(void *pModel)
+{
+    u_long aImg[12];
+    char *pTex;
+    char *pList;
+    int *pOfs;
+    TEXTRANS *p;
+    int nOfs;
+    int nTbp;
+    int i;
+
+    s_pPacket = xglPacketGetCurrent();
+    pTex = *(char **)((char *)pModel + 0x254);
+    nOfs = *(int *)(pTex + 0x6C);
+    pList = pTex + nOfs;
+    if (nOfs != 0) {
+        pOfs = (int *)(pList + 0x30);
+        for (i = 0; i < *(int *)pList; i++) {
+            p = (TEXTRANS *)(pOfs[i] + (u_int)pList);
+            sceVif1PkCnt(s_pPacket, 0);
+            sceVif1PkAddCode(s_pPacket, 0x11000000);
+            nTbp = (sRender.nTexBase << 5) + p->nTbp;
+            sceGsSetDefLoadImage(aImg, nTbp, p->nFbw, p->nPsm, 0, 0,
+                                 p->nWidth, p->nHeight);
+            aImg[0] |= 0x8000;
+            sceVif1PkOpenDirectCode(s_pPacket, 0);
+            sceVif1PkAddDirectDataN(s_pPacket, aImg, 5);
+            sceVif1PkCloseDirectCode(s_pPacket);
+            sceVif1PkRef(s_pPacket, (u_int)((char *)p + 0x40),
+                         p->nSize / 16, 0, 0, 0);
+        }
+    }
+}
