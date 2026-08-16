@@ -2474,3 +2474,5 @@ xglMcRequest = 0x0021FB58, 0xE0; // xglMc.c
 svGetScript = 0x002DE9C8, 0x138; // sv.c
 ACT_createChr = 0x0030B548, 0xBC; // ACT.c
 sceMpegReset = 0x00216FF8, 0x50; // sceMpeg.c
+SeisanTest = 0x0026FDE8, 0x8C; // Seisan.c
+SeisanDisp = 0x002A18F0, 0xEC; // Seisan.c
