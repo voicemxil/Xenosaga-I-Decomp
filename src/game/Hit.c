@@ -42,6 +42,17 @@ typedef union HitAlignedBounds {
     long long alignment[2];
 } HitAlignedBounds;
 
+/* The collision-shape sub-object a map unit carries at +0x1A0. The original
+   code walks and tests it through its own pointer rather than through the
+   unit -- that is where the extra `addiu vX,unit,416` in this family comes
+   from, and it is the same sub-struct CrossCheck.c names `shape`. */
+typedef struct HitMapUnitShape {
+    char pad_000[4];
+    char container;         /* unit + 0x1A4 */
+    char pad_005[0x28];
+    char active;            /* unit + 0x1CD */
+} HitMapUnitShape;
+
 typedef struct HitMapUnit {
     unsigned int status;
     char pad_004[0x0C];
@@ -52,12 +63,12 @@ typedef struct HitMapUnit {
     short index;
     char pad_0A6[0x0A];
     HitAlignedBounds bounds;
-    char pad_0C0[0xE4];
-    char container;
-    char pad_1A5[0x28];
-    char active;
+    char pad_0C0[0xE0];
+    HitMapUnitShape shape;  /* 0x1A0 */
     char pad_1CE[0x132];
 } HitMapUnit __attribute__((aligned(8)));
+
+extern HitMapUnit MapUnit[];
 
 typedef struct HitUwamonoView {
     unsigned char team;
@@ -89,7 +100,7 @@ int HitCheckMapUnit(void *position)
         if (unit->status & 0x100000) {
             continue;
         }
-        if (unit->active == 0) {
+        if (unit->shape.active == 0) {
             continue;
         }
         if ((unit->status & 0x10000) == 0) {
@@ -116,7 +127,7 @@ int HitCheckMapUnitReverse(void *position)
         if (unit->status & 0x100000) {
             continue;
         }
-        if (unit->active == 0) {
+        if (unit->shape.active == 0) {
             continue;
         }
         if ((unit->status & 0x10000) == 0) {
@@ -143,7 +154,7 @@ int HitCheckMapUnitPosSize(void *position, void *unused, float size)
         if (unit->index == -1) {
             continue;
         }
-        if (unit->active == 0) {
+        if (unit->shape.active == 0) {
             continue;
         }
         if ((unit->status & 0x10000) == 0) {
@@ -170,7 +181,7 @@ int HitCheckMapUnitPosReverse(void *position)
         if (unit->index == -1) {
             continue;
         }
-        if (unit->active == 0) {
+        if (unit->shape.active == 0) {
             continue;
         }
         if ((unit->status & 0x10000) == 0) {
@@ -183,34 +194,40 @@ int HitCheckMapUnitPosReverse(void *position)
     return -1;
 }
 
-/* Find a collidable map unit outside one excluded container slot. */
-/* TODO: LENGTH near-match: gcc folds the interior D_0047AEC0 cursor and the
- * record-base pointer together, producing 65 words versus the original 66 and
- * changing the saved-register assignment for the excluded slot and masks. */
+/* Find a collidable map unit outside one excluded container slot.
+
+   The shape pointer is the loop's first address expression, so gcc anchors
+   the induction variable on MapUnit+0x1A0 and reaches the unit fields at
+   negative offsets from it; `&MapUnit[i]` is only ever a value (the call
+   argument), so it becomes its own accumulator plus a hoisted base. */
 int HitCheckContainerPosSize(void *position, int excluded, float size)
 {
     HitProbe probe;
-    char *tail = D_0047AEC0;
-    int i = 0;
-    int offset = 0;
-    HitMapUnit *base = (HitMapUnit *)(D_0047AEC0 - 0x1A0);
+    HitMapUnitShape *shape;
+    int i;
 
     probe.position = *(HitVector *)position;
     probe.size = size;
-    while (i < 0x40) {
-        HitMapUnit *unit = (HitMapUnit *)((char *)base + offset);
-
-        if (*(short *)(tail - 0xFC) != -1 &&
-            *(char *)(tail + 4) == 0 &&
-            i != excluded &&
-            *(char *)(tail + 0x2D) != 0 &&
-            (*(unsigned int *)(tail - 0x1A0) & 0x10000) != 0 &&
-            HitCheckMapUnitPosAt(&probe, unit) != 0) {
+    for (i = 0; i < 0x40; i++) {
+        shape = &MapUnit[i].shape;
+        if (MapUnit[i].index == -1) {
+            continue;
+        }
+        if (shape->container != 0) {
+            continue;
+        }
+        if (i == excluded) {
+            continue;
+        }
+        if (shape->active == 0) {
+            continue;
+        }
+        if ((MapUnit[i].status & 0x10000) == 0) {
+            continue;
+        }
+        if (HitCheckMapUnitPosAt(&probe, &MapUnit[i]) != 0) {
             return i;
         }
-        i++;
-        tail += 0x300;
-        offset += 0x300;
     }
     return -1;
 }
@@ -265,6 +282,7 @@ int HitCheckMapUnitAt(void *position, void *map_unit)
 {
     HitProbe *probe = (HitProbe *)position;
     HitMapUnit *unit = (HitMapUnit *)map_unit;
+    HitMapUnitShape *shape = &unit->shape;
     int result;
     float distance;
 
@@ -274,10 +292,14 @@ int HitCheckMapUnitAt(void *position, void *map_unit)
     } else if (probe->position.y < unit->position.value.y - 1.8f) {
         result = 0;
     } else {
-        switch (unit->active) {
+        switch (shape->active) {
         case 1:
             distance = CheckDist2D(&probe->position, &unit->position.value);
-            result = distance < probe->size + unit->bounds.value.radius;
+            if (distance < probe->size + unit->bounds.value.radius) {
+                result = 1;
+            } else {
+                result = 0;
+            }
             break;
         case 2:
             return HitCheckBox(probe, unit);
@@ -296,6 +318,7 @@ int HitCheckMapUnitPosAt(void *position, void *map_unit)
 {
     HitProbe *probe = (HitProbe *)position;
     HitMapUnit *unit = (HitMapUnit *)map_unit;
+    HitMapUnitShape *shape = &unit->shape;
     int result;
     float distance;
 
@@ -305,10 +328,14 @@ int HitCheckMapUnitPosAt(void *position, void *map_unit)
     } else if (probe->position.y < unit->position.value.y - 1.8f) {
         result = 0;
     } else {
-        switch (unit->active) {
+        switch (shape->active) {
         case 1:
             distance = CheckDist2D(&probe->position, &unit->position.value);
-            result = distance < probe->size + unit->bounds.value.radius;
+            if (distance < probe->size + unit->bounds.value.radius) {
+                result = 1;
+            } else {
+                result = 0;
+            }
             break;
         case 2:
             return HitCheckBoxCorner(probe, unit);
