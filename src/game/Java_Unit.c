@@ -513,25 +513,32 @@ void Java_xeno_Unit_setArgs__ILjava_lang_Object_I(void *pEnv, JVAL *pArgs, JVAL 
     }
 }
 
-/* Store four script argument words into one argument-block slot */
-/* TODO: near-miss - the original keeps the slot base in $v1 and shuffles it
-   through $a1/$a2/$s0 while restoring callee-saved registers; gcc folds the
-   0x1A0 displacement into the base here, so 3 words differ. */
+/* Store four script argument words into one argument-block slot.
+ * The slot number is an INDEX into the argument array in groups of four
+ * words, not a byte offset added to a recomputed UNITWORK pointer. The
+ * distinction is visible in the codegen: with the array-subscript form
+ * ee-gcc re-materialises the block address into a fresh register for
+ * each store (the $v1 -> $a1 -> $a2 -> $s0 copy chain the original has),
+ * while any pointer form -- (char *)pUnit + (n << 4), a cast to int *,
+ * or a separate int * local -- folds 0x1A0 into one base register and
+ * loses those three instructions.
+ * Slots above 0 run past the four declared words and into the fields
+ * that follow, which is what the original does too: the script picks the
+ * offset, and Java_xeno_Unit_setArgs__III below lets it pick any byte
+ * offset at all. */
 void Java_xeno_Unit_setArgs__IIIII(void *pEnv, JVAL *pArgs, JVAL *pRet)
 {
     void *pObj;
     UNITWORK *pUnit;
-    UNITWORK *pSlot;
     int nSlot;
 
     pObj = pArgs[0].p;
-    nSlot = pArgs[1].i << 4;
+    nSlot = pArgs[1].i;
     pUnit = UNIT_WORK(pObj);
-    pSlot = (UNITWORK *)((char *)pUnit + nSlot);
-    pSlot->aArgs[0] = pArgs[2].i;
-    pSlot->aArgs[1] = pArgs[3].i;
-    pSlot->aArgs[2] = pArgs[4].i;
-    pSlot->aArgs[3] = pArgs[5].i;
+    pUnit->aArgs[nSlot * 4 + 0] = pArgs[2].i;
+    pUnit->aArgs[nSlot * 4 + 1] = pArgs[3].i;
+    pUnit->aArgs[nSlot * 4 + 2] = pArgs[4].i;
+    pUnit->aArgs[nSlot * 4 + 3] = pArgs[5].i;
 }
 
 /* Read the unit's scale back into the script as a Vector4f */
