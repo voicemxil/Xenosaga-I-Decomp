@@ -480,3 +480,64 @@ int sceSync(char *name, int flag)
     DeleteSema(semid);
     return result;
 }
+
+/* The path-argument request layout: the same block seen through a
+ * header with no descriptor word, so the name starts at +16 and the
+ * request length is the name length + 17. */
+typedef struct t_fs_send_path {
+    int   semid;
+    void *dst;
+    int   size;
+    int   mode;                 /* +12 the one non-name argument */
+    char  path[1024];           /* +16 */
+} fs_send_path_t;
+
+/* sceMkdir: create a directory.  Same copy-with-cap as sceSync, except
+ * that overflowing the cap also pulls the length back to 1023 so the
+ * request length still counts the terminator. */
+int sceMkdir(char *name, int mode)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_path_t *sd;
+    int done;
+    int i;
+
+    sd = (fs_send_path_t *)&_send_data;
+    _sceFsWaitS(7);
+    if (_fs_init == 0)
+        sceFsInit();
+    for (i = 0; i < 1024; i++) {
+        sd->path[i] = name[i];
+        if (sd->path[i] == 0)
+            break;
+    }
+    if (i == 1024) {
+        sd->path[1023] = 0;
+        i = 1023;
+    }
+    sd->mode = mode;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->dst = &result;
+    sd->semid = semid;
+    sd->size = 4;
+    if (sceSifCallRpc(&_cd, 7, 0, &_send_data, i + 17, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}

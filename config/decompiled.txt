@@ -2697,3 +2697,4 @@ Check_Undu = 0x002D8A68, 0x160; // Check.c
 sefSetHitSignal = 0x002E67A0, 0x68; // sefIs.c
 sefSetSeSignal = 0x002E6860, 0x68; // sefIs.c
 sceSync = 0x00206828, 0x198; // sceFs.c
+sceMkdir = 0x00205930, 0x1AC; // sceFs.c
