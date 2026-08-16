@@ -2727,3 +2727,4 @@ UnduCheckResultCheck = 0x00323638, 0xBC; // Undu.c
 sceDevctl = 0x00206E88, 0x238; // sceFs.c
 sceAddDrv = 0x00205D70, 0x120; // sceFs.c
 buffer_reset = 0x00219430, 0x44; // xglFont.c
+sefDeleteEffectWait = 0x002E7430, 0xAC; // sef.c

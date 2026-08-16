@@ -1241,6 +1241,8 @@ typedef struct
     unsigned short nWaitID;  /* 0x10 */
     short pad12;
     short nEffectNo;         /* 0x14 */
+    char pad16[0x24 - 0x16]; /* the record really is 0x24 bytes: see the
+                              * memset in sefDeleteEffectWait */
 } SEF_WAITLINE;
 
 extern unsigned short steftTbl[];
@@ -1495,5 +1497,30 @@ void sefCaclAllTarget(SEF_VEC4 *pDst)
     }
     if (n != 0) {
         MMathDivVectorS(pDst, pDst, (float) n);
+    }
+}
+
+/* --- sefDeleteEffectWait: build a wait-line record on the stack, let
+ * sefCnvWaitEffectNo resolve it, then free every live scheduler slot
+ * running the resolved effect. The record is zeroed with memset and is
+ * 0x24 bytes even though only the two fields at 0x10/0x14 are used.
+ * The resolved number is re-read from the stack on every iteration, so
+ * it stays a memory operand in the C too. --- */
+void sefDeleteEffectWait(int nWaitID)
+{
+    SEF_WAITLINE prm;
+    int i;
+
+    memset(&prm, 0, sizeof(prm));
+    prm.nWaitID = nWaitID;
+    prm.nEffectNo = 0x4001;
+    sefCnvWaitEffectNo(&prm);
+    if (prm.nEffectNo > 0) {
+        for (i = 0; i < 128; i++) {
+            if (_schedSlots[i].nUsed != 0 &&
+                _schedSlots[i].nActorID == prm.nEffectNo) {
+                sefDeleteEffect2(&_schedSlots[i]);
+            }
+        }
     }
 }
