@@ -486,9 +486,9 @@ int HitCheckBoxUwamono(void *position, void *map_unit)
     float distance;
 
     unit = (HitMapUnit *)map_unit;
-    bounds = unit->bounds;
     unit_position = unit->position;
     axis = unit->direction;
+    bounds = unit->bounds;
     z_delta = probe->position.z - unit_position.value.z;
     x_delta = probe->position.x - unit_position.value.x;
     projection = x_delta * axis->x + z_delta * axis->z;
@@ -633,6 +633,68 @@ int HitCheckBoxCorner(void *position, void *map_unit)
                 return HitCheckCorner(position, map_unit) != 0;
             }
         }
+        return 1;
+    }
+    return 0;
+}
+
+/* Statement order here is load-bearing, and was worth 79 of the 84 words:
+   each corner's X must be assigned BEFORE its Y (writing Y first, which
+   is the order the stores come out in, costs 15 words per corner), and
+   `axis` must be read BETWEEN the position and bounds copies -- reading it
+   after both leaves gcc's `lw` for it after the four `sd`s instead of
+   before them. Only the bounds/corner values have to be re-read from the
+   copy at every use: hoisting them into `radius`/`corner` locals makes gcc
+   keep them in callee-saved $f20/$f21 across the four calls and grows the
+   frame by 16 bytes.
+
+   The last word is that same `lw axis` still one slot late; no source
+   order tried put it before the stores, so it is rotated into place by
+   --rotate HitCheckCorner:17:5 (a pure 5-instruction window rotation of
+   four independent stores and one independent load).
+
+   The exact rounded-corner test HitCheckBoxCorner falls back to: build the
+   four corner points of the unit's box (the radius axis and the corner
+   axis, and the same pair rotated a quarter turn) and accept the probe if
+   it is within its own expanded radius of any of them. */
+int HitCheckCorner(void *position, void *map_unit)
+{
+    HitProbe *probe = (HitProbe *)position;
+    HitMapUnit *unit = (HitMapUnit *)map_unit;
+    HitVector c0;
+    HitVector c1;
+    HitVector c2;
+    HitVector c3;
+    HitAlignedVector unit_position;
+    HitAlignedBounds bounds;
+    HitVector *axis;
+
+    unit_position = unit->position;
+    axis = unit->direction;
+    bounds = unit->bounds;
+
+    c0.x = unit_position.value.x + (bounds.value.radius * axis[0].x + bounds.value.corner_radius * axis[2].x);
+    c0.y = unit_position.value.y;
+    c0.z = unit_position.value.z + (bounds.value.radius * axis[0].z + bounds.value.corner_radius * axis[2].z);
+    if (CheckDist2D(&probe->position, &c0) < probe->size * 1.5f) {
+        return 1;
+    }
+    c1.x = unit_position.value.x - (bounds.value.corner_radius * axis[0].z + bounds.value.radius * axis[2].z);
+    c1.y = unit_position.value.y;
+    c1.z = unit_position.value.z + (bounds.value.corner_radius * axis[0].x + bounds.value.radius * axis[2].x);
+    if (CheckDist2D(&probe->position, &c1) < probe->size * 1.5f) {
+        return 1;
+    }
+    c2.x = unit_position.value.x - (bounds.value.radius * axis[0].x + bounds.value.corner_radius * axis[2].x);
+    c2.y = unit_position.value.y;
+    c2.z = unit_position.value.z - (bounds.value.radius * axis[0].z + bounds.value.corner_radius * axis[2].z);
+    if (CheckDist2D(&probe->position, &c2) < probe->size * 1.5f) {
+        return 1;
+    }
+    c3.x = unit_position.value.x + (bounds.value.corner_radius * axis[0].z + bounds.value.radius * axis[2].z);
+    c3.y = unit_position.value.y;
+    c3.z = unit_position.value.z - (bounds.value.corner_radius * axis[0].x + bounds.value.radius * axis[2].x);
+    if (CheckDist2D(&probe->position, &c3) < probe->size * 1.5f) {
         return 1;
     }
     return 0;
