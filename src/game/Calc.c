@@ -153,7 +153,7 @@ extern void CheckNearPoint(MC_VECTOR *pFrom, MC_VECTOR *pA,
  * pos.hi, bounds.lo and slots the pDir load and the vHit.y store between
  * them; gcc here emits the two copies back to back, which permutes which
  * temporary register carries which half.  Swept every ordering of the
- * five prologue statements and ran the permuter for 180 iterations
+ * five prologue statements and ran the permuter for 213 iterations
  * without beating the base. */
 void CalcNearCrossPointBox(MC_VECTOR *pStart, MC_VECTOR *pEnd,
                            CALC_MAP_UNIT *pUnit, MC_VECTOR *pOut)
