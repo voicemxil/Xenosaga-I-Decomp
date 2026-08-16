@@ -249,7 +249,7 @@ u_int RSRC_searchFile(RSRC *pResource, char *pName)
     return 0;
 }
 
-extern void RSRC_info(RSRC *pResource, int nMode);
+extern int RSRC_info(RSRC *pResource, int nMode);
 
 /* Allocate a resource block: reuse a dirty item big enough, else append a
    fresh item (or, when the table is full, recycle the smallest dirty one)
@@ -435,4 +435,74 @@ void RSRC_dispose(RSRC *pResource, u_int pSource)
         pItem++;
     }
     pResource->nItemCount = nLive;
+}
+
+extern char *markedSTR[2][2];
+extern char *selectedSTR[2][2];
+extern char *unselectedSTR[2][2];
+extern char *normalSTR[2][2];
+extern void DB_pathGetShortPath(char *pDest, u_int pName, int nLen);
+
+/* Debug listing of the item table: build the mark/select decoration for
+   each item in the window set by RSRC_setPrintParam, then clear the
+   window. */
+int RSRC_info(RSRC *pResource, int nMode)
+{
+    char szMark[128];
+    char szName[128];
+    char szPath[128];
+    int nShort;
+    int nIndex;
+    int i;
+    int nLen;
+    int nCount;
+    int nEnd;
+
+    nShort = nMode & 0xf;
+    nIndex = infoIndex;
+    nLen = infoLength;
+    if (nIndex < 0) {
+        nIndex = 0;
+    }
+    if (nLen < 0) {
+        nEnd = pResource->nItemCount;
+        nCount = nEnd;
+    } else {
+        nCount = pResource->nItemCount;
+        nEnd = nIndex + nLen;
+        if (nCount < nEnd) {
+            nEnd = nCount;
+        }
+    }
+    if (nIndex < 0 || nIndex >= nCount) {
+        nIndex = 0;
+    }
+    for (i = nIndex; i < nEnd; i++) {
+        RSRCITEM *pItem = &pResource->pItems[i];
+
+        szName[0] = 0;
+        szMark[0] = 0;
+        if (pItem->nState & 2) {
+            strcat(szMark, selectedSTR[nMode][0]);
+            strcat(szName, selectedSTR[nMode][1]);
+        } else {
+            strcat(szMark, unselectedSTR[nMode][0]);
+            strcat(szName, unselectedSTR[nMode][1]);
+        }
+        if (pItem->nState & 1) {
+            strcat(szMark, markedSTR[nMode][0]);
+            strcat(szName, markedSTR[nMode][1]);
+        } else {
+            strcat(szMark, normalSTR[nMode][0]);
+            strcat(szName, normalSTR[nMode][1]);
+        }
+        if (pItem->nType == 1) {
+            if (nShort != 0) {
+                DB_pathGetShortPath(szPath, pItem->pName, 22);
+            }
+        }
+    }
+    infoLength = -1;
+    infoIndex = -1;
+    return 0;
 }

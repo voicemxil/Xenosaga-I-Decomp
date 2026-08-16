@@ -2814,3 +2814,4 @@ _FacePoint = 0x0023E2C0, 0x74; // nmlModel.c
 _ModelCalcClip = 0x0023F250, 0x108; // nmlModel.c
 _ModelCalcClipMat1 = 0x0023F118, 0x134; // nmlModel.c
 _ModelCalcClipMat2 = 0x0023EF78, 0x19C; // nmlModel.c
+RSRC_info = 0x0026D500, 0x21C; // RSRC.c
