@@ -441,7 +441,8 @@ typedef struct {
     float fBaseX;               /* 0x30 */
     float fBaseY;               /* 0x34 */
     float fBaseZ;               /* 0x38 */
-    char pad3C[0x18];
+    float fScale;               /* 0x3C */
+    char pad40[0x14];
     ETNODE *pJouto;             /* 0x54 */
     char pad58[0x28];
 } ETSYSTEM;
@@ -576,6 +577,21 @@ void subJoutoPosSet(void)
 
 /* --- Ether tree "line2" (the animated connector to the target node) --- */
 
+/* One drawn quad of the connector: two transformed endpoints, each
+   followed by the 16-byte colour block EtherTreeLineColorGet fills. */
+typedef struct {
+    float x;                    /* 0x00 */
+    float y;                    /* 0x04 */
+    float z;                    /* 0x08 */
+    char pad0C[0x04];
+    char color0[0x10];          /* 0x10 */
+    float x2;                   /* 0x20 */
+    float y2;                   /* 0x24 */
+    float z2;                   /* 0x28 */
+    char pad2C[0x04];
+    char color1[0x10];          /* 0x30 */
+} ETOUT;
+
 /* The base[] copy is 4-aligned where position[] is 8-aligned; that is what
    picks ldl/ldr for base = position but plain ld/sd for position = node. */
 typedef struct {
@@ -588,8 +604,46 @@ typedef struct {
     EVEC4 base[3];              /* 0x10 */
     EVEC position[3];           /* 0x40 */
     ETNODE *pTarget;            /* 0x70 */
-    char pad74[0xCC];
+    char pad74[0x0C];
+    ETOUT out[3];               /* 0x80, stride 0x40 */
 } ETLINE2;
+
+extern void EtherTreeLineColorGet(void *pDst, int nType);
+
+/* Transform all three connector segments into screen space and queue
+   them: each endpoint is offset by the tree's base and centre and scaled,
+   and both endpoints get a colour block. */
+void subLine2_DrawType_1(ETLINE2 *p)
+{
+    ETSYSTEM *sys;
+    float *pBase;
+    float *pCenter;
+    float *pIn;
+    int i;
+
+    sys = EtherTreeSystem;
+    pBase = &sys->fBaseX;
+    pCenter = &sys->fCenterX;
+    /* One float walk over BOTH endpoint arrays: the original's induction
+       variable sits on &position[i].y and reaches base[i] at -52/-48, an
+       anchor no struct-member spelling of base[i]/position[i] produces --
+       indexing the two arrays separately builds four givs. */
+    pIn = &p->position[0].y;
+    for (i = 0; i < 3; i++) {
+        ETOUT *q = &p->out[i];
+
+        q->x = (pIn[-13] + pBase[0] + pCenter[0]) * pBase[3];
+        q->y = (pIn[-12] + pBase[1] + pCenter[1]) * pBase[3];
+        q->z = pBase[2] - 1.0f;
+        q->x2 = (pIn[-1] + pBase[0] + pCenter[0]) * pBase[3];
+        q->y2 = (pIn[0] + pBase[1] + pCenter[1]) * pBase[3];
+        q->z2 = pBase[2] - 1.0f;
+        EtherTreeLineColorGet(q->color0, 3);
+        EtherTreeLineColorGet(q->color1, 3);
+        endPrintExtFunc(0, 16, q);
+        pIn += 4;
+    }
+}
 
 /* Grow the connector toward the target's first child; 1 once it arrives. */
 int subLine2_OpenType_0(ETLINE2 *p)
