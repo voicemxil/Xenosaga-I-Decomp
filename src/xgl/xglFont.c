@@ -492,6 +492,41 @@ void set_ot(int nZ)
     FS.pStream += 2;
 }
 
+/* Emit the position/colour command for the next string.  Declared K&R so
+ * the one-argument call sites in xglFontPrint/xglFontPrintf still compile
+ * -- the original has no prototype for this function either. */
+void set_xyz(nX, nY, nZ)
+int nX;
+int nY;
+int nZ;
+{
+    set_ot(nZ);
+    if (nX < 0 || nX >= 768 || nY < 0 || nY >= 512) {
+        u_char *p = FS.pStream;
+        p[0] = 8;
+        p[1] = 7;
+        p[2] = nX >> 8;
+        p[3] = nX;
+        p[4] = nY >> 8;
+        p[5] = nY;
+        p[6] = nZ >> 16;
+        p[7] = nZ >> 8;
+        p[8] = nZ;
+        FS.pStream += 9;
+    } else {
+        u_char *p = FS.pStream;
+        p[0] = (nX >> 8) + 1;
+        p[1] = nX;
+        p[2] = (nY >> 8) + 4;
+        p[3] = nY;
+        p[4] = 6;
+        p[5] = nZ >> 16;
+        p[6] = nZ >> 8;
+        p[7] = nZ;
+        FS.pStream += 8;
+    }
+}
+
 /* One hex digit to its value; anything else is 0 */
 int hex2val(int nChar)
 {
