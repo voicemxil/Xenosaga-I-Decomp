@@ -2811,3 +2811,6 @@ set_xyz = 0x00218BC0, 0x100; // xglFont.c
 sefFreeScheduler = 0x002E51A8, 0x110; // sef.c
 RSRC_dispose = 0x0026D970, 0x188; // RSRC.c
 _FacePoint = 0x0023E2C0, 0x74; // nmlModel.c
+_ModelCalcClip = 0x0023F250, 0x108; // nmlModel.c
+_ModelCalcClipMat1 = 0x0023F118, 0x134; // nmlModel.c
+_ModelCalcClipMat2 = 0x0023EF78, 0x19C; // nmlModel.c

@@ -2515,7 +2515,7 @@ int _ModelCalcClip(void *pPos)
             "sub $2, $2, $2\n"
             "addi $2, $2, 1\n"
             "_$mcc_exit:\n"
-            "move %0, $2\n"
+            "daddu %0, $2, $0\n"
             ".set reorder"
             : "=r"(nRet) : "r"(pPos) : "$2", "$f0", "$f1");
     return nRet;
@@ -2604,7 +2604,7 @@ int _ModelCalcClipMat1(void *pPos, void *pMat)
             "sub $2, $2, $2\n"
             "addi $2, $2, 1\n"
             "_$mcc1_exit:\n"
-            "move %0, $2\n"
+            "daddu %0, $2, $0\n"
             ".set reorder"
             : "=r"(nRet) : "r"(pPos), "r"(pMat) : "$2", "$f0", "$f1");
     return nRet;
@@ -2718,7 +2718,7 @@ int _ModelCalcClipMat2(void *pPos, void *pMat1, void *pMat2)
             "sub $2, $2, $2\n"
             "addi $2, $2, 1\n"
             "_$mcc2_exit:\n"
-            "move %0, $2\n"
+            "daddu %0, $2, $0\n"
             ".set reorder"
             : "=r"(nRet) : "r"(pPos), "r"(pMat1), "r"(pMat2) : "$2", "$f0", "$f1");
     return nRet;
