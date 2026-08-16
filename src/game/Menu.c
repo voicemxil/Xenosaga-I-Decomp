@@ -4350,11 +4350,14 @@ void MenuAgwsListMake_Wpn(void)
             ptr = (unsigned char *)ptr + 12;
         } while (cnt != 0);
     }
+    /* store order: found by tools/permute.py over all 120 orderings of this
+       block -- this one is the closest gcc gets (14 differing words); the
+       source order that equals the retail store order gives 22. */
+    win->b15 = 7;
+    win->h0C = 229;
     win->h0E = 174;
     win->b14 = 1;
     win->b01 = 7;
-    win->b15 = 7;
-    win->h0C = 229;
     win->p10 = 0;
     win->p1C = MenuListGet(0);
     WindowSPItemChange(win);
