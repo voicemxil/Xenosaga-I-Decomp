@@ -1029,7 +1029,8 @@ typedef struct
     short nEtParam;          /* 0xA74 */
     short padA76;
     short nActorID;          /* 0xA78 */
-    char padA7A[0xA90 - 0xA7A];
+    char padA7A[0xA8C - 0xA7A];
+    int  nFlags;             /* 0xA8C */
     short nState;            /* 0xA90 */
     short nScriptA;          /* 0xA92 */
     short nScriptB;          /* 0xA94 */
@@ -1451,4 +1452,28 @@ void sefInitEffectBattle(void)
         LAUNDER(pBuf);
         _srsMemRes.pBuf = smAlloc(0x40000, pBuf);
     }
+}
+
+/* --- sefIsFinishEffect: true when nothing is still running (optionally
+ * only counting slots belonging to one actor). Same counter/sltiu shape
+ * as sefIsFinishEffect2; bit 6 of the slot's 0xA8C flags marks a slot
+ * that does not hold the "finished" answer back. --- */
+extern int func_A33248(void);
+
+int sefIsFinishEffect(int nID)
+{
+    unsigned int nHits;
+    int i;
+
+    nHits = 0;
+    if (func_A33248() != 0) {
+        return 0;
+    }
+    for (i = 0; i < 128; i++) {
+        if (_schedSlots[i].nUsed != 0 && !(_schedSlots[i].nFlags & 0x40) &&
+            (nID == 0 || _schedSlots[i].nActorID == nID)) {
+            nHits++;
+        }
+    }
+    return nHits < 1U;
 }

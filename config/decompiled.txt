@@ -2705,3 +2705,4 @@ sefSetLightFlag = 0x002E6738, 0x64; // sefIs.c
 HddTestDummyFolder = 0x00255F08, 0xC8; // HddTest.c
 sefInitEffect = 0x002E6B60, 0xA4; // sef.c
 sefInitEffectBattle = 0x002E6C08, 0x70; // sef.c
+sefIsFinishEffect = 0x002E7A18, 0x90; // sef.c
