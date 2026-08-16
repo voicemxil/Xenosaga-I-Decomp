@@ -82,6 +82,29 @@ Two safe habits:
   skew between the host (where edits land) and the container (where the
   build runs), which can otherwise make ninja skip a changed file.
 
+## Shared files: use the tools, never hand-edit
+
+`configure.py` and `config/decompiled.txt` are written by every agent
+working the tree at once. Hand-editing them has repeatedly destroyed
+other people's entries -- an editor that reflows the whole dict silently
+drops whatever landed between the read and the write, and the loss is
+invisible: the functions just stop being verified.
+
+Two tools make that impossible. Both take an exclusive lock, change only
+what you named, and refuse the write if anything else moved.
+
+```
+python3 tools/set_flags.py --show Menu.c            # read current entries
+python3 tools/set_flags.py --cflags scePad.c "-O2 -G0"
+python3 tools/set_flags.py --fix Menu.c "--swap-adjacent MenuFoo:12"
+python3 tools/register.py src/xgl/xglSound.c        # register new matches
+```
+
+`--fix` REPLACES the entry, so read it with `--show` first and pass the
+full new string when adding a site. Never pass the same flag twice in
+one value: a store-action flag keeps only its last occurrence, which
+once silently dropped three already-matched functions.
+
 ## Raw addresses: use the named symbol, not a numeric cast
 
 Writing a fixed address as `(int *)0x00996C00` makes ee-gcc materialise
