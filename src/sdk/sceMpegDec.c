@@ -290,232 +290,27 @@ void _outputFrame(MPEGSTREAM *pStream, int nIdx, int nDoIt)
     if (nDoIt != 0) {
         int nType;
 
-        nType = pStream->nUnk174;
-        if (nType == 3) {
-            nType = pStream->nUnk150;
-            _dispRefImage(pStream,
-                          nType == 3 ? pStream->pUnk1C4 : pStream->pUnk1B8,
-                          nIdx - 1);
-        } else {
-            REFIMAGE *pTop;
-            REFIMAGE *pBot;
-
-            nType = pStream->nUnk150;
-            if (nType == 3) {
-                pTop = pStream->pUnk1D4;
-                pBot = pStream->pUnk1E4;
-            } else {
-                pTop = pStream->pUnk1C8;
-                pBot = pStream->pUnk1D8;
-            }
-            _dispRefImageField(pStream, pTop, pBot, nIdx - 1);
-        }
-    }
-    if (pStream->nUnk0F8 == 1) {
-        pStream->nUnk0F8 = 2;
-    }
-}
-
-/* Reject an output request whose rectangle does not fit the decoded frame.
- *
- * PARKED at 5 differing words, registers only ($v0<->$v1 across the
- * area-compare arm).  Without the LAUNDER the two arms' identical
- * `slt; xori` tails get cross-jumped into one block and the function is a
- * word short; with it the arms are separate but the product lands in $v0
- * where the original has it in $v1.  Swept: LAUNDER on bOK in either arm
- * (13 diffs, $s0<->$s1 instead), PIN($3) on the product (cross-jump
- * returns), LAUNDER on the limit instead of the product (cross-jump
- * returns), a `bOK = 0` pre-initialised shape (16 diffs, LOGIC), and both
- * declaration orders of the two temporaries. */
-int _isOutSizeOK(MPEGSTREAM *pStream, OUTREQ *pReq)
-{
-    char sBuf[256];
-    int bOK;
-
-    if (pStream->nUnk0E0 != 0) {
-        if (pStream->nUnk0DC < pReq->nWidth) {
-            bOK = 0;
-        } else {
-            bOK = pStream->nUnk0E0 >= pReq->nHeight;
-        }
-    } else {
-        int nArea;
-        int nLimit;
-
-        /* Laundering the product keeps this arm's slt/xori tail out of the
-         * shared block gcc's cross-jumping otherwise folds the arms into. */
-        nLimit = pStream->nUnk0E4;
-        nArea = pReq->nUnk0C * pReq->nUnk10;
-        LAUNDER(nArea);
-        bOK = nLimit >= nArea;
-    }
-    if (bOK == 0) {
-        sprintf(sBuf, D_004D5DA8, pReq->nWidth, pReq->nHeight);
-        _Error(pStream, sBuf);
-    }
-    return bOK;
-}
-
-extern char D_004D5C90[];  /* skipped macroblock in an I picture */
-
-/* picture_display_extension(): 1..3 frame_centre offsets */
-void _pictureDisplayExtension(MPEGSTREAM *pStream)
-{
-    int nOffs;
-    int i;
-
-    /* PARKED at 13 differing words.  The original shares ONE `nOffs = 1`
-     * block between both arms (the frame-structure test's beql jumps over
-     * it), while gcc gives us a second copy in an annulled delay slot.
-     * Swept: ternary and if/else forms of each arm, `!= 3` vs `== 3`
-     * inversion, else-if vs fully nested, and a `nOffs = 1` default
-     * pre-assignment (16 diffs). */
-    if (pStream->nUnk13C != 0) {
-        if (pStream->nUnk184 != 0) {
-            nOffs = pStream->nUnk178 ? 3 : 2;
-        } else {
-            nOffs = 1;
-        }
-    } else {
-        if (pStream->nUnk174 == 3) {
-            nOffs = pStream->nUnk184 ? 3 : 2;
-        } else {
-            nOffs = 1;
-        }
-    }
-    for (i = 0; i < nOffs; i++) {
-        pStream->anUnk18C[i] = _nextBit(pStream, 16);
-        _nextBit(pStream, 1);
-        pStream->anUnk198[i] = _nextBit(pStream, 16);
-        _nextBit(pStream, 1);
-    }
-}
-
-/* Fill in a skipped macroblock's prediction state. */
-int _skipMB0(MPEGSTREAM *pStream, int *pMV, int *pType, int *pField, int *pStat)
-{
-    int nStruct;
-    int bOK;
-
-    bOK = 1;
-    *(int *)((char *)pStream + pStream->nUnk810 * 320 + 1740) = 1;
-    pStream->nUnk1B0 = 1;
-    if (pStream->nUnk150 == 2) {
-        pMV[5] = 0;
-        pMV[4] = 0;
-        pMV[1] = 0;
-        pMV[0] = 0;
-    }
-    nStruct = pStream->nUnk174;
-    if (nStruct == 3) {
-        *pType = 2;
-    } else {
-        int bFrame;
-
-        *pType = 1;
-        bFrame = pStream->nUnk174 == 2;
-        pField[1] = bFrame;
-        pField[0] = bFrame;
-    }
-    if (pStream->nUnk150 == 1) {
-        _Error(pStream, D_004D5C90);
-        bOK = 0;
-    }
-    *pStat &= ~1;
-    return bOK;
-}
-
-extern char D_004D5D68[];  /* second picture_structure in one frame */
-extern char D_004D5D88[];  /* unknown picture_structure */
-
-/* Track the presentation ordering across a temporal_reference wrap. */
-void _updateTempTackData(MPEGSTREAM *pStream, int nTempRef)
-{
-    /* The original keeps the stream pointer in $a2 and the base in $a0;
-     * gcc leaves the pointer in $a0 and never makes the copy at all. */
-    PIN(MPEGSTREAM *p, "$6");
-    int bWrapped;
-    int nBase;
-    int nCur;
-    int nMax;
-
-    p = pStream;
-    LAUNDER_V(p);
-    bWrapped = 0;
-    nBase = 0;
-    if (p->nUnk150 != 3) {
-        if (nTempRef != 0) {
-            if (nTempRef < 0) {
-                bWrapped = p->nUnk854 == 0;
-            }
-            p->nUnk854 = 0;
-            nBase = nTempRef;
-        }
-    }
-    nCur = p->nUnk84C + nTempRef;
-    p->nUnk1AC = nCur;
-    if (bWrapped != 0) {
-        if (nBase >= nTempRef) {
-            p->nUnk1AC = nCur + 1024;
-        }
-    }
-    nMax = p->nUnk850;
-    nCur = p->nUnk1AC;
-    if (nMax < nCur) {
-        nMax = nCur;
-    }
-    p->nUnk850 = nMax;
-}
-
-/* motion_vector(): fold one decoded delta into the running predictor. */
-void _decode_motion_vector(int *pVal, int nFCode, int nDelta, int nResid,
-                           int bHalf)
-{
-    int nLim;
-    int v;
-
-    nLim = 16 << nFCode;
-    v = bHalf ? (*pVal >> 1) : *pVal;
-    if (nDelta > 0) {
-        v += ((nDelta - 1) << nFCode) + nResid + 1;
-        if (v >= nLim) {
-            v -= nLim * 2;
-        }
-    } else if (nDelta < 0) {
-        v -= ((~nDelta) << nFCode) + nResid + 1;
-        if (v < -nLim) {
-            v += nLim * 2;
-        }
-    }
-    *pVal = bHalf ? v * 2 : v;
-}
-
-/* picture_data(): decode into the reference image the structure selects. */
-int _decPicture(MPEGSTREAM *pStream)
-{
-    REFIMAGE *pImg;
-    int nType;
-    int nRet;
-
-    if (pStream->nUnk174 == 3 && pStream->nUnk120 != 0) {
-        _Error(pStream, D_004D5D68);
-        pStream->nUnk120 = 0;
-    }
-    nType = pStream->nUnk174;
-    if (nType == 2) {
+        /* PARKED one word long (51 orig vs 52).  The original's decision tree
+     * has case 3 fall THROUGH into the shared `s1 = pUnk1C0` load the
+     * default arm also uses, entering the error block at a second label;
+     * gcc gives case 3 its own block and an extra `b`.  Swept: switch with
+     * cases in 1/2/3 and 2/1/3 order, and the explicit if/else chain that
+     * mirrors the tree (55 words -- the type gets reloaded per arm, with or
+     * without a named local for it). */
+    switch (pStream->nUnk174) {
+    case 1:
+        pImg = pStream->pUnk1D0;
+        break;
+    case 2:
         pImg = pStream->pUnk1E0;
-    } else if (nType < 3) {
-        if (nType == 1) {
-            pImg = pStream->pUnk1D0;
-        } else {
-            pImg = pStream->pUnk1C0;
-            _Error(pStream, D_004D5D88);
-        }
-    } else if (nType == 3) {
+        break;
+    case 3:
         pImg = pStream->pUnk1C0;
-    } else {
+        break;
+    default:
         pImg = pStream->pUnk1C0;
         _Error(pStream, D_004D5D88);
+        break;
     }
     nRet = _pictureData0(pStream);
     if (nRet != 0) {
