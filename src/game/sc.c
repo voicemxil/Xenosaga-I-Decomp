@@ -1048,3 +1048,59 @@ int scEFFECT3Script(SCOBJ *o)
     sefCreateBattleActorTbl(t->eftNo);
     return 1;
 }
+
+extern int (*_scFuncHandler[])(SCTASK *o);
+
+/* Run script opcodes for one task until a handler asks to stop (0), yields
+ * (2), or the task is closed/suspended. The 2000-opcode cap is a runaway
+ * guard. Written as an explicit goto loop: the original enters at the body
+ * and branches back to the top, which no `while`/`for` spelling reproduces
+ * (they all carry a loop note that jump.c rotates). */
+/* TODO: near-miss (2/44 words). Every instruction matches; only the
+   prologue order differs -- the original emits `sd ra,24(sp)` and fills
+   the entry `b`'s delay slot with the hoisted `lui s2,%hi(_scFuncHandler)`,
+   while we materialise the %hi first and fill the slot with `sd ra`. The
+   two are non-adjacent (the `b` sits between them) so no swap flag fits.
+   Swept: n++ on either side of the r==2 arm (after is required, and is
+   what fixed the length), the opcode index in a block-local vs a
+   function-scope local, an explicit `tbl` pointer local (43 words, worse),
+   `*(tbl + i)` instead of `tbl[i]`, and initialising n through a separate
+   label. The block-local index local is what freed $s0 for the task
+   pointer -- without it gcc parks the table base in a callee-saved
+   register and the whole allocation shifts by one. */
+int scParseScript(SCTASK *o)
+{
+    int n = 0;
+    int r;
+    goto body;
+top:
+    {
+        unsigned short f = o->flags;
+        if (f == 0) {
+            goto done;
+        }
+        if (f & 4) {
+            goto done;
+        }
+        if (r == 2) {
+            n = n + 1;
+            o->flags = f | 0x10;
+            goto done;
+        }
+        n = n + 1;
+        if (n >= 2001) {
+            goto done;
+        }
+    }
+body:
+    {
+        int nCmd = scGetCmdScript(o);
+        r = _scFuncHandler[nCmd](o);
+    }
+    if (r != 0) {
+        goto top;
+    }
+    scDeleteTask(_nowScript, _nowEvent);
+done:
+    return 1;
+}
