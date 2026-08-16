@@ -502,6 +502,61 @@ void SEQ_moveXZ(ACTOR *a)
     p->nCount++;
 }
 
+/* Walk the unit along the XZ line to the linear move channel's target at
+   the channel's speed, turning to face the way it is going, and clear the
+   channel once the remaining distance is within one step. */
+void SEQ_moveUnitXZ(UNIT *u)
+{
+    SEQUENCE *p = &unitSequence[u->nSerial];
+    SEQ_MOVE *m = &p->mov.mv;
+    float *pRot = u->fRot;
+    float *pPos = u->fPos;
+    float *pStart = m->fStart;
+    float *pTo = m->fTarget;
+    float *pSpeed = &m->fTarget[3];
+    float d[4];
+    float e[4];
+    float fDir;
+
+    if ((p->nState & 0x1) == 0) {
+        float fx = pPos[0];
+        float fz;
+        int n;
+
+        p->nState |= 0x1;
+        pStart[0] = fx;
+        n = m->nCount;
+        pStart[1] = pPos[1];
+        fz = pPos[2];
+        pStart[2] = fz;
+        if (n > 0) {
+            d[0] = (pTo[0] - fx) * (1.0f / (float)n);
+            d[1] = 0.0f;
+            d[2] = (pTo[2] - fz) * (1.0f / (float)n);
+            xglVectorLength(pSpeed, d);
+            fDir = xglAtan2(pTo[0] - pPos[0], pTo[2] - pPos[2]);
+        }
+        p->nCount = 0;
+    }
+    fDir = xglAtan2(pTo[0] - pPos[0], pTo[2] - pPos[2]);
+    if ((p->nFlags & 0x4) == 0) {
+        pRot[1] = fDir;
+    }
+    e[0] = pTo[0] - pPos[0];
+    e[2] = pTo[2] - pPos[2];
+    e[3] = e[0] * e[0] + e[2] * e[2];
+    e[3] = sqrtf(e[3]);
+    if (e[3] <= sqrtf(pSpeed[0] * pSpeed[0])) {
+        p->nFlags &= ~0x1;
+        if ((p->nFlags & ~0x10) == 0) {
+            p->nFlags = 0;
+        }
+    }
+    pPos[0] = pPos[0] + xglSin(fDir) * pSpeed[0];
+    pPos[2] = pPos[2] + xglCos(fDir) * pSpeed[0];
+    p->nCount++;
+}
+
 /* Advance a unit's spline-driven rotation channel (degrees to radians) */
 void SEQ_rotateUnitSPL(UNIT *u)
 {
