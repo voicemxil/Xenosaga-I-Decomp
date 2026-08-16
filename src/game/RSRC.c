@@ -25,9 +25,12 @@ typedef struct {
 extern void *rsrcDefaultPath;
 extern int infoIndex;
 extern int infoLength;
-extern u_int RSRC_loadFileSub(RSRC *pResource, void *pPath, void *pFile);
+extern u_int RSRC_loadFileSub(RSRC *pResource, char *pPath, char *pFile);
 extern void *memset(void *pDest, int nValue, u_int nSize);
 extern int strlen(const char *pStr);
+extern u_int RSRC_searchFile(RSRC *pResource, char *pName);
+extern RSRCITEM *RSRC_getDirtyItem(RSRC *pResource, u_int nSize);
+extern int RSRC_check(RSRC *pResource, u_int nSize);
 extern int strncmp(const char *pA, const char *pB, int nLen);
 
 void RSRC_inactiveSource(RSRC *pResource, u_int pSource)
@@ -135,14 +138,14 @@ RSRCITEM *RSRC_getItem(RSRC *pResource, u_int pData)
     return 0;
 }
 
-u_int RSRC_loadFile2(RSRC *pResource, void *pPath, void *pFile)
+u_int RSRC_loadFile2(RSRC *pResource, char *pPath, char *pFile)
 {
     return RSRC_loadFileSub(pResource, pPath, pFile);
 }
 
-u_int RSRC_loadFile(RSRC *pResource, void *pFile)
+u_int RSRC_loadFile(RSRC *pResource, char *pFile)
 {
-    return RSRC_loadFile2(pResource, rsrcDefaultPath, pFile);
+    return RSRC_loadFile2(pResource, (char *)rsrcDefaultPath, pFile);
 }
 
 /* Find a dirty (free) item: without a size target, the smallest dirty
@@ -296,4 +299,72 @@ u_int RSRC_alloc(RSRC *pResource, u_int nSize, u_int pName)
     pItem->nType = 2;
     memset((void *)pItem->pData, 0, pItem->nSize);
     return pItem->pData;
+}
+
+extern int strcpy(char *pDest, const char *pSrc);
+extern int strcat(char *pDest, const char *pSrc);
+extern int sceOpen(const char *pName, int nFlags);
+extern int sceLseek(int fd, int nOffset, int nWhence);
+extern int sceRead(int fd, void *pBuf, int nSize);
+extern int sceClose(int fd);
+
+/* TODO: near-miss, 23 diffs at the right 100 words. Early returns (rather
+   than a single `pData` result local) are what get the length right -- a
+   result variable costs an extra callee-saved register and four words.
+   Residue is entirely in the block that fills the new item: the original
+   holds the item pointer in $a0 and the name's block count in $a1, and
+   stores .pName before .nSize, where gcc mirrors the pair and sinks the
+   name-block shift past the .nSize store. Swept: four placements of the
+   name-block rounding relative to the item stores (23-26). Next thing to
+   try is tools/permute.py over the five item stores. */
+/* Load pFile from pPath into the top of the heap and append a type-1 item
+   describing it. The file's name is copied in immediately behind the data
+   and the item's size covers both. Returns the data address, or 0 when the
+   file is missing or the heap is full. */
+u_int RSRC_loadFileSub(RSRC *pResource, char *pPath, char *pFile)
+{
+    char szPath[1024];
+    u_int pTop;
+    int fd;
+    int nSize;
+    int nLen;
+    int nBlock;
+    int nNameBlock;
+    RSRCITEM *pItem;
+    u_int pData;
+
+    pData = RSRC_searchFile(pResource, pFile);
+    if (pData != 0) {
+        return pData;
+    }
+    strcpy(szPath, pPath);
+    strcat(szPath, pFile);
+    pTop = pResource->pCurrent;
+    fd = sceOpen(szPath, 1);
+    if (fd < 0) {
+        return 0;
+    }
+    nSize = sceLseek(fd, 0, 2);
+    if (RSRC_check(pResource, nSize) != 0) {
+        return 0;
+    }
+    sceLseek(fd, 0, 0);
+    if (nSize != 0) {
+        sceRead(fd, (void *)pTop, nSize);
+    }
+    sceClose(fd);
+    nBlock = (nSize + 15) / 16;
+    pResource->pCurrent = pResource->pCurrent + nBlock * 16;
+    nLen = strlen(pFile);
+    strcpy((char *)pResource->pCurrent, pFile);
+    pItem = pResource->pItems + pResource->nItemCount;
+    pItem->nType = 1;
+    pItem->pData = pTop;
+    nNameBlock = (nLen + 16) / 16;
+    pItem->nState = 0;
+    pItem->pName = pResource->pCurrent;
+    pItem->nSize = (nBlock + nNameBlock) * 16;
+    pResource->pCurrent = pResource->pCurrent + nNameBlock * 16;
+    pResource->nItemCount = pResource->nItemCount + 1;
+    return pTop;
 }

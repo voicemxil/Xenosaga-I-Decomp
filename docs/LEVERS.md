@@ -107,6 +107,57 @@ address arithmetic moved a pointer off `$a0`.
 **The constant-range lever.** Hoist a literal into a long-lived temp to
 demote its register-allocation priority.
 
+**The operand order of a commutative `addu` is observable, and it follows
+the source.** `*(int *)((char *)p + ofs)` emits `addu v0,p,ofs`;
+`*(int *)(ofs + (int)p)` emits `addu v0,ofs,p`. The integer cast is
+load-bearing -- with pointer arithmetic gcc canonicalises the pointer to
+the first operand however you write it, so the offset has to be added as
+a plain integer. This was the LAST word between GameDefocusSet and a
+match.
+
+**A redundant `andi 0xffff` in the original means an explicit `(u_short)`
+cast in the source.** When retail truncates a value a preceding `lhu`
+already zero-extended, the cast is really there: without it gcc proves
+the value fits and drops the word, and the function comes out one
+instruction SHORT. Same for `andi 0xff` after an `lbu`. (RSRC_alloc.)
+
+**LAUNDER2 fences the ORDER of two values against the EE scheduler
+where a single LAUNDER on either one does not.** In RSRC_alloc the
+scheduler issued a `(u_short)` truncation ahead of the `+1` increment
+that shared its source register; with the truncation first, the
+increment still needed the untruncated value, so the truncation could
+not overwrite the dead loaded register in place and every role shifted.
+`LAUNDER(x)` alone went from 6 diffs to 54; `LAUNDER2(next, count)`
+matched. Reach for LAUNDER2 whenever the diff is "these two independent
+computations are in the wrong order".
+
+**LAUNDER_V between the two halves of a split shift lets an unrelated
+store schedule between them.** `n = (x + 15) >> 4; LAUNDER_V(n);
+n <<= 4;` reproduces retail's `srl` / `sw` / `sll` interleave; written as
+one expression the pair stays adjacent. (RSRC_alloc.)
+
+**Transform a parameter IN PLACE inside the guarded region.** `nSize =
+(nSize + 63) & ~63;` after the guard gives retail's `move s0,a0` in the
+call's delay slot plus a separate `addiu`/`and` pair; a fresh
+`nAligned` local lets gcc merge the argument copy with the rounding and
+steal the delay slot. Took GameResourceAlloc 31 diffs -> 6.
+(This is the same "one local, two roles" family, applied to a
+parameter.)
+
+**Which arm is written FIRST decides the branch polarity, and it is
+readable off the original.** A conditional branch that jumps FORWARD
+over a block means that block is the fall-through arm, i.e. the source
+tests the OTHER condition. Writing `if (n >= cap) recycle; else
+append;` rather than `if (n < cap) append; else recycle;` was worth
+three words in RSRC_alloc -- gcc will not lay the arms out the other
+way round for you.
+
+**Read both fields into locals before any store when the original loads
+them together.** A load written after an intervening store to the same
+object cannot be hoisted (gcc must assume the store aliases), so the
+schedule is fixed by source order, not by the scheduler.
+(GameResourceAlloc.)
+
 ---
 
 ## Loops and induction variables
