@@ -414,7 +414,12 @@ def swap_registers(lines, sites):
     of temp throughout the function (verified against the original
     binary at each call site, same as swap_adjacent/swap_into_slot).
 
-    sites: {func: (regA, regB)} parsed from "FUNC:A-B" tokens.
+    Both GPRs and FPRs are supported: a site's two halves are register
+    TOKENS, "2-3" for $2/$3 and "f4-f6" for $f4/$f6. The rename is
+    anchored ($%s\b straight after the dollar), so "2-3" never touches
+    $20 or $f2.
+
+    sites: {func: (tokA, tokB)} parsed from "FUNC:A-B" tokens.
     """
     if not sites:
         return lines
@@ -424,11 +429,11 @@ def swap_registers(lines, sites):
         pair = sites.get(owner[i])
         if pair:
             a, b = pair
-            ra = re.compile(r'\$%d\b' % a)
-            rb = re.compile(r'\$%d\b' % b)
+            ra = re.compile(r'\$%s\b' % re.escape(a))
+            rb = re.compile(r'\$%s\b' % re.escape(b))
             line = ra.sub('\x01', line)
-            line = rb.sub('$%d' % a, line)
-            line = line.replace('\x01', '$%d' % b)
+            line = rb.sub('$%s' % a, line)
+            line = line.replace('\x01', '$%s' % b)
         out.append(line)
     return out
 
@@ -673,6 +678,91 @@ def rotate_insns(flat, sites):
     return res
 
 
+def zero_quad_stores(flat, scope):
+    """`por $X,$0,$0` + `sq $X,d(b)`  ->  `nop` + `sq $0,d(b)`.
+
+    gcc 2.9x always materializes a TI-mode zero into a register before
+    storing it, because its TImode move pattern has no "store the zero
+    register" alternative. The original build stored `$0` directly and
+    padded with a nop, so the two differ by exactly two words in every
+    quadword-clearing function (Java_xeno_Camera_setPointLightReset,
+    Java_xeno_Camera_resetFog, the nmlModelGetGblPosition family).
+
+    `$0` is hardwired zero, so substituting it for a register the `por`
+    just zeroed is semantics-preserving by construction -- this pass
+    cannot change what the code computes, only which encoding says it.
+
+    Conservative: the scan follows $X only to the end of its live range
+    -- the first instruction that WRITES $X starts a different value and
+    stops the scan -- and rewrites the `por` only when every read of $X
+    before that point is the source operand of an `sq`. Any other read
+    (or no store at all) leaves the site alone. Reusing $X as an ordinary
+    temp later in the function, which gcc does routinely, is therefore
+    not a veto.
+    """
+    if not scope:
+        return flat
+    owner = function_at(flat)
+    out = list(flat)
+    # gcc emits these two with a SPACE after the mnemonic, not the tab it
+    # uses for most instructions -- accept either.
+    por = re.compile(r'^\t(por)[ \t](\$\w+),\$0,\$0$')
+    for i, line in enumerate(flat):
+        if not in_scope(owner[i], scope):
+            continue
+        m = por.match(line.rstrip())
+        if not m:
+            continue
+        reg = m.group(2)
+        ref = re.compile(r'%s\b' % re.escape(reg))
+        stores = []
+        ok = True
+        for j in range(i + 1, len(flat)):
+            if owner[j] != owner[i]:
+                break
+            nxt = flat[j]
+            if not RE_INSN.match(nxt) or not ref.search(nxt):
+                continue
+            sq = re.match(r'^\t(sq)[ \t](\$\w+),(.*)$', nxt.rstrip())
+            if sq and sq.group(2) == reg and not ref.search(sq.group(3)):
+                stores.append(j)      # a use we can retarget to $0
+                continue
+            writes, reads = insn_regs(nxt.replace(' ', '\t', 1))
+            if reg in writes and reg not in reads:
+                break                 # live range ends; earlier reads stand
+            ok = False                # a read we cannot retarget
+            break
+        if ok and stores:
+            out[i] = "\tnop"
+            for j in stores:
+                out[j] = re.sub(r'^(\tsq[ \t])%s,' % re.escape(reg),
+                                r'\g<1>$0,', out[j])
+    return out
+
+
+def rotate_insns_seq(flat, site_list):
+    """Apply --rotate sites ONE AT A TIME, re-resolving indices each time.
+
+    rotate_insns() resolves every site against a single scan of the
+    pre-rotation stream and steps the index past a window once it fires,
+    so two windows that OVERLAP -- or a second window whose position only
+    exists after the first has moved things -- cannot both be expressed.
+    Chaining the rotations fixes that: each site is resolved against the
+    output of the previous one, exactly as if the pass had been invoked
+    once per site.
+
+    The cost is that a site's index means "after the earlier sites in
+    this list have been applied", so ORDER MATTERS and the list is not
+    commutative. Use plain --rotate for independent windows; reach for
+    this only when the windows overlap (JS_loadClass and
+    Java_xeno_Chr_setPeer are the motivating cases -- both need two
+    windows sharing instructions).
+    """
+    for site in site_list:
+        flat = "\n".join(rotate_insns(flat, [site])).split("\n")
+    return flat
+
+
 def swap_adjacent_insns(flat, sites):
     """Swap the two instructions of an explicitly named adjacent pair.
 
@@ -898,7 +988,8 @@ def main(path, omitted_hazards, barrier_return_store=None,
          branch_likely=None, branch_unlikely=None,
          war_restore=None, pin_slot=None, lis_hazard_nop=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
-         swap_slot_tgt=None, rotate=None, swap_regs=None):
+         swap_slot_tgt=None, rotate=None, swap_regs=None,
+         rotate_seq=None, zero_quad_store=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -912,7 +1003,12 @@ def main(path, omitted_hazards, barrier_return_store=None,
         for tok in swap_regs:
             fn, ab = tok.split(':')
             a, b = ab.split('-')
-            spec[fn] = (int(a), int(b))
+            a, b = a.lstrip('$'), b.lstrip('$')
+            for t in (a, b):
+                if not re.match(r'^f?\d+$', t):
+                    raise SystemExit("--swap-regs: bad register token %r "
+                                     "(want 2, $2, f4 or $f4)" % t)
+            spec[fn] = (a, b)
         lines = swap_registers(lines, spec)
 
     owner = function_at(lines)
@@ -1193,6 +1289,14 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = rotate_insns(flat, rotate)
 
+    if rotate_seq:
+        flat = "\n".join(out).split("\n")
+        out = rotate_insns_seq(flat, rotate_seq)
+
+    if zero_quad_store:
+        flat = "\n".join(out).split("\n")
+        out = zero_quad_stores(flat, zero_quad_store)
+
     if swap_slot:
         flat = "\n".join(out).split("\n")
         out = swap_into_slot(flat, swap_slot)
@@ -1265,6 +1369,16 @@ if __name__ == "__main__":
                         help="rotate a window right by one: FUNC:N[:LEN] "
                              "(LEN defaults to 3); expresses the dependent "
                              "swaps --swap-adjacent cannot")
+    parser.add_argument("--rotate-seq", default=None, metavar="SITES",
+                        help="like --rotate, but the comma-separated sites "
+                             "are applied ONE AT A TIME with indices "
+                             "re-resolved after each, so overlapping "
+                             "windows can both fire (order matters)")
+    parser.add_argument("--zero-quad-store", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="rewrite gcc's `por $X,$0,$0` + `sq $X` "
+                             "quadword-zero idiom to `nop` + `sq $0`, the "
+                             "form the original build emitted")
     parser.add_argument("--lis-hazard-nop", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="add the ee-as hazard nop after a synthesized "
@@ -1325,8 +1439,9 @@ if __name__ == "__main__":
                         metavar="FUNC:A-B",
                         help="whole-function register-number swap: every "
                              "$A becomes $B and vice versa within FUNC "
-                             "(0-based raw register numbers, e.g. 2-3 for "
-                             "$v0/$v1). A pure allocator naming tie-break, "
+                             "(raw register tokens, e.g. 2-3 for $v0/$v1 "
+                             "or f4-f6 for $f4/$f6). An allocator naming "
+                             "tie-break, "
                              "distinct from the scheduling fixers above; "
                              "repeatable for multiple FUNC:A-B sites")
     parser.add_argument("--expand-sym-loads", action="store_true",
@@ -1384,4 +1499,6 @@ if __name__ == "__main__":
          scope(args.lis_hazard_nop), scope(args.swap_adjacent),
          scope(args.swap_into_slot), scope(args.mtc1_nop),
          scope(args.swap_slot_target), scope(args.rotate),
-         args.swap_regs)
+         args.swap_regs,
+         [t for t in (args.rotate_seq or "").split(',') if t],
+         scope(args.zero_quad_store))

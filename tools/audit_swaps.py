@@ -46,8 +46,8 @@ def _identity(word):
     return word & 0xFFFF0000             # I-type: drop the immediate
 
 
-REORDER_FLAGS = ("--swap-adjacent", "--rotate", "--swap-into-slot",
-                 "--swap-slot-target")
+REORDER_FLAGS = ("--swap-adjacent", "--rotate", "--rotate-seq",
+                 "--swap-into-slot", "--swap-slot-target")
 
 
 def sources_by_basename():

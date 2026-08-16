@@ -186,7 +186,24 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
-    "Java_Chr.c": "--mtc1-nop Java_xeno_Chr_look_eye_set__FF:0 --rotate Java_xeno_Chr_setFilter__I:58:2",
+    # JS_classLight_setDirection2: the li/lw pair is a scheduling
+    # tie-break, and the $f0/$f1 assignment across the three
+    # load-store pairs is an allocator naming tie-break -- the loads and
+    # stores are already in the original's order.
+    # JS_loadClass needs two OVERLAPPING left-rotations, which a single
+    # --rotate scan cannot fire (it steps past the first window), hence
+    # --rotate-seq. The order is not commutative: 12:-7 first.
+    "JS.c": ("--swap-adjacent JS_classLight_setDirection2:6 "
+             "--swap-regs JS_classLight_setDirection2:f0-f1 "
+             "--rotate-seq JS_loadClass:12:-7,JS_loadClass:10:-4"),
+
+    "Java_Chr.c": ("--mtc1-nop Java_xeno_Chr_look_eye_set__FF:0 "
+                   "--rotate Java_xeno_Chr_setFilter__I:58:2 "
+                   "--swap-adjacent Java_xeno_Chr_setPointLightReset__:18 "
+                   "--zero-quad-store Java_xeno_Chr_setPointLightReset__ "
+                   "--rotate-seq Java_xeno_Chr_setPeer__Ljava_lang_Object_:21:-5,"
+                   "Java_xeno_Chr_setPeer__Ljava_lang_Object_:21:2,"
+                   "Java_xeno_Chr_setPeer__Ljava_lang_Object_:23:2"),
     "JNI.c": "--rotate JNI_searchClasses:16:2",
     "JTHREAD.c": "--rotate JTHREAD_cntl:2:2",
     "sceGs.c": "--swap-adjacent sceGsSyncVCallback:26",

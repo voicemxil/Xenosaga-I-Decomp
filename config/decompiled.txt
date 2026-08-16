@@ -2328,3 +2328,7 @@ JNI_searchClasses = 0x002F0A90, 0xFC; // JNI
 JTHREAD_cntl = 0x003058C8, 0x8C; // JTHREAD
 sceGsSyncVCallback = 0x0020ABC8, 0xA0; // sceGs
 sceCdDelayThread = 0x0020C940, 0x68; // sceCd.c
+JS_loadClass = 0x0026B1A0, 0x6C; // JS.c
+JS_classLight_setDirection2 = 0x0026BF18, 0x68; // JS.c
+Java_xeno_Chr_setPointLightReset__ = 0x003006E0, 0x84; // Java_Chr.c
+Java_xeno_Chr_setPeer__Ljava_lang_Object_ = 0x003008F0, 0xC8; // Java_Chr.c
