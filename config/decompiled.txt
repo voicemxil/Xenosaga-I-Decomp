@@ -2845,3 +2845,6 @@ subLine2_DrawType_1 = 0x002BB448, 0x144; // sub.c
 sceSifLoadIopHeap = 0x00207678, 0xF0; // sceSif.c
 fileRead = 0x00221B48, 0x134; // xglMovie.c
 SEQ_moveUnitChr = 0x00320288, 0x260; // SEQ.c
+SGsAddReg = 0x002E0E68, 0x38; // sef.c
+SGsAddGifUV = 0x002E0FC0, 0x40; // sef.c
+SEQ_moveChr = 0x00309FD0, 0x2C4; // SEQ.c

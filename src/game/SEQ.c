@@ -439,6 +439,7 @@ extern float xglSin(float f);
 extern float xglCos(float f);
 extern float sqrtf(float f);
 extern float D_004D84D0;
+extern float D_004D84C0;
 
 /* Walk the actor along the XZ line to the linear move channel's target at
    the channel's speed, turning to face the way it is going, and clear the
@@ -611,6 +612,74 @@ void SEQ_moveUnitChr(UNIT *u)
     }
     pPos[0] = pPos[0] + xglSin(fDir) * pSpeed[0];
     pPos[2] = pPos[2] + xglCos(fDir) * pSpeed[0];
+    p->nCount++;
+}
+
+/* Walk the actor along the XZ line toward another character's position at
+   the channel's speed; stop and clear the channel once it is within half a
+   step more than one frame's travel. */
+void SEQ_moveChr(ACTOR *a)
+{
+    SEQUENCE *p = &actSequence[a->nSerial];
+    SEQ_MOVE *m = &p->mov.mv;
+    float *pRot = a->fRot;
+    float *pPos = a->fPos;
+    float *pStart = m->fStart;
+    float *pTo = ((ACTOR *)m->pTarget)->fPos;
+    float *pSpeed = &m->fTarget[3];
+    float d[4];
+    float e[4];
+    float fDir;
+
+    if ((p->nState & 0x1) == 0) {
+        float fx = pPos[0];
+        float fz;
+        int n;
+
+        p->nState |= 0x1;
+        pStart[0] = fx;
+        n = m->nCount;
+        pStart[1] = pPos[1];
+        fz = pPos[2];
+        pStart[2] = fz;
+        if (n > 0) {
+            d[0] = (pTo[0] - fx) * (1.0f / (float)n);
+            d[2] = (pTo[2] - fz) * (1.0f / (float)n);
+            d[1] = 0.0f;
+            xglVectorLength(pSpeed, d);
+        }
+        fDir = xglAtan2(pTo[0] - pPos[0], pTo[2] - pPos[2]);
+        p->nCount = 0;
+    }
+    fDir = xglAtan2(pTo[0] - pPos[0], pTo[2] - pPos[2]);
+    if ((p->nFlags & 0x4) == 0) {
+        pRot[1] = fDir;
+    }
+    e[0] = pTo[0] - pPos[0];
+    e[2] = pTo[2] - pPos[2];
+    e[3] = e[0] * e[0] + e[2] * e[2];
+    e[3] = sqrtf(e[3]);
+    if (e[3] < sqrtf((pSpeed[0] + 0.5f) * (pSpeed[0] + 0.5f))) {
+        p->nFlags &= ~0x1;
+        if ((p->nFlags & ~0x10) == 0) {
+            p->nFlags = 0;
+        }
+        return;
+    }
+    pPos[0] = pPos[0] + xglSin(fDir) * pSpeed[0];
+    pPos[2] = pPos[2] + xglCos(fDir) * pSpeed[0];
+    if ((p->nFlags & 0x10) == 0) {
+        ANM *w = &a->anim;
+
+        if ((w->nFlags & 0x8) == 0) {
+            w->nFlags |= 0x8;
+        }
+        if (pSpeed[0] <= D_004D84C0) {
+            ACT_setMotion(a, 1);
+        } else {
+            ACT_setMotion(a, 3);
+        }
+    }
     p->nCount++;
 }
 
