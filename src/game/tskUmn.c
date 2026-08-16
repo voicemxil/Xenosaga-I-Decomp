@@ -70,7 +70,8 @@ typedef struct {
     signed char nDataBaseHit;           /* 0x5D: keyword-search result */
     signed char nDataBaseOpen;          /* 0x5E: pop-up may be opened */
     signed char nDataBaseBusy;          /* 0x5F: pop-up must stay open */
-    char pad60[0x80 - 0x60];
+    int nMailHist;                    /* 0x60 */
+    char pad64[0x80 - 0x64];
 } UMN_WORK;
 
 extern UMN_WORK UmnWork;
@@ -1849,6 +1850,190 @@ void tskUmnMailMenu(TSK_TASK *pTask, UMN_MAILMENU *w)
         }
     }
     xglFontDebugPrintf(0, 40, "yn : %2d", w->nState);
+}
+
+/* --- Mail screen: the button-guide strip and the two counter panels --- */
+
+/* One caption row: a slide-in x/y pair followed by its eMessage. */
+typedef struct {
+    short nX;                           /* 0x00 */
+    short nY;                           /* 0x02 */
+    EMSG emsg;                          /* 0x04 */
+} MAILEXROW;                            /* 0x48 */
+
+/* One "n/m" counter panel: ribbon + tag + number, all driven from the
+   panel's own sliding x/y.  Not UMN_EXWIN: retail's object here starts
+   at the coordinate pair, with no window header in front of it. */
+typedef struct {
+    short nX;                           /* 0x000 */
+    short nY;                           /* 0x002 */
+    EXTAGFONT tag;                      /* 0x004 */
+    EXRIBBON rib;                       /* 0x024 */
+    EXNUMBER num;                       /* 0x094 */
+    char pad118[0x124 - 0x118];         /* 0x118 */
+} MAILEXNUM;                            /* 0x124 */
+
+typedef struct {
+    unsigned char nMode;                /* 0x000 */
+    unsigned char bReady;               /* 0x001 */
+    char pad002[2];                     /* 0x002 */
+    short nW;                           /* 0x004 */
+    short nH;                           /* 0x006 */
+    int nColor;                         /* 0x008 */
+    MAILEXROW row[3];                   /* 0x00C */
+    MAILEXNUM ex[2];                    /* 0x0E4 */
+} UMN_MAILEX;
+
+extern void *UmnMailDataGet(void);
+
+/* Mail screen: the three button captions across the bottom of the mail
+ * list, plus the two "n/m" counter panels that slide in beside them.
+ *
+ * The two captions that can be greyed out are recoloured IN THE STRING:
+ * each carries a `\014rgb' escape whose three bytes are overwritten with
+ * 0x40 (lit) or 0x80 (dimmed) before it is drawn, which is why the text
+ * table is `char *' and not `const char *'. */
+void tskUmnMailExWin(TSK_TASK *pTask, UMN_MAILEX *w)
+{
+    static char *text[3] = {
+        "\036\002:History",
+        "\014@@@\036\001:Reply  \014\200\200\200\036\003:Back",
+        "\014@@@\036\001:Set    \014\200\200\200\036\003:Cancel"
+    };
+    int i;
+
+    if (UmnWork.nScene != 1) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nW = 528;
+        w->nH = 32;
+        w->nColor = 0x00FFFFF0;
+        for (i = 0; i < 3; i++) {
+            w->row[i].nX = 528;
+            w->row[i].nY = 16;
+            eMessageSet(&w->row[i].emsg, text[i]);
+            eMessageModeChange(&w->row[i].emsg, 32);
+        }
+        for (i = 0; i < 2; i++) {
+            w->ex[i].nX = -272;
+            w->ex[i].nY = 48;
+            eRibbonSet(&w->ex[i].rib, 3);
+            w->ex[i].rib.nW = 256;
+            w->ex[i].rib.nH = 24;
+            eTagFontSet(&w->ex[i].tag, "\001Num");
+            eNumberSet(&w->ex[i].num, 0);
+        }
+        w->nMode = 0;
+        w->bReady = 0;
+        break;
+    case 2: {
+        short nTarget[3];
+        short nExTarget[3];
+        /* One register in retail: the colour is stored into the ribbon
+           AND passed to eRibbonMain, likewise the tag colour. */
+        PIN(int nColor, "$5");
+        PIN(int nTagColor, "$5");
+        PIN(int nNumY, "$5");
+        PIN(int nAlign, "$6");
+        PIN(int nDigits, "$4");
+
+        for (i = 0; i < 3; i++) {
+            nTarget[i] = 528;
+            nExTarget[i] = -272;
+        }
+        switch (UmnWork.nPage) {
+        case 32:
+        case 33:
+        case 48:
+        case 49:
+        case 96:
+        case 97:
+            nExTarget[0] = 0;
+            break;
+        case 64:
+        case 65: {
+            char *p;
+            char *q;
+
+            p = text[1] + 1;
+            q = text[1] + 15;
+            if (UmnWork.u54.mail.aId[3]) {
+                p[2] = -128;
+                p[1] = -128;
+                p[0] = -128;
+            } else {
+                p[2] = 64;
+                p[1] = 64;
+                p[0] = 64;
+            }
+            if (UmnWork.u.db.nSel == 30 &&
+                (*(unsigned char *)UmnMailDataGet() & 0x30) == 0) {
+                q[2] = 64;
+                q[1] = 64;
+                q[0] = 64;
+            } else {
+                q[2] = -128;
+                q[1] = -128;
+                q[0] = -128;
+            }
+            nTarget[1] = 272;
+            break;
+        }
+        case 80:
+        case 81: {
+            char *p;
+
+            p = text[2] + 1;
+            if (UmnWork.nMailHist >= 0) {
+                p[2] = -128;
+                p[1] = -128;
+                p[0] = -128;
+            } else {
+                p[2] = 64;
+                p[1] = 64;
+                p[0] = 64;
+            }
+            nTarget[2] = 272;
+            break;
+        }
+        }
+        for (i = 0; i < 3; i++) {
+            MoveSlide(&w->row[i].nX, &nTarget[i], 3.0f);
+            w->row[i].emsg.nX = w->row[i].nX;
+            w->row[i].emsg.nY = w->row[i].nY;
+            w->row[i].emsg.nColor = w->nColor;
+            eMessageMain(&w->row[i].emsg);
+        }
+        for (i = 0; i < 2; i++) {
+            MoveSlide(&w->ex[i].nX, &nExTarget[i], 3.0f);
+            w->ex[i].rib.nX = w->ex[i].nX;
+            w->ex[i].rib.nY = w->ex[i].nY;
+            nColor = w->nColor;
+            w->ex[i].rib.nColor = nColor;
+            eRibbonMain(&w->ex[i].rib, nColor);
+            w->ex[i].tag.nX = w->ex[i].nX + 188;
+            w->ex[i].tag.nY = w->ex[i].nY + 4;
+            nTagColor = w->ex[i].rib.nColor + 1;
+            w->ex[i].tag.nColor = nTagColor;
+            eTagFontMain(&w->ex[i].tag, nTagColor);
+            w->ex[i].num.nX = w->ex[i].tag.nX + 30;
+            w->ex[i].num.nColor = w->ex[i].tag.nColor;
+            nDigits = 3;
+            w->ex[i].num.nDigits = nDigits;
+            nNumY = w->ex[i].tag.nY;
+            w->ex[i].num.nY = nNumY;
+            nAlign = 2;
+            w->ex[i].num.nValue =
+                (UmnWork.u.ex.nHi << 16) + UmnWork.u.ex.nLo + 1;
+            w->ex[i].num.nAlign = nAlign;
+            eNumberMain(&w->ex[i].num, nNumY, nAlign);
+        }
+        break;
+    }
+    }
 }
 
 /* --- Database screen: the button-guide strip (five captions + two
