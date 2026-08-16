@@ -1,8 +1,9 @@
 /* Undo-query parameter helpers. */
 
-extern float UnduGet2(int mode, float x, float z);
+typedef struct UNDU_PARAM UNDU_PARAM;
+extern float UnduGet2(UNDU_PARAM *param, float x, float z);
 
-typedef struct {
+struct UNDU_PARAM {
     int field_00;
     int field_04;
     short field_08;
@@ -18,7 +19,7 @@ typedef struct {
     long long field_28;
     long long field_30;
     long long field_38;
-} UNDU_PARAM;
+};
 
 float UnduGet(float x, float z)
 {
@@ -254,4 +255,59 @@ float UnduCheckResultCheck(WALL_UNIT *w, UNDU_RESULT *res, float *pos)
     }
 done:
     return w->fHeight;
+}
+
+/* EE scratchpad: the default parameter block when the caller passes none. */
+#define UNDU_SPR ((UNDU_PARAM *)0x70000000)
+
+typedef struct {
+    UNDU_PARAM param;
+    float fX;
+    int nPad;
+    float fZ;
+} UNDU_WORK;
+
+extern unsigned char *CurrentColiHead;
+extern float UnduCheck(float *pos, int mode, UNDU_PARAM *param);
+
+float UnduGet2(UNDU_PARAM *param, float x, float z)
+{
+    UNDU_WORK *work;
+    int nType;
+
+    /* CurrentColiHead is read twice, not held in a local: a local becomes
+       a callee-saved $s0 across the UnduParamInit call and costs the
+       register save/restore pair. */
+    if (CurrentColiHead == 0) {
+        return 0.0f;
+    }
+    if (param == 0) {
+        UnduParamInit(UNDU_SPR);
+        param = UNDU_SPR;
+    }
+    work = (UNDU_WORK *)param->field_1C;
+    nType = *CurrentColiHead & 0x7F;
+    if (work == 0) {
+        work = (UNDU_WORK *)UNDU_SPR;
+    }
+    if (nType < 3 && nType != 0) {
+        /* PARKED at 12 diffs, all register: the original keeps `work` in
+           $a1 and forms the call's first argument directly in $a0
+           (`addiu a0,a1,64` between the two swc1); we get work in $a3, the
+           address in $v0 and an extra `move a0,v0`.  Length and schedule
+           are exact.  Swept: the address expression inline at the call
+           (loses the beqzl + the alignment nop -- 40 words), the `p =`
+           assignment at all four positions in the store group (only
+           position 0 keeps 42 words), PIN($4) on p (23 diffs, adds
+           moves), function-scope vs block-scope p, and a float[3] member
+           spelling of the destination.  Permuter territory. */
+        float *p;
+
+        p = &work->fX;
+        work->fX = x;
+        work->fZ = z;
+        work->nPad = 0;
+        return UnduCheck(p, 0, param);
+    }
+    return param->field_14;
 }
