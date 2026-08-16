@@ -1338,3 +1338,113 @@ int sceIoctl2(int fd, int cmd, char *arg, unsigned int arglen,
     DeleteSema(semid);
     return result;
 }
+
+/* The read/write request layout.  The 0x20000000 flag bit means the
+ * caller's buffer is already an uncached-accelerated pointer, so it
+ * needs no writeback -- and gcc shares that constant with the
+ * uncached alias built for the completion word further down.
+ *
+ * PARKED NEAR-MISS (sceRead), TWO WORDS short, 154 vs 156, and the same
+ * two residues as sceLseek above:
+ *   - gcc keeps `flags & 0x8000` in a callee-saved register instead of
+ *     recomputing it in the second test.  In the original ALL NINE
+ *     callee-saved registers are already taken (p, sd, semid, flags,
+ *     two %hi bases, the 0x20000000 mask, buf, len), so there was
+ *     nowhere to keep it.  Swept: hoisting `&_rcv_data_rpc` into a
+ *     local (158 words), hoisting 0x20000000 into a local (161), both
+ *     together (162) -- each buys the register back but costs more in
+ *     spills than it saves.  LAUNDER(flags) also spills `len` (161).
+ *   - the peeled queue probe's `bne` delay slot takes `move a2,zero`
+ *     where the original takes the `lui %hi` from the block after the
+ *     branch.  Pure delay-slot-filler tie-break; no source shape
+ *     reached it.
+ * The whole request layout, both writeback guards and the entire reply
+ * tail are exact. */
+typedef struct t_fs_send_rw {
+    int   semid;
+    void *dst;
+    int   size;
+    int   fd;                   /* +12 */
+    void *buf;                  /* +16 */
+    int   len;                  /* +20 */
+    int   reserved;             /* +24 */
+    int   index;                /* +28 */
+} fs_send_rw_t;                 /* 32 bytes */
+
+extern int _rcv_data_cmd;
+
+int sceRead(int fd, void *buf, int len)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_rw_t *sd;
+    iob_t *p;
+    int done;
+    int i;
+    int flags;
+    int id;
+
+    sd = (fs_send_rw_t *)&_send_data;
+    p = get_iob(fd);
+    _sceFsWaitS(2);
+    if (_fs_init == 0) {
+        _sceFsSigSema();
+        return -1;
+    }
+    if (p == 0) {
+        _sceFsSigSema();
+        return -9;
+    }
+    flags = p->used;
+    if (flags == 0) {
+        _sceFsSigSema();
+        return -9;
+    }
+    sd->fd = p->fd;
+    sd->index = p - _iob;
+    sd->buf = buf;
+    sd->len = len;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->size = 4;
+    sd->dst = &result;
+    _send_data.semid = semid;
+    if (flags & 0x8000) {
+        WaitSema(_fs_fsq_semid);
+        for (i = 0; i < 32; i++) {
+            if (_sceFs_q[i] == -1) {
+                id = sd->semid;
+                _sceFs_q[i] = id;
+                sd->semid = -id;
+                break;
+            }
+        }
+        SignalSema(_fs_fsq_semid);
+    }
+    if ((flags & 0x20000000) == 0)
+        sceSifWriteBackDCache(buf, len);
+    sceSifWriteBackDCache(&_rcv_data_cmd, 164);
+    sceSifWriteBackDCache(sd, 32);
+    if (sceSifCallRpc(&_cd, 2, 0, &_send_data, 32, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    if (flags & 0x8000) {
+        DeleteSema(semid);
+        return 0;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}
