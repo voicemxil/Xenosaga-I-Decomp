@@ -658,6 +658,43 @@ extern int MSG_queuePop(MSGQUEUE *q, unsigned char *pDst, int nArg);
 extern void MSG_queueReset(MSGQUEUE *q, int nArg);
 extern void TW_setPos(TMENU *t);
 
+/* NEAR-MISS, 26 diffs of 461 words, LENGTH CORRECT (was 443 on the first
+ * draft).  Nothing structural is left -- all three jump tables, both
+ * dispatches, the pad block, the fade and the queue drain are
+ * instruction-for-instruction right.  The residue is four register /
+ * scheduling clusters:
+ *
+ *  1. open arm (h14 == 16, no bit 2): 3 words.  Retail issues
+ *     `lw a0,260(s0)` second and `sh zero,48(s0)` sixth; this build
+ *     rotates the two.  A --rotate TMENU_updateDefault:N:3 fixer would
+ *     close it.  Swept: all four statement orders of the arm (the
+ *     block-local EWCOMP* already recovered retail's $a0 -- see below).
+ *  2. cursor block: 2 words, one adjacent `sra ..,0x10` / `sra ..,0x18`
+ *     pair emitted the other way round.  Pure scheduling; a
+ *     --swap-adjacent site would close it.
+ *  3. h14 == 1 live arm: 12 words.  Retail keeps `t->nFlags | 1` in $a0
+ *     and the reload in $v0; this build has $a1/$a0, and puts the first
+ *     store after the `and` instead of before it.  Caused by the
+ *     volatile-store spelling below.  Swept: plain |= / &= (loses the
+ *     store entirely), the volatile read alone in three positions,
+ *     volatile store with and without a separate local, h14 before and
+ *     after the mask, and a fresh local for the outer reload.
+ *  4. fade arm (h14 == 16, live): 9 words, a pure $v0/$v1/$a1 rotation
+ *     around nB and the phase counter -- retail does `addiu a1,a1,1`
+ *     in place, this build lands the sum in $v0.  Swept: int vs short
+ *     phase local, reading t->h30 back instead, the store before and
+ *     after the u14 write, and an if/else duplication of the u14 store.
+ *
+ * Also swept with NO effect: the order of the local declarations (four
+ * orders, byte-identical output -- gcc 2.96 allocates by use order, do
+ * not spend runs on it), and a block-local EWCOMP* in the fade arm
+ * (helps only in the open arm).
+ *
+ * The two --mtc1-nop sites in configure.py are REQUIRED for the length:
+ * ee-as pads two slots after the last mtc1 of each float-constant pair
+ * before the first COP1 compute and this toolchain emits only the first
+ * hazard nop.
+ */
 /* Per-frame state machine for a default text menu.  h14 is the mode and
  * h30 the phase counter; the mode is dispatched twice, once for the
  * "not yet running" half (bit 2 of nFlags clear) and once for the live
