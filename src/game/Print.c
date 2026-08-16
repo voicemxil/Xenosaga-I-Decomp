@@ -242,3 +242,44 @@ loop:
     }
     sceVif1PkAddDirectDataN(*packet, direct, 0xD);
 }
+
+typedef struct {
+    short x;                /* 0x00 */
+    short y;                /* 0x02 */
+    PRINT_U32 color;        /* 0x04 */
+    unsigned char r;        /* 0x08 */
+    unsigned char g;        /* 0x09 */
+    unsigned char b;        /* 0x0A */
+    unsigned char a;        /* 0x0B */
+} PRINT_POINT;
+
+/* A single GS POINT primitive: three quadwords of GIFtag + RGBAQ + XYZ2. */
+void PrintPoint(void **packet, PRINT_POINT *point)
+{
+    PRINT_U32 *direct;
+    /* Initialised on the declaration, not after the call: as a statement
+       the address computation schedules ahead of the first store's
+       constant instead of behind it. */
+    PRINT_U32 *entry = (PRINT_U32 *)((char *)packet + 0x30);
+
+    endPrintInfoSet(packet, 0, 0);
+    entry[0] = 0x8001;
+    entry[1] = 0x20204000;
+    entry[2] = 0x51;
+    entry[3] = 0;
+    direct = entry;
+
+    entry = (PRINT_U32 *)((char *)packet + 0x40);
+    entry[0] = point->r;
+    entry[1] = point->g;
+    entry[2] = point->b;
+    entry[3] = point->a;
+
+    entry = (PRINT_U32 *)((char *)packet + 0x50);
+    entry[0] = (point->x << 4) + 0x6FF8;
+    entry[1] = (point->y << 4) + 0x71F8;
+    entry[2] = point->color & 0xFFFFFF;
+    entry[3] = 0;
+
+    sceVif1PkAddDirectDataN(*packet, direct, 3);
+}
