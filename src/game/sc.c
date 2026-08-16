@@ -755,12 +755,18 @@ int scONGOSUB(SCOBJ *o)
     int *cmd = &o->cmdBuf[0];
     int cnt = scGetNumScript(o);
     int base = scGetCmdScript(o);
-    int next = cmd[o->field54] + base;
-    int ret = next;
+    /* Base-first addend via a pointer local -- see scPRINTScript. */
+    int *p0 = (int *)((int)cmd + o->field54 * 4);
+    int next = *p0 + base;
+    int *slot;
+    int ret;
     if (cnt >= 0 && cnt < base) {
         ret = scGetAdrIdx(o, cnt);
+    } else {
+        ret = next;
     }
-    cmd[(short)(unsigned short)o->field54] = next;
+    slot = (int *)((int)cmd + (short)(unsigned short)o->field54 * 4);
+    *slot = next;
     return ret;
 }
 

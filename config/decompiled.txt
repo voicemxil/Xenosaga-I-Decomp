@@ -2646,3 +2646,4 @@ scEFFECTScript = 0x002EB4D0, 0x98; // sc.c
 srsGetEffectType = 0x002E8B80, 0x88; // srsGet.c
 srsEffectNameToID = 0x002E9AB8, 0x70; // srsGet.c
 scPRINTScript = 0x002EAC18, 0xB4; // sc.c
+scONGOSUB = 0x002EAA08, 0xA0; // sc.c
