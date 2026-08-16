@@ -685,6 +685,13 @@ extern int scParseScript(SCTASK *o);
 /* Flags==0 means the task is free; bit 2 means suspended. Bit 4 selects the
  * wait state machine, bit 5 the move one; the wait handler may clear bit 4,
  * in which case the parser is skipped for this frame. */
+/* TODO: near-miss (1/32 words). Every instruction is identical; the
+   original's last test is `beqzl` (branch-likely) where we emit a plain
+   `beqz` with the same `li v0,1` in the slot. reorg.c only annuls when
+   the slot insn is not redundant on the fall-through path, and both
+   builds have an identical `li v0,1` after the scMoveParseScript call.
+   Swept: `return 1` inside the if as well as after it, an else-arm with
+   a duplicated scParseScript call -- all still beqz. */
 int scDispatchScript(SCTASK *o)
 {
     unsigned short f = o->flags;
