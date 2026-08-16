@@ -1,6 +1,8 @@
 /* Timeline camera helpers.  A timeline camera owns four animation channels
  * and drives the active XGL camera's transform fields. */
 
+#include "matching.h"
+
 typedef struct {
     char pad000[0x94];
     float fov;                 /* 0x094 */
@@ -125,4 +127,49 @@ void TCAMERA_init(void)
         }
         pCam++;
     }
+}
+
+/* A CNS (constraint) node the timeline camera can be attached to. It
+ * carries two positions: the node's own translation and the world-space
+ * one baked by the constraint solver. */
+typedef struct {
+    /* 0x00 */ float local[4];
+    /* 0x10 */ float world[4];
+} TCAMERA_CNS;
+
+/* Place the camera at the attached CNS node plus a constant offset.
+ * nMode 1 takes the node's own translation, every other mode the solved
+ * world one (0 and the default share a body, which is why gcc tests for
+ * zero first and then for one). The add itself is VU0 macro mode: the
+ * offset and the gathered position go through vf3/vf2 and the xyz-masked
+ * vadd leaves w untouched.
+ *
+ * The repeated `(*ppCns)->` is deliberate: a named local for the node
+ * pointer makes gcc reuse the dying argument register a1 for it, while
+ * letting CSE invent the temporary itself puts it in v0, as the original
+ * has. */
+void TCAMERA_transCNS(TCAMERA_XGL_CAMERA *pCamera, TCAMERA_CNS **ppCns,
+                      float *pOffset, int nMode)
+{
+    float aPos[4];
+    float *pTranslate = pCamera->translate;
+
+    switch (nMode) {
+    case 1:
+        aPos[0] = (*ppCns)->local[0];
+        aPos[1] = (*ppCns)->local[1];
+        aPos[2] = (*ppCns)->local[2];
+        break;
+    case 0:
+    default:
+        aPos[0] = (*ppCns)->world[0];
+        aPos[1] = (*ppCns)->world[1];
+        aPos[2] = (*ppCns)->world[2];
+        break;
+    }
+    PS2_ASM("lqc2 $vf3, 0(%1)\n"
+            "lqc2 $vf2, %2\n"
+            "vadd.xyz $vf2, $vf2, $vf3\n"
+            "sqc2 $vf2, 0(%0)"
+            : : "r"(pTranslate), "r"(pOffset), "m"(aPos[0]) : "memory");
 }

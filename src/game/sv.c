@@ -489,12 +489,14 @@ void svInitImageMapper(void)
     }
 }
 
-/* NEAR MISS (2 diffs): same shape, but the original biases the store
- * induction variable to &ref[i].unk04, giving `sw -4(v0)` / `sw 0(v0)`
- * off base+4 where this build uses base+0 and `sw 0` / `sw 4`. The
- * lui/ori constant differs by exactly that 4. Everything else -- including
- * forming the offset at run time rather than folding it into %hi/%lo,
- * which is why the base has to be a pointer variable -- matches. */
+/* The induction variable is biased to &ref[i].unk04: the walk is
+ * `sw -4(v0)` / `sw 0(v0)` off base+4, not `sw 0` / `sw 4` off base+0.
+ * Writing the two fields by name (in either order, and as a chained
+ * assignment) always gives gcc the base+0 giv; a BLOCK-LOCAL pointer to
+ * the second word, indexed [-1] and [0], is what puts the +4 into the
+ * lui/ori constant. Note also that the offset is formed at run time
+ * rather than folded into %hi/%lo, which is why the base has to be a
+ * pointer variable. */
 void svInitRefImage(void)
 {
     char *m = _imageMapper;
@@ -502,8 +504,9 @@ void svInitRefImage(void)
     int i;
 
     for (i = 0; i < 40; i++) {
-        p[i].unk04 = 0;
-        p[i].unk00 = 0;
+        int *q = &p[i].unk04;
+        q[-1] = 0;
+        q[0] = 0;
     }
 }
 
