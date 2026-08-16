@@ -27,16 +27,13 @@ void sceResetttyinit(void)
  * sceDeci2Open result and then RELOADS it for the sign test, which no
  * non-volatile spelling reproduces (that alone was 47 vs 46 words).
  *
- * NOTE FOR THE NEXT AGENT: the interleaving is scheduler output, so
- * this TU looks like another `FILE_CFLAGS_OVERRIDE = "-O2 -G0"` file
- * (scePad.c / sceCd.c / sceSif.c / sceMc.c).  With that flag set the
- * residue drops from 19-20 diffs to 14; without it, nothing gets below
- * 19.  The override is NOT set, because 14 is not a match and an
- * unproven flag on a shared file is worse than none -- set it again
- * when a second sceTty function confirms it.  Statement orders swept
- * at 14: rbuf-alias before wbuf-alias and after, the zero-stores
- * before/between/after the alias computations, and both orders of the
- * final `w->pad` / `w->src` stores.
+ * The interleaving is scheduler output, which is consistent with this
+ * TU's `FILE_CFLAGS_OVERRIDE = "-O2 -G0"`: with the flag the residue is
+ * 14 diffs, with -fno-schedule-insns nothing gets below 19.  Statement
+ * orders swept at 14: the rbuf alias before and after the wbuf alias,
+ * the three zero-stores before / between / after the alias
+ * computations, and both orders of the final `w->pad` / `w->src`
+ * stores.  Wants the scheduler pushed, not a different shape.
  * ------------------------------------------------------------------ */
 
 typedef struct t_ttyinfo {
