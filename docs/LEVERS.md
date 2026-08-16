@@ -285,6 +285,56 @@ file to `ldl/ldr`.
 
 ---
 
+## Addressing and symbols
+
+**An extern ARRAY's declared size decides gp-relative addressing.**
+`extern short sym[];` (incomplete type) forces `lui`+`addiu` for its
+address; giving it a small concrete size (`extern short sym[4];`) lets
+gcc place it in small data and emit the single `addiu reg,gp,off` the
+original has. Scalars get this for free, so it only bites on arrays.
+Worth one word per reference site.
+
+**Base-first vs offset-first addend.** `base[i]` reassociates to
+offset+base (`addu v0,v0,s1`). Naming the address in a POINTER LOCAL --
+`p = (int *)((int)base + i * 4); ... *p` -- gives base+offset
+(`addu v0,s1,v0`). Each site needs its OWN local: sharing one local
+across a call makes it live across the call and costs a dozen words.
+
+**Spell a struct stride as its two halves when the original does.** A
+0x450 slot made of an 0x400 array plus an 0x50 header appears in the
+original as `(i << 10) + i * 80`, not as one 1104 multiply -- and it
+does so even outside a loop, so this is a source spelling, not loop
+strength reduction. `&tbl[i].member` folds to the single multiply and is
+two words short.
+
+**Prefer the base symbol whose displacement the original keeps.** Two
+aliases for the same address (`slotTable[i].field` at base+0 vs
+`workTable[i].field` at base-0x400 with a +0x400 displacement) generate
+the same address but different code: the alias folds the offset into the
+`%lo` and loses the shared `lui` the original hoists into a callee-saved
+register. Pick the one whose load displacement matches.
+
+## More control flow
+
+**A REDUNDANT else arm changes basic-block layout.** `if (p) { X }`
+inlines X between the test and the join. `if (!p) { q = 0; } else { X }`
+-- where q was already 0, so the arm is a no-op -- makes gcc lay X out
+AFTER the join and reach it with `bnez`+`b`, duplicating the join's
+first load into both delay slots. That was a ten-word difference in
+scEFFECT2Script.
+
+**`goto` the default arm's assignment instead of repeating it.** A
+switch arm that ends in the same value as `default:` gets its `move` sunk
+into a branch delay slot; `goto` a label placed on the default arm makes
+gcc branch to the shared block, which is what the original does.
+
+**Raise register pressure EARLY to move address arithmetic off `$a0`.**
+Reading a global into a local before a block of address arithmetic (even
+with no call in between) can be the whole difference: in scMOVIEScript it
+pushed the cursor pointer/value into `$t0`/`$t1` and left `$a0` free for
+the call's buffer argument. Testing the global in place instead left
+`$a0` free during the arithmetic and permuted eleven words.
+
 ## Suspect the C, not the compiler
 
 Several matches in this project were BUGS, not codegen. If the diff
