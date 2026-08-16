@@ -219,20 +219,23 @@ extern float D_004D7F50;
 extern float fabsf(float f);
 extern float atan2f(float y, float x);
 extern float nearDir(float a, float b);
+extern float Get_Decimal_Surplus_for_Radius(float f);
 void CheckDoorPos(DOORACTOR *a, VECTOR8 *pOut);
 
-/* Compute a door's approach distance, blending toward its linked map unit */
-/* TODO: near-miss - the a.y/pDoor.y load registers ($f1/$f2 vs original's
-   $f2/$f1, with the 2.0f constant landing in $f2 not $f3) are an allocator
-   tie-break; every statement ordering and operand direction tried gives the
-   same pair of registers, so it looks unreachable from C alone. */
+/* Compute a door's approach distance, blending toward its linked map unit.
+
+   65535.0f is the "unreachable" sentinel. Spelling it as a literal rather
+   than as the extern at 0x004D7F4C is what keeps it out of the branch delay
+   slot: gcc will not put an `li.s` (potentially multi-instruction) into a
+   slot, so the load stays above the branch and the slot is filled eagerly
+   from the epilogue instead -- which is the original's bc1tl. */
 float CheckDoorDist(DOORACTOR *a)
 {
     DOORTARGET *pDoor = D_00338684[0];
     VECTOR8 buf;
 
     if (fabsf(pDoor->pos.y - a->pos.y) > 2.0f) {
-        return D_004D7F4C;
+        return 65535.0f;
     }
     CheckDoorPos(a, &buf);
     return CheckDist2D((VECTOR *)&pDoor->pos, (VECTOR *)&buf);
@@ -279,13 +282,24 @@ void CheckDoorPos(DOORACTOR *a, VECTOR8 *pOut)
 }
 
 /* True when any live, non-frozen enemy is electrified */
-/* TODO: near-miss - LOGIC, 27/34 instructions differ. The original walks
-   actor/enepc with two hand-incremented pointers (actor stride 0xA70,
-   enepc stride 0x38B0) rather than index expressions, and its inner
-   attribute check reuses a "move v0,a0" copy of the enepc pointer before
-   the lb -- Check_EnemyBurn's simpler two-condition body matches with
-   plain indexing, so the extra nesting here likely needs the pointer-pair
-   loop shape instead. */
+/* TODO: near-miss (34 orig vs 35 built, 27 diffs). Reading the two enepc
+   fields through plain enepc[i] indexing (as the matching Check_EnemyBurn
+   does for its single field) leaves gcc with TWO separate address induction
+   variables, one per field, where the original has one. An explicit byte
+   offset accumulator -- `p = (ENEPC *)(off + (char *)enepc)` with
+   `off += sizeof(ENEPC)` -- reproduces the original's single combined base
+   and its `addu a0,off,base` exactly (26 diffs), but gcc then hoists the
+   whole lui+addiu of the enepc address out of the loop where the original
+   hoists only the lui and recomputes `addiu v0,t1,%lo` every iteration.
+   That one extra setup instruction pushes the loop head off an 8-byte
+   boundary, so we also gain an alignment nop the original does not have,
+   and the two differences together are the whole remaining delta.
+   Swept: pointer-vs-index for each field independently, nested-if vs ||,
+   continue-form vs nested-if, i*sizeof inside the loop, unsigned and
+   char-pointer/int cast spellings of the base, and two separate pointer temps.
+   Whoever picks this up: the question is only how to keep the %lo addiu
+   inside the loop. Left in the plain-indexing form because it is the
+   honest C; the offset-accumulator form is one diff better and no closer. */
 int Check_EnemyElec(void)
 {
     short i;
@@ -300,43 +314,29 @@ int Check_EnemyElec(void)
     return 0;
 }
 
-/* True when segment p1-p2 crosses segment p3-p4 */
-int Check_CrossingOver(VECTOR *p1, VECTOR *p2, VECTOR *p3, VECTOR *p4)
-{
-    int a, b, c, d;
+/* True when `angle` lies in the [lo,hi] arc, wrapping when lo > hi.
 
-    a = CheckPointLine(p1, p2, p3);
-    b = CheckPointLine(p1, p2, p4);
-    if (a != b) {
-        c = CheckPointLine(p3, p4, p1);
-        d = CheckPointLine(p3, p4, p2);
-        if (c != d) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-extern float Get_Decimal_Surplus_for_Radius(float angle);
-
-/* True when angle (wrapped) falls within the [lo, hi] arc (wrapped, handling wraparound) */
-/* TODO: near-miss (LOGIC) - the callee-saved register that ends up holding
- * "hi" vs "angle" across the first call is swapped from the original, and
- * the &&/|| short-circuit form uses an extra v0/v1 temp the original
- * doesn't; a nested-if rewrite fixed the boolean shape but made the length
- * worse (41 vs 45), so the register save order looks like the harder half
- * of this one. Parked after 2 attempts. */
+   The parameters are transformed in place rather than into fresh locals:
+   that is what makes each result share its argument's callee-saved
+   register (angle and its wrapped value both in $f20, hi and its in $f21),
+   which is the whole register assignment. With separate locals gcc leaves
+   the last result in $f0 and swaps the $f20/$f21 roles. The && / || also
+   have to be spelled as `if (...) return 1; return 0;` -- returning the
+   comparison directly makes gcc build the boolean in a $v1 temp. */
 int Check_Angle(float angle, float lo, float hi)
 {
-    float wLo, wHi, wAngle;
+    lo = Get_Decimal_Surplus_for_Radius(lo);
+    hi = Get_Decimal_Surplus_for_Radius(hi);
+    angle = Get_Decimal_Surplus_for_Radius(angle);
 
-    wLo = Get_Decimal_Surplus_for_Radius(lo);
-    wHi = Get_Decimal_Surplus_for_Radius(hi);
-    wAngle = Get_Decimal_Surplus_for_Radius(angle);
-
-    if (wLo <= wHi) {
-        return (wLo <= wAngle) && (wAngle <= wHi);
-    } else {
-        return (wLo <= wAngle) || (wAngle <= wHi);
+    if (lo <= hi) {
+        if (lo <= angle && angle <= hi) {
+            return 1;
+        }
+        return 0;
     }
+    if (lo <= angle || angle <= hi) {
+        return 1;
+    }
+    return 0;
 }

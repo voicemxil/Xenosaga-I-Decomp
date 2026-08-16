@@ -186,6 +186,8 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "eMessage.c": "--rotate eMessageNextGyouMaxGet:2:-5",
+    "INIT.c": "--rotate InitEvsSymbol:33:-3,InitRetSymbol:33:-3 --rotate-seq InitShopSymbol:39:-4,InitShopSymbol:39:-3,InitSaveSymbol:39:-4,InitSaveSymbol:39:-3 --barrier-lo-load InitItemSymbol",
     "Get.c": "--swap-adjacent Get_Rnd:5",
     "Check.c": "--mtc1-nop CheckDoorDist:0",
     "Undu.c": "--swap-adjacent UnduParamInit:5",
@@ -300,7 +302,7 @@ FILE_FIX_FLAGS = {
     "tskMenuPause.c": ("--pin-slot-nop PauseMenu:0 "
                        "--swap-into-slot PauseMenu:3"),
     "xglMovie.c": "--barrier-branch-move xglMovieClose",
-    "xglMath.c": "--omit-hazard qmtc2 --lis-hazard-nop xglAtan2",
+    "xglMath.c": "--omit-hazard qmtc2 --lis-hazard-nop xglAtan2 --swap-adjacent xglGeometryInit:0",
     "newlib_mprec.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtod.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtoul.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",

@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* xeno.Chr native methods - JNI bindings over the character actor work struct */
 
 typedef struct {
@@ -865,17 +867,23 @@ void Java_xeno_Chr_touchto__Ljava_lang_String_(void *env, int *args, int *ret)
 }
 
 /* Find the actor's first child of the given kind */
-/* TODO: near-miss - the original tests the tag with a branch-likely and annuls an
-   epilogue `ld $s0` in its delay slot; every natural early-return/loop shape here
-   emits a plain `bne` and two instructions fewer. */
+/* The original computes the peer pointer BEFORE testing the tag, which
+   leaves the tag test with nothing to fill its delay slot from the
+   fall-through -- so it takes the branch-likely form and annuls the
+   epilogue `ld $s0` from the target instead. gcc instead sinks the peer
+   deref into the slot and emits a plain `bne`, two instructions shorter.
+   Fencing the peer pointer and the return pointer together holds both
+   the deref and the ret[0] store on the original's side of the branch. */
 void Java_xeno_Chr_childGetPeer__II(void *env, int *args, int *ret)
 {
     char *obj = (char *)args[0];
     CHR *chr;
     CHR *child;
     int i;
+    int nNum;
 
     chr = CHR_PEER(obj);
+    LAUNDER2(chr, ret);
     ret[0] = 0;
     if (args[1] == 0x1000000) {
         for (i = 0; i < chr->nChildNum; i++) {
