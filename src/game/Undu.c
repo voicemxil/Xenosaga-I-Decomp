@@ -56,9 +56,8 @@ void UnduParamInit(UNDU_PARAM *param)
     param->field_0D = 0x10;
 }
 
-/* TODO: near-match (LENGTH) - the direct-index and linear-id lookup logic
- * are recovered, but its loop/control-flow shape is 33 built vs 29 original
- * instructions. Recover the original source loop form. */
+/* Look one entry up in a 20-byte-stride table, either by direct index
+   (bit 15 set) or by scanning for a matching id. */
 void *UnduDataGetHeaderSub(void *data, unsigned int count, unsigned int id)
 {
     unsigned int i;
@@ -69,10 +68,7 @@ void *UnduDataGetHeaderSub(void *data, unsigned int count, unsigned int id)
         if (id < count) {
             return entry + id * 20;
         }
-        return 0;
-    }
-    if (count == 0) {
-        return 0;
+        goto notfound;
     }
     for (i = 0; i < count; i++) {
         if (*(unsigned short *)(entry + 2) == id) {
@@ -80,5 +76,6 @@ void *UnduDataGetHeaderSub(void *data, unsigned int count, unsigned int id)
         }
         entry += 20;
     }
+notfound:
     return 0;
 }

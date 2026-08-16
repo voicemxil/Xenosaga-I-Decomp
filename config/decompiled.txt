@@ -2359,3 +2359,5 @@ ACT_jointGetAccessories = 0x00306A70, 0x70; // ACT.c
 UnduDataGetHeaderSub = 0x003221A0, 0x74; // Undu.c
 Java_xeno_Stage_start__ILjava_lang_Object_ = 0x00304D70, 0x124; // Java_Stage.c
 nmlModelSetFilter = 0x0022FB70, 0x8C; // nmlModel.c
+ACT_updateMotionCore = 0x00306D98, 0xD8; // ACT.c
+RSRC_getDirtyItem = 0x0026DDB0, 0xA0; // RSRC.c

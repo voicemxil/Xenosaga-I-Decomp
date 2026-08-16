@@ -1,3 +1,5 @@
+#include "matching.h"
+
 typedef unsigned char u_char;
 typedef unsigned short u_short;
 typedef unsigned int u_int;
@@ -142,12 +144,24 @@ u_int RSRC_loadFile(RSRC *pResource, void *pFile)
 
 /* Find a dirty (free) item: without a size target, the smallest dirty
    item; with a size target, the first dirty item large enough.
-   TODO: near-miss only - the nSize!=0 search loop emits one fewer nop
-   between the size sltu and its beqz than the original (every other
-   instruction/register in the function matches exactly); no source
-   variant tried (nested if, nested short-circuit, staged local) changed
-   it, so the extra nop is likely a genuine 2.96 scheduling artifact of
-   this specific comparison shape that needs more investigation. */
+
+   Two details of the size-search loop are load-bearing.
+
+   `i++` sits ahead of the flag test because the retail build increments
+   the index in the flag branch's (plain, non-annulled) delay slot. Left
+   at the bottom of the body, gcc instead COPIES it into the delay slot
+   and annuls the branch (beqzl), which costs a word.
+
+   The retail build then has a pad word between the size sltu and its
+   beqz that gcc 2.96 does not emit -- and only there; the identical
+   `sltu`/branch pair in the smallest-item loop above has no pad. Nothing
+   at the C level produces it (nested ifs, staged locals, do-while,
+   pointer-limit and goto loop forms were all tried), so it is spelled
+   with SCHED_NOP. TWO are needed to leave ONE behind: gas's reorder-mode
+   delay-slot filler steals the instruction immediately before a branch,
+   and with a single SCHED_NOP that instruction is the pad itself, which
+   lands in the branch slot instead. Splitting the compare into `lt` is
+   what puts the pads AFTER the sltu rather than before it. */
 RSRCITEM *RSRC_getDirtyItem(RSRC *pResource, u_int nSize)
 {
     int nItemCount = pResource->nItemCount;
@@ -175,10 +189,15 @@ RSRCITEM *RSRC_getDirtyItem(RSRC *pResource, u_int nSize)
 
     i = 0;
     while (i < nItemCount) {
-        if ((pItem->nState & 0x8000) != 0 && pItem->nSize >= nSize) {
-            return pItem;
-        }
         i++;
+        if ((pItem->nState & 0x8000) != 0) {
+            int lt = (pItem->nSize < nSize);
+            SCHED_NOP();
+            SCHED_NOP();
+            if (!lt) {
+                return pItem;
+            }
+        }
         pItem++;
     }
     return 0;
