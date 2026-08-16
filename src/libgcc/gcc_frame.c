@@ -53,11 +53,17 @@
  * We keep the 1999 base plus only the two hunks above. 2c84914526bd
  * looks tempting -- 176 in-range diffs against 214 -- but it gets there
  * by ADDING 24 words, and the original is SHORTER than every upstream
- * revision including the oldest. A build that is 58 words long is not
- * closer than one that is 34 words long; the in-range improvement is
- * alignment noise. gcc split frame.c into frame.c + frame-dwarf2.c
- * between 2000-05-15 and 2000-05-25, and neither side of the split has
- * decode_stack_op either.
+ * revision including the oldest. A build that overshoots the original's
+ * length by 58 words is not closer than one that overshoots it by 34;
+ * the in-range improvement is just the two bodies re-aligning. When a
+ * function is this far out, the LENGTH GAP is the honest metric and the
+ * diff count is not.
+ *
+ * gcc split frame.c into frame.c + frame-dwarf2.c between 2000-05-15
+ * and 2000-05-25. Building against the post-split frame-dwarf2.c at
+ * 89d7f003d32b gives execute_cfa_insn 214 and __frame_state_for 51 --
+ * bit-identical to the 1999 pre-split file, so the split changed
+ * nothing here. Neither side of it has decode_stack_op.
  *
  * STILL WIP, both the same shape -- our build is LONGER than the
  * original, by 34 words and 32 words respectively:
