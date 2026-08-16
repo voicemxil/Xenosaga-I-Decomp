@@ -90,7 +90,7 @@ typedef struct {
     int nUnk83C;                 /* 0x83C */
     int nUnk840;                 /* 0x840 */
     int nUnk844;                 /* 0x844 */
-    char pad848[0x4];
+    int nUnk848;                 /* 0x848 */
     int nUnk84C;                 /* 0x84C */
     int nUnk850;                 /* 0x850 */
     int nUnk854;                 /* 0x854 */
@@ -696,7 +696,8 @@ long long _waitIpuIdle64(MPEGSTREAM *pStream)
 }
 
 #define IPU_BP   (*(volatile u_int *)0x10002020)
-#define IPU_TOP64 (*(volatile long long *)0x10002030)
+/* Indexed off the register-file base so the offset folds into the ld. */
+#define IPU_TOP64 (((volatile long long *)0x10000000)[1030])
 
 /* Consume and return the next nBits, refilling the peek window first. */
 u_int _nextBit(MPEGSTREAM *pStream, u_int nBits)
@@ -731,11 +732,22 @@ u_int _nextBit(MPEGSTREAM *pStream, u_int nBits)
     return nRet;
 }
 
-/* Run one IPU VDEC (variable-length decode) against table nTbl. */
+/* Run one IPU VDEC (variable-length decode) against table nTbl.
+ *
+ * PARKED at 3 differing words, registers only: the register-file base
+ * pointer lands in $v1 where the original has it in $a0 (and the two luis
+ * come out in the other order).  Swept: PIN($4) on the base with and
+ * without LAUNDER_V (5 and 10 diffs), reading the bit-position register
+ * before the top-of-stream one (8 diffs), and moving the base pointer's
+ * declaration to the head of the block. */
 int _ipuVdec(MPEGSTREAM *pStream, int nTbl)
 {
+    /* Through a base pointer, not a folded constant: 0x10000000 needs only
+     * a lui, so the 0x2030 displacement folds into the ld. */
+    volatile long long *pRegs;
     long long nRes;
     long long nTop;
+    u_int nBP;
     int nCmd;
     int i;
     int j;
@@ -759,13 +771,95 @@ int _ipuVdec(MPEGSTREAM *pStream, int nTbl)
         }
         nRes = IPU_CMD64;
     }
-    nTop = IPU_TOP64;
+    pRegs = (volatile long long *)0x10000000;
+    nTop = pRegs[1030];
+    /* The bit-position register is read unconditionally, before the sign
+     * test, so its load is not sunk into the else arm. */
+    nBP = IPU_BP;
     pStream->nUnk838 = nTop;
-    if (nTop >= 0) {
-        pStream->nUnk83C = 32;
+    if (nTop < 0) {
+        pStream->nUnk83C = (0 - (nBP & 0x1F)) & 0x1F;
     } else {
-        pStream->nUnk83C = (0 - (IPU_BP & 0x1F)) & 0x1F;
+        pStream->nUnk83C = 32;
     }
     pStream->nUnk11C = (int)nRes == 0;
     return (short)nRes;
+}
+
+/* ---- macroblock address and extension dispatch ------------------------ */
+
+extern char D_004D5BD0[];  /* bad macroblock_address_increment */
+
+/* macroblock_address_increment(): escape and stuffing codes accumulate. */
+int _mbAddressIncrement(MPEGSTREAM *pStream)
+{
+    int nTotal;
+    int nCode;
+    int nPeek;
+    int bMore;
+
+    nTotal = 0;
+    do {
+        nCode = _ipuVdec(pStream, 0);
+        if (nCode == 34) {
+            bMore = 1;                       /* macroblock_stuffing */
+        } else if (nCode < 35) {
+            if (nCode == 0) {
+                nPeek = _peepBit(pStream, 11);
+                if (pStream->nUnk848 != 0 && nPeek == 15) {
+                    _flushBuf(pStream, 11);
+                    bMore = 1;
+                } else {
+                    _Error1(pStream, D_004D5BD0, nCode);
+                    pStream->nUnk11C = 1;
+                    return 1;
+                }
+            } else {
+                nTotal += nCode;
+                bMore = 0;
+            }
+        } else if (nCode != 35) {
+            nTotal += nCode;
+            bMore = 0;
+        } else {
+            nTotal += 33;                    /* macroblock_escape */
+            bMore = 1;
+        }
+    } while (bMore);
+    return nTotal;
+}
+
+/* The extension-id dispatch table, copied to the stack on entry. */
+typedef struct {
+    void (*af[11])(MPEGSTREAM *pStream);
+} EXTTBL;
+
+extern EXTTBL D_004D5CE0;
+
+/* extension_and_user_data(): run the extension parsers, skip user data. */
+void _extensionAndUserData(MPEGSTREAM *pStream)
+{
+    EXTTBL tbl;
+    u_int nCode;
+    u_int nId;
+
+    tbl = D_004D5CE0;
+    _nextStartCode(pStream);
+    for (;;) {
+        nCode = _peepBit(pStream, 32);
+        if (nCode == 0x1B5) {
+            _flushBuf(pStream, 32);
+            nId = _nextBit(pStream, 4);
+            if (nId > 10) {
+                nId = 0;
+            }
+            tbl.af[nId](pStream);
+            _nextStartCode(pStream);
+        } else if (nCode == 0x1B2) {
+            _flushBuf(pStream, 32);
+            _nextStartCode(pStream);
+        } else {
+            break;
+        }
+    }
 }
