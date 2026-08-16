@@ -2584,3 +2584,4 @@ initWrapperClass = 0x002F44B0, 0x78; // JavaClass.c
 resolveInstanceField = 0x002F4F48, 0x80; // JavaClass.c
 loadStaticClass = 0x002F5120, 0x8C; // JavaClass.c
 newArray = 0x002F4898, 0x94; // JavaClass.c
+PrintBackSprite2 = 0x0027E520, 0x1D4; // Print.c
