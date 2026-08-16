@@ -467,3 +467,32 @@ int Check_Undu(float *a, float *b, int nId, VECTOR *out, int nA, int nB,
     }
     return 0;
 }
+
+extern void xglVectorLength(float *pDest, const float *pVector);
+
+/* dst = *to - *from, xyz only (VU0 macro mode, exactly as in Calc.c) */
+#define VEC_SUB(dst, from, to)                          \
+    __asm__ __volatile__(                               \
+        "lqc2 $vf3, 0x0(%1)\n"                          \
+        "lqc2 $vf2, 0x0(%2)\n"                          \
+        "vsub.xyz $vf2xyz, $vf2xyz, $vf3xyz\n"          \
+        "sqc2 $vf2, 0x0(%0)\n"                          \
+        : : "r"(dst), "r"(from), "r"(to) : "memory")
+
+/* Copy whichever of the two points is nearer to pOrigin into pOut. */
+void CheckNearPoint(VECTOR *pOrigin, VECTOR *pA, VECTOR *pB, VECTOR *pOut)
+{
+    VECTOR d;
+    float lenA;
+    float lenB;
+
+    VEC_SUB(&d, pA, pOrigin);
+    xglVectorLength(&lenA, &d.x);
+    VEC_SUB(&d, pB, pOrigin);
+    xglVectorLength(&lenB, &d.x);
+    if (lenA < lenB) {
+        *pOut = *pA;
+    } else {
+        *pOut = *pB;
+    }
+}
