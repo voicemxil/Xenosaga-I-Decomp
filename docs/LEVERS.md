@@ -1407,3 +1407,58 @@ function in emission order and name the last one of each block.
 **Local DECLARATION ORDER does not move gcc 2.96's register allocation.**
 Four orders of `TMENU_updateDefault`'s twelve locals gave byte-identical
 output. Do not spend compile runs on this axis.
+
+## From the xgl run (Cd / Font / Movie / Hdd)
+
+**A statement AFTER a call in tail position blocks gcc's sibling-call
+jump.** gcc 2.96 turns a trailing `f(a, b);` into `j f` (restoring `$ra`
+and `$sp` first); the original build emits `jal f` plus a branch to the
+epilogue. ANY statement after the call suppresses it -- a dead
+`nSize = 0;` or `nWord = 0;` costs zero instructions because the store is
+dead. This is NOT a whole-file flag question: `-fno-optimize-sibling-calls`
+on xglCd.c fixed `extract` but broke three functions whose sibling calls
+the original DOES have, so the original compiler had the optimisation and
+the difference is genuinely in the source. Check the callee's ARITY too --
+`extract` only matched once xglArxExtract was declared with two arguments
+instead of three; the spurious third made gcc copy the caller's third
+argument out of `$a2` and rotated every register in the function.
+
+**`if (cond) { body; return 0; } return 1;` and
+`if (!cond) return 1; body; return 0;` emit the same instructions in a
+DIFFERENT ORDER.** With the body inside the `if`, the return constant is
+the FIRST of the invariants gcc hoists above the branch; with the early
+return it is the LAST. Worth 3 words in `queue_next`, and nothing else
+moved. Try both before reaching for a scheduling flag.
+
+**A guard written as `||` puts its LAST arm's block on the fall-through
+and lets gcc fold the first adjacent pair into one `sltiu`.**
+`if (nX < 0 || nX >= 768 || nY < 0 || nY >= 512) { A } else { B }` is a
+different program layout from `if (in range) { B } else { A }` even
+though the arms are the same: the OR form makes A the fall-through and
+gives `sltiu $v0,nX,768` for the first pair. Read which arm the original
+jumps FORWARD to and write that one as the branch target. (set_xyz;
+xglCdDiskCheck is the same lever at whole-function scale -- writing the
+rare arm as the `else` recovered the shared tail, the callee-saved copy
+of the constant 1 and a value held across a call, 80 diffs to zero.)
+
+**KNOWN BLOCKER -- the R5900 SHORT-LOOP PAD is 8 in this toolchain and
+10 in the original build.** ee-gcc 2.96 pads a tight loop containing a
+branch-likely out to 8 instructions from branch target to closing
+branch, inclusive, by emitting `nop`s between the loop-closing load and
+the branch. Several original loops are padded to 9 or 10 instead.
+Verified it is a fixed TOTAL, not a fixed nop count: adding real
+instructions to the body drops the pad to zero at 8 total. No source
+shape moves it (while / do-while / for / goto, char vs u_char, named
+temp vs direct compare all give the same pad), `-m5900` and
+`-falign-loops=` do not change it, and `SCHED_NOP()` lands BEFORE the
+closing load rather than between the load and the branch. There is no
+fix_cc_asm pass for it. Two otherwise-perfect functions are parked on
+exactly this (`FileSelectListReload` 70/72, and it also blocks
+`xglCdStreamOpen`); an opt-in `--short-loop-pad FUNC:N:COUNT` pass is
+the way in.
+
+**`--swap-regs` is WHOLE-FUNCTION.** When a near-miss is "6 of this
+function's 14 $v0/$v1 uses are swapped", the flag makes it worse, not
+better. In `fileRead` that exact residue fell instead to declaring the
+preceding call `void` rather than `int` (the return-type lever) -- check
+that first, always.
