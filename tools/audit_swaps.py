@@ -25,10 +25,13 @@ not go).
     python3 tools/audit_swaps.py            # audit all
     python3 tools/audit_swaps.py Menu.c     # one file
 """
+import atexit
 import collections
 import os
 import re
+import shutil
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.getcwd())
@@ -58,6 +61,9 @@ def _identity(word):
 
 REORDER_FLAGS = ("--swap-adjacent", "--rotate", "--rotate-seq",
                  "--swap-into-slot", "--swap-slot-target")
+
+_TMPDIR = tempfile.mkdtemp(prefix="audit_swaps.")
+atexit.register(shutil.rmtree, _TMPDIR, True)
 
 
 def sources_by_basename():
@@ -99,7 +105,13 @@ def main():
                 continue
             stripped.append(fixflags[i])
             i += 1
-        ok, log = ccpipe.compile_c(path, "/tmp/_audit.o", cc=cc,
+        # A per-process temp dir, NOT a fixed path: several agents run this
+        # at once in the same container, and a shared /tmp/_audit.o meant
+        # concurrent runs clobbered each other's object mid-compile. That
+        # produced BOTH false "does not compile right now" skips and false
+        # SUSPECT verdicts on functions that are fine.
+        obj = os.path.join(_TMPDIR, "audit.o")
+        ok, log = ccpipe.compile_c(path, obj, cc=cc,
                                    cflags=cflags, fixflags=tuple(stripped),
                                    asflags=asflags)
         if not ok:
@@ -110,7 +122,7 @@ def main():
                   f"(mid-edit?) -- not audited")
             skipped.append(base)
             continue
-        elf = Elf32("/tmp/_audit.o")
+        elf = Elf32(obj)
         syms = elf.func_symbols_sized()
         for fn, used in sorted(sites.items()):
             loc = repo.orig_functions.get(fn)
