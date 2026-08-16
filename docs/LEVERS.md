@@ -151,6 +151,10 @@ already zero-extended, the cast is really there: without it gcc proves
 the value fits and drops the word, and the function comes out one
 instruction SHORT. Same for `andi 0xff` after an `lbu`. (RSRC_alloc.)
 
+**`LAUNDER2` over `int` copies defeats loop-invariant motion of gp
+loads** — the pseudo is then set twice in the loop. As `unsigned short`
+locals the same trick costs two extension moves.
+
 **LAUNDER2 fences the ORDER of two values against the EE scheduler
 where a single LAUNDER on either one does not.** In RSRC_alloc the
 scheduler issued a `(u_short)` truncation ahead of the `+1` increment
@@ -234,6 +238,12 @@ latter.
 statements that use them.** Writing a packet block in plain
 `p[0]..p[9]` order matched, while hoisting one element to second place
 moved its instruction seven slots and nothing else.
+
+**Two views of one record.** A walking pointer into a BIASED sub-view of
+an array element, alongside a byte offset added to the base, is a real
+source idiom — four matches in the sound driver needed it. The bias
+constant in the field offsets tells you where the sub-view starts; the
+stride stays the full record, so pad the view struct to it.
 
 **Let LSR build the giv.** `arr[i].field` yields `%hi/%lo(arr)` plus a
 separate `addiu +off` for the giv's initial value; a hand-walked pointer
@@ -400,6 +410,14 @@ it early.
 Giving one struct a leading `int *` rounded its size 0x12 -> 0x14 and
 shifted every later member, surfacing as IMMEDIATE diffs in three
 already-matching functions.
+
+**`p->field--` on an `unsigned short` compiles to `li 0xffff` + `addu`.**
+Read into an `int` first for retail's `addiu -1`.
+
+**A member address folds into the symbol unless you go through a pointer
+local.** `TBL[n].field` gives `lui/addiu` of `sym+8` into a pseudo;
+`REC *p = &TBL[n]; p->field` keeps the bare symbol in `$at` and the 8 as
+the load offset.
 
 **`long` is 64-bit here.** `(long)` casts give dsll/daddu chains where
 plain int gives sll/addu.
@@ -652,6 +670,11 @@ shows any of these, check the source first:
 real hazard.** One cost an agent 30 minutes and briefly broke a
 registered match, because the comment invited experimentation on
 working code. `checkfile.py` is the authority, not the file comments.
+
+**`set_flags.py` keys are BASENAMES, not paths.** Passing
+`src/ssd/sef.c` used to write a key nothing ever reads, silently doing
+nothing — three "the flag has no effect" cycles lost to it. The tool now
+normalises and says so, but the fact matters when reading configure.py.
 
 **GREP THE WHOLE TERRITORY for a function name before writing it**, not
 just the file you expect it in. A function defined in two TUs has caused
