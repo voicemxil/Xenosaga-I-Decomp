@@ -76,3 +76,80 @@ void sefLerpInt(KEYREC *pTable, LERPSTATE_I *pState)
     }
     pState->nResult = p[0].nValue;
 }
+
+/* Advance the current key index one tick. pState is void * so the float
+ * and integer state structs (identical apart from the result field) can
+ * share it. */
+void sefProgressKey3(KEYREC *pTable, void *pStateArg)
+{
+    LERPSTATE_I *pState;
+    KEYREC *p;
+    int nTime;
+    int nNext;
+
+    pState = (LERPSTATE_I *)pStateArg;
+    nTime = pState->nTime + 1;
+    pState->nTime = nTime;
+    if (nTime < 1024) {
+        p = &pTable[pState->nKey];
+        if (p[0].nTime != 1024) {
+            if (nTime >= p[1].nTime) {
+                nNext = p[1].nFlag;
+                if (nNext >= 0) {
+                    pState->nKey = nNext;
+                    p = &pTable[nNext];
+                    pState->nTime = p->nTime;
+                } else {
+                    pState->nKey = pState->nKey + 1;
+                }
+            }
+        }
+    }
+}
+
+/* The 10-byte-record variant. Returns the record the state now points
+ * at -- which, on the "no next key" path, is one past the record that
+ * was current on entry. */
+typedef struct
+{
+    short nTime;   /* 0x00 */
+    short nValue;  /* 0x02 */
+    short f04;     /* 0x04 */
+    short f06;     /* 0x06 */
+    short nNext;   /* 0x08 */
+} KEYREC5;
+
+KEYREC5 *sefProgressKey5(KEYREC5 *pTable, LERPSTATE_I *pState)
+{
+    KEYREC5 *p;
+    int nTime;
+    int nNext;
+
+    nTime = pState->nTime + 1;
+    p = &pTable[pState->nKey];
+    pState->nTime = nTime;
+    if (nTime < 1024) {
+        if (p->nTime != 1024) {
+            if (nTime >= p[1].nTime) {
+                p++;
+                nNext = p->nNext;
+                if (nNext >= 0) {
+                    pState->nKey = nNext;
+                    p = &pTable[nNext];
+                    pState->nTime = p->nTime;
+                } else {
+                    pState->nKey = pState->nKey + 1;
+                }
+            }
+        }
+    }
+    return p;
+}
+
+/* Advance the key index, then snap the integer result to the new key's
+ * raw value (no interpolation) */
+void sefProgressInt(KEYREC *pTable, LERPSTATE_I *pState)
+{
+    sefProgressKey3(pTable, pState);
+    pState->nResult = pTable[pState->nKey].nValue;
+}

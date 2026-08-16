@@ -147,3 +147,118 @@ int srsFileLoad(int a, int b, int c)
 {
     return fileLoad(a, b, c);
 }
+
+/* --- weapon <-> effect id cross-reference table (45 x 8 bytes) --- */
+
+typedef struct
+{
+    short nWeaponID;   /* 0x00 */
+    short nEffectID;   /* 0x02 */
+    short pad[2];      /* 0x04 */
+} WEAPON_ENT;
+
+extern WEAPON_ENT _weaponTbl[];
+
+int srsGetWeaponEffectIdx(int nEftNo);
+
+/* Effect number -> weapon id (0 when the effect has no weapon slot) */
+int srsEftNoWeaponEffectID(int nEftNo)
+{
+    int nIdx;
+    int nRet;
+
+    nIdx = srsGetWeaponEffectIdx(nEftNo);
+    nRet = 0;
+    if (nIdx >= 0) {
+        nRet = _weaponTbl[nIdx].nEffectID;
+    }
+    return nRet;
+}
+
+int srsEftNo2WeaponID(int nEftNo)
+{
+    int nIdx;
+    int nRet;
+
+    nIdx = srsGetWeaponEffectIdx(nEftNo);
+    nRet = 0;
+    if (nIdx >= 0) {
+        nRet = _weaponTbl[nIdx].nWeaponID;
+    }
+    return nRet;
+}
+
+/* Linear search the other way: weapon id -> effect id, -1 if absent */
+int srsWeapon2EffectID(int nWeaponID)
+{
+    int i;
+
+    if (nWeaponID > 0) {
+        for (i = 0; i < 45; i++) {
+            if (nWeaponID == _weaponTbl[i].nWeaponID) {
+                return _weaponTbl[i].nEffectID;
+            }
+        }
+    }
+    return -1;
+}
+
+/* Load an effect's data file by id; -1 if the id has no name entry */
+extern char *srsGetEffectName(int nID);
+int srsLoadEffectData(void *pBuf, int nID)
+{
+    char *pName;
+
+    pName = srsGetEffectName(nID);
+    if (pName == 0) {
+        return -1;
+    }
+    return fileLoad((int)pBuf, (int)pName, 1);
+}
+
+/* Rewrite unix path separators in place to the CD filesystem's.
+ * Index the array rather than walking a `char *`: with a pointer
+ * variable gcc CSEs the loop-test read into the '/' test and pays an
+ * lbu + sll/sra sign-extension for it; the subscript form keeps the two
+ * separate `lb`s the original has. `i = 0` must sit BETWEEN the two
+ * guards -- that is the instruction gcc puts in the second beqz's delay
+ * slot. */
+void srsChangeSeparator(char *pPath)
+{
+    int i;
+
+    if (pPath != 0) {
+        i = 0;
+        while (pPath[i] != 0) {
+            if (pPath[i] == '/') {
+                pPath[i] = '\\';
+            }
+            i++;
+        }
+    }
+}
+
+/* --- boss "wait" effect lookup (36 x 6-byte records) --- */
+
+typedef struct
+{
+    short nID;      /* 0x00 */
+    short nEftNo;   /* 0x02 */
+    short f04;      /* 0x04 */
+} CHR_EFT;
+
+extern CHR_EFT _srsChrEfTbl3[];
+
+int srsGetBossWaitEftNo(int nID)
+{
+    int i;
+
+    if ((unsigned int)(nID - 0x97) < 36) {
+        for (i = 0; i < 36; i++) {
+            if (nID == _srsChrEfTbl3[i].nID) {
+                return _srsChrEfTbl3[i].nEftNo;
+            }
+        }
+    }
+    return 0;
+}

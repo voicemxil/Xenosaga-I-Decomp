@@ -322,9 +322,11 @@ typedef struct {
     char pad808[0x80A - 0x808];
     unsigned short f80A;
     unsigned short f80C;
-    char pad80E[0x814 - 0x80E];
+    char pad80E[0x812 - 0x80E];
+    unsigned short nUsed;   /* 0x812 -- slot-in-use flag */
     unsigned short f814;
     short f816;
+    char pad818[0x820 - 0x818];
 } SEF_LINE;
 
 extern float _gravity;
@@ -529,4 +531,135 @@ int sefLoadEffectCfName(void *p, void *name)
         ((void (*)(void *, int))srsFileLoadCf)(p, id);
     }
     return 0;
+}
+
+/* --- line-data slot allocator (128 slots of 0x820 bytes) --- */
+
+/* _lineData is declared above as int[] for sefGetLineAdr's byte
+ * arithmetic; the same storage typed as the record array. */
+extern SEF_LINE _lineTbl[] __asm__("_lineData");
+
+int sefAllocLineData(void)
+{
+    int i;
+
+    for (i = 0; i < 128; i++) {
+        if (_lineTbl[i].nUsed == 0) {
+            _lineTbl[i].nUsed = 1;
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* Release the line-data handle stored in an effect-data byte slot */
+extern void sefFreeLineData(int nLine);
+void sefFreeEffectData(void *pBase, int nOfs)
+{
+    signed char *p;
+
+    if ((unsigned int)nOfs < 32) {
+        p = (signed char *)pBase + nOfs;
+        if (*p >= 0) {
+            sefFreeLineData(*p);
+            *p = -1;
+        }
+    }
+}
+
+/* --- inverse-view matrix --- */
+
+extern void *xglStudioGetActiveCamera(void);
+extern void MMathRotateMatrixYXZ(void *pDst, void *pSrc, void *pRot);
+extern float _invView[16];
+
+/* Build the identity matrix straight out of vf0 by rotating the (0,0,0,1)
+ * constant register, then apply the active camera's rotation. No C
+ * expression names vf0's constant contents, so the identity fill is real
+ * hardware asm. */
+void sefCalcInvView(void *pMtx)
+{
+    void *pCam;
+
+    pCam = xglStudioGetActiveCamera();
+    __asm__ __volatile__(".set noreorder\n"
+        "vmr32.xyzw $vf1, $vf0\n"
+        "vmr32.xyzw $vf2, $vf1\n"
+        "vmr32.xyzw $vf3, $vf2\n"
+        "sqc2 $vf0, 0x30(%0)\n"
+        "sqc2 $vf1, 0x20(%0)\n"
+        "sqc2 $vf2, 0x10(%0)\n"
+        "sqc2 $vf3, 0x0(%0)\n"
+        ".set reorder\n"
+        : : "r"(pMtx) : "memory");
+    MMathRotateMatrixYXZ(pMtx, pMtx, (char *)pCam + 160);
+}
+
+extern void svDrawScheduler(void);
+void sefDrawEffect(void)
+{
+    if (_initialize != 0 && (GameLoopState.nFlags & 0x04000000) == 0) {
+        sefCalcInvView(_invView);
+        svDrawScheduler();
+    }
+}
+
+/* --- start/target world positions: an offset-range roll added onto the
+ * caller's vector. The 3-component add is VU0 macro mode. --- */
+
+extern void sefGetOfsRange(void *pDst, void *pPrm, int nRange);
+
+void sefGetStartPos(void *pPos, SEF_LINE *p)
+{
+    void *pOfs;
+
+    pOfs = (char *)p + 0x30;
+    sefGetOfsRange(pPos, (char *)p + 0x170, *(short *)p->f1D4);
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%0)\n"
+        "lqc2 $vf2, 0x0(%1)\n"
+        "vadd.xyz $vf1, $vf1, $vf2\n"
+        "sqc2 $vf1, 0x0(%1)\n"
+        ".set reorder" : : "r"(pOfs), "r"(pPos) : "memory");
+}
+
+void sefGetTargetPos(void *pPos, SEF_LINE *p)
+{
+    void *pOfs;
+
+    pOfs = (char *)p + 0x50;
+    sefGetOfsRange(pPos, (char *)p + 0x190, *(short *)p->f1DC);
+    __asm__ __volatile__(".set noreorder\n"
+        "lqc2 $vf1, 0x0(%0)\n"
+        "lqc2 $vf2, 0x0(%1)\n"
+        "vadd.xyz $vf1, $vf1, $vf2\n"
+        "sqc2 $vf1, 0x0(%1)\n"
+        ".set reorder" : : "r"(pOfs), "r"(pPos) : "memory");
+}
+
+/* Name-keyed variant of sefLoadMemoryEffectCf; srsMemoryLoadCf really
+ * takes three arguments (see sefLoadEffectCfName for the same call
+ * through a locally cast pointer). */
+int sefLoadMemoryEffectCfName(void *p, void *pName, int nArg)
+{
+    int nID = srsEffectNameToID(pName);
+    if (nID > 0) {
+        ((void (*)(void *, int, int))srsMemoryLoadCf)(p, nID, nArg);
+    }
+    return 0;
+}
+
+/* Free every line handle an effect-data block owns and clear its
+ * in-use count */
+typedef struct { char pad[0x20]; int nUsed; } SEF_EFFDATA;
+void sefDestroyEffectData(SEF_EFFDATA *p)
+{
+    int i;
+
+    if (p->nUsed != 0) {
+        for (i = 0; i < 32; i++) {
+            sefFreeEffectData(p, i);
+        }
+    }
+    p->nUsed = 0;
 }
