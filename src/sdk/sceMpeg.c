@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* PS2 SDK sceMpeg (libmpeg) handle accessors.
  *
  * A "handle" passed to these calls is an opaque struct whose real
@@ -254,24 +256,29 @@ int sceMpegGetPictureRAW8xy(SCEMPEGHANDLE *mp, unsigned int addr, int w, int h)
     return _getpic(mp);
 }
 
-/* NEAR-MISS, not registered: 19 words against the original's 20.
- * Everything matches except that the original keeps the handle in v0
- * (an extra `move v0,a0` up front) and sets a0 to the context early,
- * where gcc here leaves the handle in a0 and computes a0 = ctx just
- * before the call -- one `move` fewer.  A pure allocator tie-break; no
- * statement order, extra local, or handle-copy phrasing tried shifts
- * it, and PIN does not stick (the handle is a plain dereference). */
+/* The handle really is copied into $v0 and everything after that reads it
+ * through the copy: gcc otherwise leaves the handle in $a0, computes
+ * a0 = ctx just before the _clearEach call and is one `move` short.
+ * PIN alone does not stick on a plain dereference -- the copy has to be
+ * forced with PASSTHRU.  The -1 stored into nUnk080 is likewise named in
+ * its own $v1-pinned local so it is materialised in the prologue rather
+ * than at the store.  The remaining `li`/`sd $s0` prologue transpose is a
+ * pure post-reload reorder (FILE_FIX_FLAGS --swap-adjacent site 3). */
 void sceMpegReset(SCEMPEGHANDLE *mp)
 {
     SCEMPEGCTX *c;
+    PIN(SCEMPEGHANDLE *h, "$2");
+    PIN(int m1, "$3");
 
-    c = mp->pCtx;
+    PASSTHRU(h, mp);
+    m1 = -1;
+    c = h->pCtx;
     c->nUnk000 = 0;
     c->nUnk004 = 0;
     c->nUnk008 = 0;
-    mp->nUnk008 = 0;
+    h->nUnk008 = 0;
     c->nUnk0AC = 0;
-    c->nUnk080 = -1;
+    c->nUnk080 = m1;
     _clearEach(c);
     c->nUnk118 = 0;
     _initSeqAgain(c);

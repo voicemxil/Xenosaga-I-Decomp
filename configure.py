@@ -186,6 +186,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "sceMpeg.c": "--swap-adjacent sceMpegReset:3",
     "TCAMERA.c": "--unfill-gcc-slots TCAMERA_mpackGetInterest --swap-regs TCAMERA_mpackGetInterest:2-3",
     "mpeg.c": "--swap-adjacent _sequenceHeader:26 --swap-into-slot _sequenceHeader:7,_sequenceHeader:12",
     "sv.c": "",
@@ -236,7 +237,7 @@ FILE_FIX_FLAGS = {
     # the original executes that copy unconditionally and re-does it at the
     # merge. Ten source-level shapes were tried against this and none moved
     # it -- it is not reachable from C.
-    "ACT.c": "--branch-unlikely ACT_setArms:2",
+    "ACT.c": "--branch-unlikely ACT_setArms:2 --rotate ACT_createChr:24:2 --rotate-seq ACT_createChr:18:5,ACT_createChr:19:-4",
     # EtherTreeRightDraw / EtherTreeLine2SelectChange: gcc annuls a branch
     # whose delay slot it filled by copying the merge point's instruction
     # (the loop test, and the epilogue's `ld ra`). Both are safe to execute
