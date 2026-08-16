@@ -245,3 +245,55 @@ u_int RSRC_searchFile(RSRC *pResource, char *pName)
     }
     return 0;
 }
+
+extern void RSRC_info(RSRC *pResource, int nMode);
+
+/* Allocate a resource block: reuse a dirty item big enough, else append a
+   fresh item (or, when the table is full, recycle the smallest dirty one)
+   and carve the block off the top of the heap. */
+u_int RSRC_alloc(RSRC *pResource, u_int nSize, u_int pName)
+{
+    RSRCITEM *pItem = RSRC_getDirtyItem(pResource, nSize);
+
+    if (pItem == 0) {
+        u_int nCount = pResource->nItemCount;
+        u_int nNext = nCount + 1;
+
+        /* The EE scheduler otherwise issues the (u_short) truncation ahead
+           of the increment, which forces the truncation into a fresh
+           register instead of overwriting the dead loaded value in place.
+           Laundering BOTH values fences the pair into source order. */
+        LAUNDER2(nNext, nCount);
+
+        /* The (u_short) casts are what produce the retail build's
+           redundant `andi 0xffff`: without them gcc knows the lhu result
+           already fits and drops the truncation, costing a word. */
+        if ((u_short)nCount >= pResource->nItemCapacity) {
+            pItem = RSRC_getDirtyItem(pResource, 0);
+            if (pItem == 0) {
+                RSRC_info(pResource, 0);
+            }
+        } else {
+            pResource->nItemCount = nNext;
+            pItem = pResource->pItems + (u_short)nCount;
+        }
+        if (RSRC_check(pResource, nSize) != 0) {
+            RSRC_info(pResource, 0);
+        }
+        {
+            u_int nAligned;
+
+            pItem->pData = pResource->pCurrent;
+            nAligned = (nSize + 15) >> 4;
+            LAUNDER_V(nAligned);
+            nAligned = nAligned << 4;
+            pItem->nSize = nAligned;
+            pResource->pCurrent = pResource->pCurrent + nAligned;
+        }
+    }
+    pItem->pName = pName;
+    pItem->nState = 0;
+    pItem->nType = 2;
+    memset((void *)pItem->pData, 0, pItem->nSize);
+    return pItem->pData;
+}
