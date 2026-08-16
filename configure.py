@@ -65,6 +65,12 @@ SDK_FILES = {
     # matched exactly by the 2.9-ee SDK compiler at -O2 -G0
     # -fno-schedule-insns; the 2.96 game compiler cannot reproduce it.
     "mpeg.c",
+    # kernel.c: the syscall stubs are frameless so they match under either
+    # compiler, but the launch forwarders (Exit/ExecOSD/LoadExecPS2/ExecPS2)
+    # need the SDK compilers 16-byte-per-saved-register frame stride --
+    # 2.96 packs the saves 8 bytes apart. All 156 functions match at
+    # -O2 -G0 -fno-schedule-insns.
+    "kernel.c",
 }
 SDK_CC = CC
 SDK_CFLAGS = CFLAGS

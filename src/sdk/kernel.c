@@ -26,7 +26,7 @@ void RFU003(void)
     __asm__ __volatile__("li $3,3\n\tsyscall");
 }
 
-void _Exit(void)
+void _Exit(int status)
 {
     __asm__ __volatile__("li $3,4\n\tsyscall");
 }
@@ -36,12 +36,12 @@ void RFU005(void)
     __asm__ __volatile__("li $3,5\n\tsyscall");
 }
 
-void _LoadExecPS2(void)
+void _LoadExecPS2(const char *path, int argc, char **argv)
 {
     __asm__ __volatile__("li $3,6\n\tsyscall");
 }
 
-void _ExecPS2(void)
+int _ExecPS2(void *entry, void *gp, int argc, char **argv)
 {
     __asm__ __volatile__("li $3,7\n\tsyscall");
 }
@@ -666,7 +666,7 @@ void sceSifGetReg(void)
     __asm__ __volatile__("li $3,122\n\tsyscall");
 }
 
-void _ExecOSD(void)
+void _ExecOSD(int argc, char **argv)
 {
     __asm__ __volatile__("li $3,123\n\tsyscall");
 }
@@ -761,3 +761,43 @@ void FindAddress(void)
     __asm__ __volatile__("li $3,131\n\tsyscall");
 }
 
+
+/* Kernel-library shutdown and the four program-launch forwarders.
+ *
+ * Each of these restores the kernel's own TLB map (TerminateLibrary is
+ * nothing but a tail call to InitTLB) and then hands off to the matching
+ * syscall stub above.  Everything except ExecPS2 is a plain tail call, so
+ * gcc turns the last `jal` into a `j` after the epilogue; ExecPS2 returns
+ * the syscall's value and therefore keeps the jal.
+ */
+
+extern void InitTLB(void);
+
+void TerminateLibrary(void)
+{
+    InitTLB();
+}
+
+void Exit(int status)
+{
+    TerminateLibrary();
+    _Exit(status);
+}
+
+void ExecOSD(int argc, char **argv)
+{
+    TerminateLibrary();
+    _ExecOSD(argc, argv);
+}
+
+void LoadExecPS2(const char *path, int argc, char **argv)
+{
+    TerminateLibrary();
+    _LoadExecPS2(path, argc, argv);
+}
+
+int ExecPS2(void *entry, void *gp, int argc, char **argv)
+{
+    TerminateLibrary();
+    return _ExecPS2(entry, gp, argc, argv);
+}

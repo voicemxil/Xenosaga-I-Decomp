@@ -1,3 +1,5 @@
+#include "matching.h"
+
 /* PS2 SDK sceGs: the graphics-parameter block and VSync plumbing.
  *
  * `gp` is a file-static in the original, so splat had to disambiguate
@@ -116,4 +118,53 @@ void *sceGsSyncVCallback(void *cb)
         EnableIntc(2);
     }
     return old;
+}
+/* sceGszbufaddr: how many 2048-byte GS pages a Z buffer of w x h pixels
+   needs, in the units the FRAME/ZBUF registers use.  `psm` bit 1 selects a
+   32-bit Z format (page height 64) over a 16-bit one (page height 32); the
+   width always rounds up to a 64-pixel page.
+
+   The mode test really is ONE 64-bit load: the parameter block's interlace
+   and FFMD shorts sit at byte offsets 0 and 4, so masking the first eight
+   bytes with 0x0000FFFF0000FFFF and comparing against 1 asks "interlaced AND
+   frame mode" in a single compare.  Written as two short compares gcc emits
+   two lh/bne pairs and four extra words.
+
+   TODO: near-miss (27 of 50 words).  The instruction multiset is EXACT --
+   `tools/scratch_diff.py --all` shows only ordering and two register roles.
+   Two things are left:
+     - the prologue: the four callee-saved `sd`s and the three parameter
+       sign-extensions are the same instructions in a different sched2 order,
+       and the original puts `sra s2,a2,16` in the sceGsGetGParam delay slot
+       where gcc puts `sll s0,a1,16`;
+     - the tail: the original loads the parameter block into $v0 and the
+       0x0000FFFF0000FFFF mask into $v1 (so the literal 1 is forced out to
+       $a0); gcc does it the other way round and reuses $v0 for the 1.
+   Naming the masked value in its own local `m` BEFORE the multiply is what
+   recovers the original's `b` and the mult-in-the-delay-slot (34 -> 27
+   words); without it reorg fills the branch slot from the target instead.
+   Ruled out: PIN/PASSTHRU on m and on the product (both drop instructions
+   or add a bnel), hoisting the mask or the literal 1 into a laundered
+   long-lived temp (the constant-range lever -- costs a stack frame here),
+   and all five tail phrasings of the final truncation. */
+short sceGszbufaddr(short psm, short w, short h)
+{
+    sceGsGParam *g;
+    int pw, ph;
+    int pages;
+    long long m;
+
+    g = sceGsGetGParam();
+
+    pw = (w + 63) / 64;
+    if (psm & 2)
+        ph = (h + 63) / 64;
+    else
+        ph = (h + 31) / 32;
+
+    m = *(long long *)g & 0x0000FFFF0000FFFFLL;
+    pages = pw * ph;
+    if (m == 1)
+        return (short)pages;
+    return (short)(pages * 2);
 }
