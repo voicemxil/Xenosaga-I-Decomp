@@ -2723,3 +2723,53 @@ int _ModelCalcClipMat2(void *pPos, void *pMat1, void *pMat2)
             : "=r"(nRet) : "r"(pPos), "r"(pMat1), "r"(pMat2) : "$2", "$f0", "$f1");
     return nRet;
 }
+
+/* Occlusion volume: five side planes plus a near distance, built by
+ * setup_occlusion from the camera. */
+typedef struct {
+    char pad000[0x100];
+    float aPlane[5][4];     /* 0x100 */
+    float fClip;            /* 0x150 */
+} OCCLUSION;
+
+/* True when pPos is inside the occlusion volume pOcc (pCam+0x1B0 is the
+ * camera's view matrix). */
+int check_occlusion(OCCLUSION *pOcc, void *pCam, void *pPos)
+{
+    VEC4 v;
+    float fZ, fNW;
+    int nRet;
+
+    PS2_ASM(".set noreorder\n"
+            "lqc2 $vf31, 0x0(%2)\n"
+            "lqc2 $vf27, 0x0(%1)\n"
+            "lqc2 $vf28, 0x10(%1)\n"
+            "lqc2 $vf29, 0x20(%1)\n"
+            "lqc2 $vf30, 0x30(%1)\n"
+            "vmulax.xyz $ACC, $vf27, $vf31x\n"
+            "vmadday.xyz $ACC, $vf28, $vf31y\n"
+            "vmaddaz.xyz $ACC, $vf29, $vf31z\n"
+            "vmaddw.xyz $vf31, $vf30, $vf0w\n"
+            "sqc2 $vf31, 0x0(%0)\n"
+            ".set reorder"
+            : : "r"(&v), "r"((char *)pCam + 0x1B0), "r"(pPos) : "memory");
+
+    nRet = 0;
+    fZ = -v.f[2];
+    v.f[2] = fZ;
+    if (fZ - v.f[3] < pOcc->fClip) goto done;
+    fNW = -v.f[3];
+    if (fNW < v.f[0] * pOcc->aPlane[0][0] + v.f[1] * pOcc->aPlane[0][1]
+          + fZ * pOcc->aPlane[0][2] + pOcc->aPlane[0][3]) goto done;
+    if (fNW < v.f[0] * pOcc->aPlane[1][0] + v.f[1] * pOcc->aPlane[1][1]
+          + fZ * pOcc->aPlane[1][2] + pOcc->aPlane[1][3]) goto done;
+    if (fNW < v.f[0] * pOcc->aPlane[2][0] + v.f[1] * pOcc->aPlane[2][1]
+          + fZ * pOcc->aPlane[2][2] + pOcc->aPlane[2][3]) goto done;
+    if (fNW < v.f[0] * pOcc->aPlane[3][0] + v.f[1] * pOcc->aPlane[3][1]
+          + fZ * pOcc->aPlane[3][2] + pOcc->aPlane[3][3]) goto done;
+    if (fNW < v.f[0] * pOcc->aPlane[4][0] + v.f[1] * pOcc->aPlane[4][1]
+          + fZ * pOcc->aPlane[4][2] + pOcc->aPlane[4][3]) goto done;
+    nRet = 1;
+done:
+    return nRet;
+}
