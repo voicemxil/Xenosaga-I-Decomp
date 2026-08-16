@@ -32,11 +32,11 @@ extern void xglFontPrint(int x, int y, int nColor, char *pStr);
 extern void xglFontPrintExtFunc(int nColor, void (*pFunc)(VIFPK *), int nArg);
 extern void xglFontSetFlags(int nFlags);
 
-/* Queue the pause background quad behind the currently printing string */
-static void DrawShadow(VIFPK *pk)
-{
-    sceVif1PkAddDirectDataN(pk->pPk, PauseBgPacket, 7);
-}
+/* Queue the pause background quad behind the currently printing string.
+   The definition lives in Draw.c (where it is registered and matches);
+   a second, static copy here made the built image carry two DrawShadows
+   and PauseMenu reference the wrong one. */
+extern void DrawShadow(VIFPK *pk);
 
 /* Build and queue an 8-quadword sprite packet for the credit screen.
  * PARKED 6-word diff: the five constants that get callee-saved registers
@@ -138,31 +138,7 @@ void PauseMenu(void)
     }
 }
 
-/* Reference the shared background quad into the current packet */
-void GamePauseDispBG(void)
-{
-    sceVif1PkRef(xglPacketGetCurrent(), PauseBgPacket, 7, 0, 0, 0);
-}
-
-/* Centered "PAUSE" banner over the background quad */
-void GamePauseDispCf(void)
-{
-    char *s = PauseStr;
-
-    xglFontPrint(256 - xglFontGetStringWidth(s) / 2, 200, 0xFFFFFF, s);
-    GamePauseDispBG();
-}
-
-/* Event-pause variant: banner plus the skip / cancel help lines */
-void GamePauseDispEvent(void)
-{
-    char *s = PauseSkipStr;
-    int cx;
-    char *s2;
-
-    GamePauseDispCf();
-    cx = 256;
-    xglFontPrint(cx - xglFontGetStringWidth(s) / 2, 256, 0xFFFFFF, s);
-    s2 = PauseCancelStr;
-    xglFontPrint(cx - xglFontGetStringWidth(s2) / 2, 288, 0xFFFFFF, s2);
-}
+/* GamePauseDispBG / GamePauseDispCf / GamePauseDispEvent used to be
+   duplicated here; they are registered against (and match in) Game.c,
+   and two definitions of one symbol let the linker pick the copy no
+   per-function check was looking at.  Removed. */
