@@ -134,6 +134,24 @@ typedef struct ETNODE {
     char pad30[0x40];
 } ETNODE;
 
+typedef struct {
+    unsigned char bFlags;       /* 0x00 */
+    char pad01;
+    unsigned short wId;         /* 0x02 */
+    char pad04[0x0C];
+    float fCenterX;             /* 0x10 */
+    float fCenterY;             /* 0x14 */
+    char pad18[0x18];
+    float fBaseX;               /* 0x30 */
+    float fBaseY;               /* 0x34 */
+    float fBaseZ;               /* 0x38 */
+    float fScale;               /* 0x3C */
+    char pad40[0x14];
+    ETNODE *pJouto;             /* 0x54 */
+    char pad58[0x28];
+} ETSYSTEM;
+
+extern ETSYSTEM *EtherTreeSystem;
 extern ETNODE *EtherTreeObject;
 extern unsigned char *EtherTreeFirstDataGet(void);
 extern ETNODE *EtherTreeObjectWorkGet(void);
@@ -250,9 +268,9 @@ void subParentChildSet(void)
    own position and its first child's. */
 typedef struct {
     EVEC posA;          /* 0x00 */
-    char pad10[0x10];
+    char colorA[0x10];  /* 0x10 */
     EVEC posB;          /* 0x20 */
-    char pad30[0x10];
+    char colorB[0x10];  /* 0x30 */
 } ETSEG;
 
 typedef struct {
@@ -262,6 +280,49 @@ typedef struct {
 } ETLINE;
 
 extern void subTreeLineDraw(ETLINE *line, int *pType);
+extern void EtherTreeLineColorGet(void *pDst, int nType);
+extern void endPrintExtFunc(int nKind, int nType, void *pData);
+
+/* How many wireframe segments each node type draws, indexed by the
+   node's child count. Copied to the stack whole -- 4-byte aligned at
+   both ends, so the copy is the unaligned ldl/ldr idiom. */
+typedef struct {
+    int n[4];
+} ETSEGCOUNT;
+
+extern ETSEGCOUNT D_004D9AC0;
+
+/* Transform every segment of one node's wireframe into screen space, in
+   place, and queue each with a colour block at either end. */
+void subTreeLineDraw(ETLINE *line, int *pType)
+{
+    ETSEGCOUNT aCount;
+    ETSYSTEM *sys;
+    float *pBase;
+    float *pCenter;
+    int i;
+
+    aCount = D_004D9AC0;
+    sys = EtherTreeSystem;
+    /* pCenter first: gcc emits the SECOND of two such initialisers where
+       it stands and sinks the FIRST to its use, and the original sinks
+       the centre pointer into the guard's delay slot. */
+    pCenter = &sys->fCenterX;
+    pBase = &sys->fBaseX;
+    for (i = 0; i < aCount.n[line->pNode->nChildren]; i++) {
+        ETSEG *q = &line->seg[i];
+
+        q->posA.x = (q->posA.x + pBase[0] + pCenter[0]) * pBase[3];
+        q->posB.x = (q->posB.x + pBase[0] + pCenter[0]) * pBase[3];
+        q->posA.y = (q->posA.y + pBase[1] + pCenter[1]) * pBase[3];
+        q->posB.y = (q->posB.y + pBase[1] + pCenter[1]) * pBase[3];
+        q->posA.z = pBase[2] - 2.0f;
+        q->posB.z = pBase[2] - 2.0f;
+        EtherTreeLineColorGet(q->colorA, pType[i]);
+        EtherTreeLineColorGet(q->colorB, pType[i]);
+        endPrintExtFunc(0, 16, &q->posA);
+    }
+}
 
 /* Type 1: node -> first child. Learned/unlearned picks the line style. */
 void subTreeLineDraw_type_1(ETLINE *line)
@@ -455,26 +516,7 @@ typedef struct {
     int nWidth;                 /* 0x30 */
 } ETRIGHT;
 
-typedef struct {
-    unsigned char bFlags;       /* 0x00 */
-    char pad01;
-    unsigned short wId;         /* 0x02 */
-    char pad04[0x0C];
-    float fCenterX;             /* 0x10 */
-    float fCenterY;             /* 0x14 */
-    char pad18[0x18];
-    float fBaseX;               /* 0x30 */
-    float fBaseY;               /* 0x34 */
-    float fBaseZ;               /* 0x38 */
-    float fScale;               /* 0x3C */
-    char pad40[0x14];
-    ETNODE *pJouto;             /* 0x54 */
-    char pad58[0x28];
-} ETSYSTEM;
-
-extern ETSYSTEM *EtherTreeSystem;
 extern float D_004D7E84;
-extern void endPrintExtFunc(int nKind, int nType, void *pData);
 
 /* Ease the right panel toward its target node, then hand the screen-space
    position to the print list. The target pointer is re-read for the second
@@ -696,8 +738,6 @@ typedef struct {
     char pad74[0x0C];
     ETOUT out[3];               /* 0x80, stride 0x40 */
 } ETLINE2;
-
-extern void EtherTreeLineColorGet(void *pDst, int nType);
 
 /* Transform all three connector segments into screen space and queue
    them: each endpoint is offset by the tree's base and centre and scaled,

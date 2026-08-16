@@ -2869,3 +2869,4 @@ sresLoadCommonMemory = 0x002E8D28, 0xBC; // srsGet.c
 SEQ_rotateUnit = 0x0031F868, 0x478; // SEQ.c
 MOutputDebugString = 0x002EEEC0, 0x8C; // sdv.c
 MOutputDebugStringWarn = 0x002EEF50, 0x8C; // sdv.c
+subTreeLineDraw = 0x002BBDF8, 0x1B8; // sub.c
