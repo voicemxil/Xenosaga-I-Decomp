@@ -1155,3 +1155,72 @@ int sceFormat(char *dev, char *blockdev, char *arg, int arglen)
     DeleteSema(semid);
     return result;
 }
+
+/* The devctl request layout. */
+typedef struct t_fs_send_devctl {
+    int   semid;
+    void *dst;
+    int   size;
+    char  path[1024];           /* +12 */
+    char  data[1024];           /* +1036 */
+    int   cmd;                  /* +2060 */
+    unsigned int arglen;        /* +2064 */
+    void *bufp;                 /* +2068 */
+    unsigned int buflen;        /* +2072 */
+} fs_send_devctl_t;             /* 2076 bytes */
+
+int sceDevctl(char *name, int cmd, char *arg, unsigned int arglen,
+              void *bufp, unsigned int buflen)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_devctl_t *sd;
+    int done;
+    int i;
+
+    sd = (fs_send_devctl_t *)&_send_data;
+    _sceFsWaitS(23);
+    if (_fs_init == 0)
+        sceFsInit();
+    for (i = 0; i < 1024; i++) {
+        sd->path[i] = name[i];
+        if (sd->path[i] == 0)
+            break;
+    }
+    if (i == 1024)
+        sd->path[1023] = 0;
+    if (arglen > 1024 || buflen > 1024) {
+        _sceFsSigSema();
+        return -22;
+    }
+    for (i = 0; i < arglen; i++)
+        sd->data[i] = arg[i];
+    sd->arglen = arglen;
+    sd->cmd = cmd;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->buflen = buflen;
+    sd->dst = &result;
+    sd->size = 4;
+    sd->bufp = bufp;
+    sd->semid = semid;
+    sceSifWriteBackDCache(&_send_data, 2076);
+    if (sceSifCallRpc(&_cd, 23, 0, &_send_data, 2076, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}
