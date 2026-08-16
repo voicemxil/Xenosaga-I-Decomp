@@ -23,12 +23,17 @@ typedef struct {
     unsigned char nAnalisis[0x10];  /* 0x98 */
 } UMN_DATABASE;
 
+typedef struct {
+    unsigned char nFlags;           /* 0x00 */
+    unsigned char nFlags2;          /* 0x01 */
+} MAIL_DATA;
+
 short UmnKosmosSpecialBox[4];
 
 extern XGLRENDER sRender;
 extern GAMELOOP GameLoopState;
 extern UMN_DATABASE D_004A1A0C;
-extern short D_004A1AB4[];
+extern MAIL_DATA D_004A1AB4[];
 
 extern void *memset(void *pDst, int nVal, unsigned int nSize);
 extern void func_A19750(int nType, int nId);
@@ -45,6 +50,25 @@ typedef struct {
     unsigned short nPos;
     char entries[1][8];
 } EVENT_TEXT_BUF;
+
+typedef struct {
+    char pad00[1];
+    unsigned char nScene;           /* 0x01 */
+    char pad02[1];
+    unsigned char nPage;            /* 0x03 */
+    char pad04[0x80 - 0x04];
+} UMN_WORK;
+
+typedef struct { char pad[0x68]; } GUNO_DATA;
+
+extern UMN_WORK UmnWork;
+extern GUNO_DATA *UmnGunoDataBaseTop[];
+extern signed char compulsion_down_load_tbl[];
+extern unsigned char event_tbl[];
+extern signed char event_end_mail[];
+
+extern int xglCdReadFile(char *pName, unsigned int nAddr, int nOfs, int nSize);
+extern void UmnProcuratorSet(void);
 
 extern MAIL_ATTACH umn_attach_tbl[];
 extern MAIL_HEADER *UmnMailHeaderBuf[];
@@ -256,7 +280,7 @@ int UmnEventTextNumberGet(char **ppText, int nMode)
 
 /* Look up one mail table entry by index */
 /* TODO: Find the natural source shape for this matched return-delay scaffold. */
-short *UmnMailDataGet(int nNo)
+MAIL_DATA *UmnMailDataGet(int nNo)
 {
     return &D_004A1AB4[nNo];
 }
@@ -317,4 +341,110 @@ int UmnDataBaseAnalisisCheck(int nNo)
         nRet = ((unsigned int)pData->nAnalisis[n / 8] >> (n % 8)) & 1;
     }
     return nRet;
+}
+
+
+/* ------------------------------------------------------------------ */
+
+/* Look up a Gnosis-database record by monster id; ids outside the
+   34..62 range fall back to the table's first entry. */
+GUNO_DATA *UmnGunoDataBaseGet(int nNo)
+{
+    GUNO_DATA *pTop = UmnGunoDataBaseTop[0];
+
+    if ((unsigned int)(nNo - 34) < 29) {
+        return &pTop[nNo - 34];
+    }
+    return pTop;
+}
+
+/* Load the conversation-history tree into a 2K-aligned slice of the
+   caller's scratch block and return the next free byte. */
+void *UmnHistoryTreeLoad(void *pRaw)
+{
+    char *pAligned;
+    char *pNext;
+
+    pAligned = (char *)(((unsigned int)pRaw + 2047) & ~2047);
+    pNext = pAligned + 2048;
+    UmnHistoryTreeBuf[0] = (int *)pAligned;
+    xglCdReadFile("data\\endou\\umn\\histree.bin", (unsigned int)pAligned, 0, 0);
+    return pNext;
+}
+
+/* Switch the menu to a top-level scene: wipe the per-scene scratch half
+   of UmnWork, reset the page and rebuild the 3D procurator model. */
+void UmnChangeTopLevel(int nScene)
+{
+    typedef int T128 __attribute__((mode(TI)));
+    UMN_WORK *w;
+    T128 *p;
+    int i;
+
+    w = &UmnWork;
+    p = (T128 *)((char *)w + 0x10);
+    for (i = 0; i < 7; i++) {
+        *p = 0;
+        p++;
+    }
+    UmnWork.nScene = nScene;
+    UmnWork.nPage = 0;
+    UmnProcuratorSet();
+}
+
+/* True when this mail is one of the story mails whose download the game
+   forces, and it has not been pulled down yet. */
+int UmnMailCompulsionDownLoadCheck(int nNo)
+{
+    int i;
+
+    for (i = 0; i < 13; i++) {
+        if (compulsion_down_load_tbl[i] == nNo) {
+            if ((UmnMailDataGet(nNo)->nFlags2 & 0x80) == 0) {
+                return 1;
+            }
+            break;
+        }
+    }
+    return 0;
+}
+
+/* Index+1 of this mail in the event-mail table if its event has not yet
+   fired, else 0. */
+int UmnMailEventCheck(int nNo)
+{
+    int i;
+
+    for (i = 0; i < 18; i++) {
+        if (event_tbl[i] == nNo) {
+            if ((UmnMailDataGet(nNo)->nFlags & 4) == 0) {
+                return i + 1;
+            }
+            break;
+        }
+    }
+    return 0;
+}
+
+/* When the just-finished event is the one that unlocks the end-of-event
+   mail, mark that mail seen and drop it in the inbox. */
+int UmnEventEndMailCheck(int nNo)
+{
+    MAIL_DATA *pData;
+    signed char *pMail;
+    unsigned char nFlags;
+    unsigned char nSeen;
+
+    if (event_end_mail[0] == nNo) {
+        pMail = &event_end_mail[1];
+        pData = UmnMailDataGet(*pMail);
+        nFlags = pData->nFlags;
+        nSeen = nFlags & 1;
+        if (nSeen == 0) {
+            pData->nFlags = nFlags | 1;
+            UmnMailBoxSet(*pMail);
+            return 1;
+        }
+    }
+    return 0;
 }

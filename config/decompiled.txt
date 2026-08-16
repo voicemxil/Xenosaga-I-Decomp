@@ -2524,3 +2524,6 @@ UmnHistoryTreeLoad = 0x00A0F0D8, 0x50; // Umn.c
 UmnMailCompulsionDownLoadCheck = 0x00A0F5E8, 0x64; // Umn.c
 UmnMailEventCheck = 0x00A0F000, 0x68; // Umn.c
 TCAMERA_transCNS = 0x00308DC8, 0x64; // TCAMERA.c
+xheap_push = 0x002F1BA0, 0x24; // JavaClass.c
+UmnChangeTopLevel = 0x00A024D8, 0x54; // Umn.c
+UmnEventEndMailCheck = 0x00A0F068, 0x6C; // Umn.c
