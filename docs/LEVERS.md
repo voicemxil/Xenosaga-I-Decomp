@@ -54,6 +54,13 @@ them independently).
 **One local, two roles.** A C local is one pseudo, so reusing it for two
 sequential purposes pins the second value into the first's register.
 
+**Let CSE invent the FP temporaries.** Naming `cur`/`dst`/`v` rotates
+every FP register; leaving them as memory reads matches.
+
+**Sequence a call into its own local when its result feeds an argument
+list** — otherwise gcc computes the other arguments first and they need
+callee-saved FP registers.
+
 **Transform parameters in place** when the original does — each result
 then shares its argument's callee-saved register.
 
@@ -143,6 +150,11 @@ cross-jumping. Assign on every path and fall out of one `return`.
 fixed by making the second path fall through to the first, or `goto` a
 shared label.
 
+**Switch node COUNT picks the decision-tree root.** gcc's
+`balance_case_nodes` special-cases exactly three nodes and splits at the
+middle. A dispatch that starts at the LOWEST label means the source has
+a case you have not written — usually an empty `case 0: break;`.
+
 **`switch` vs `if/else-if`.** gcc sorts the case TESTS but emits the
 BODIES in source order — that asymmetry is often the whole layout
 difference. Case-label order decides block layout.
@@ -174,6 +186,8 @@ plain int gives sll/addu.
 **16-bit truncation trap.** `unsigned short v = field;` narrows a later
 range test to 16 bits and costs `andi 0xffff` plus `li`+`addu`.
 `unsigned int v = (unsigned short)field;` keeps it in int domain.
+
+**`^ 1`, not `!` or `== 0`,** for the `xori`+`sltu` pair.
 
 **`c->s * 4` gives `lh`+`sll`; `c->s << 2` gives `lhu`+`sll`.** Multiply
 and shift are NOT interchangeable for matching.
@@ -252,6 +266,22 @@ must); caching costs a callee-saved register and a wider frame.
 **Read a field back out after the `if`**, do not assign the local inside
 it — fixes both the store's source register and gcc's jump threading of
 a redundant re-test.
+
+---
+
+## Alignment and aliasing — a CORRECTNESS trap
+
+**Use alignment variants of ONE struct tag, never two struct types.**
+Two identically-shaped structs land in different gcc alias sets, and gcc
+will hoist a read above the store that fills it. That is WRONG CODE, not
+merely a mismatch, and byte-comparison against a function you have not
+matched yet will not catch it. Declare `struct EVECS` once and typedef
+it twice, one with `aligned(8)`.
+
+**Member-level `aligned()` does nothing here.** ee-gcc takes block-move
+alignment from `TYPE_ALIGN`, not `DECL_ALIGN`, so moving the attribute
+onto declarations silently converts every `ld/sd` vector copy in the
+file to `ldl/ldr`.
 
 ---
 
