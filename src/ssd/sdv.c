@@ -557,3 +557,33 @@ void smFree(void *pMem)
         }
     }
 }
+
+/* --- MOutputDebugString: prefix the caller's format string, then print
+ * the caller's own varargs through it. --- */
+
+#define va_start(ap, last) __builtin_stdarg_start(ap, last)
+typedef __builtin_va_list va_list;
+
+extern char dstr[];
+extern char D_004CCA40[];
+extern char D_004CCA58[];
+extern int sprintf(char *pBuf, const char *pFmt, ...);
+extern int vprintf(const char *pFmt, va_list ap);
+
+void MOutputDebugString(char *pFmt, ...)
+{
+    va_list ap;
+
+    va_start(ap, pFmt);
+    sprintf(dstr, D_004CCA40, pFmt);
+    vprintf(dstr, ap);
+}
+
+void MOutputDebugStringWarn(char *pFmt, ...)
+{
+    va_list ap;
+
+    va_start(ap, pFmt);
+    sprintf(dstr, D_004CCA58, pFmt);
+    vprintf(dstr, ap);
+}

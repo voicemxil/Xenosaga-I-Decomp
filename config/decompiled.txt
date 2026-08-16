@@ -2867,3 +2867,5 @@ isceSifSendCmd = 0x00202C58, 0x3C; // sceSif.c
 _search_svdata = 0x002033E0, 0x4C; // sceSif.c
 sresLoadCommonMemory = 0x002E8D28, 0xBC; // srsGet.c
 SEQ_rotateUnit = 0x0031F868, 0x478; // SEQ.c
+MOutputDebugString = 0x002EEEC0, 0x8C; // sdv.c
+MOutputDebugStringWarn = 0x002EEF50, 0x8C; // sdv.c
