@@ -1092,6 +1092,52 @@ void nmlModelSetFadeIn(int time, int n20)
     D_00338680.afOutColor[3].f = f30;
 }
 
+/* --- Active (script) fades --- */
+
+/* TODO: both nmlModelSetActive* below are near-misses and are NOT
+ * registered. The logic is verified: every non-nop word matches, the
+ * fade_set argument slots are confirmed against the disassembly
+ * (nUnk18=0, nTime, nUnk1C, nUnk20=1, nUnk2C=third arg) and the colour
+ * scale is 1/128 (lui at,0x3c00 -> mtc1, not a .lit4 load).
+ * What is left is padding only, in the three unsigned-int-to-float
+ * conversion blocks: the original leaves the `b` delay slot after each
+ * `cvt.s.w` EMPTY and adds a trailing pad nop, where gcc fills the slot
+ * with the cvt.s.w. FadeOut is short by 16 bytes (4 insns), FadeIn by 24
+ * (6 insns), and the shortfall is entirely those slots. This is the same
+ * ee-as COP1 stall-pad class already handled in this file for
+ * nmlModelSetFadeIn / nmlModelFogPara -- try --unfill-gcc-slots and/or
+ * --mtc1-nop nmlModelSetActiveFadeOut:N,nmlModelSetActiveFadeIn:N before
+ * touching the C, which is very unlikely to be wrong.
+ * Note the unsigned->float dance (bltz / andi 1 / srl 1 / or / add.s) is
+ * gcc's UNSIGNED conversion: the colour argument must stay `unsigned
+ * int` or the whole block collapses to a plain cvt.s.w. */
+
+/* Start an active fade-out over time+2 frames from a packed 0x00BBGGRR
+ * colour, unless one is already running */
+void nmlModelSetActiveFadeOut(int nTime, unsigned int nColor, int nUnk2C)
+{
+    FADE_COL aCol[3];
+
+    if (s_inActiveFadeOut.nTime >= 0) {
+        return;
+    }
+    aCol[0].f = (float)(nColor & 0xFF) * 0.0078125f;
+    aCol[1].f = (float)((nColor >> 8) & 0xFF) * 0.0078125f;
+    aCol[2].f = (float)((nColor >> 16) & 0xFF) * 0.0078125f;
+    fade_set(&s_inActiveFadeOut, aCol, 0, nTime + 2, 0, 1, nUnk2C);
+}
+
+/* Start an active fade-in from a packed 0x00BBGGRR colour */
+void nmlModelSetActiveFadeIn(int nTime, unsigned int nColor, int nUnk2C)
+{
+    FADE_COL aCol[3];
+
+    aCol[0].f = (float)(nColor & 0xFF) * 0.0078125f;
+    aCol[1].f = (float)((nColor >> 8) & 0xFF) * 0.0078125f;
+    aCol[2].f = (float)((nColor >> 16) & 0xFF) * 0.0078125f;
+    fade_set(&s_inActiveFadeIn, aCol, 0, nTime, 1, 1, nUnk2C);
+}
+
 /* --- Global point lights --- */
 
 void xglVectorScaleXYZ(void *pDst, void *pSrc, float fScale);
