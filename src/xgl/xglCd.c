@@ -77,6 +77,30 @@ int StreamReadRingCoreXss(void *pStr);
 int StreamReadRingCoreNormal(void *pStr);
 
 /* Default completion callback (nothing to do) */
+int xglArxExtract(void *pDst, void *pSrc);
+
+/* Copy nSize bytes from pSrc to pDst, unpacking an "ARX" archive in place
+ * if the source carries one.  nSize = 0 after the unpack is dead but it is
+ * what the original wrote: without a statement after the call gcc turns the
+ * call into a sibling jump. */
+void extract(u_int *pDst, u_int *pSrc, int nSize)
+{
+    u_int nWord;
+
+    if (*pSrc == 0x00585241 && pSrc[3] == 0) {
+        xglArxExtract(pDst, pSrc);
+        nSize = 0;
+    } else if (pDst != pSrc && nSize > 0) {
+        do {
+            nWord = *pSrc;
+            nSize -= 4;
+            *pDst = nWord;
+            pSrc++;
+            pDst++;
+        } while (nSize > 0);
+    }
+}
+
 void xglCdDefaultCallback(void)
 {
 }

@@ -2799,3 +2799,4 @@ _WeightToGlobalPlaceVec = 0x0023B180, 0x98; // nmlFilter.c
 GameDefocusSet = 0x0024FF40, 0xF4; // Game.c
 _nextBit = 0x00213BC8, 0x150; // sceMpegDec.c
 _CurMatrixMul33norm = 0x00236500, 0xC0; // nmlModel.c
+extract = 0x0021CF18, 0x80; // xglCd.c
