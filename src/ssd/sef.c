@@ -1394,3 +1394,52 @@ int sefIsFinishEffect(int nID)
     }
     return nHits < 1U;
 }
+
+/* --- sefClearEffectCf: walk all 32 effect-data records of a Cf slot
+ * and release every line handle each one still holds. Same "line
+ * address or null" convention as sefFreeLineData: the handle is tested
+ * for negative, and the address formed from it is tested again.
+ *
+ * NEAR-MISS (43/43 words, 2 differing): the original emits the %hi of
+ * the line table (`lui s4,0x6b`) before the outer loop's reversed
+ * counter init (`li s3,31`); every spelling here emits them the other
+ * way round. Swept: for/do-while/down-counting outer loop, all five
+ * declaration orders of the locals, `i = 0` hoisted above the record
+ * pointer, and LAUNDER_V on the record pointer (that one also moves the
+ * pointer to s0 -- worse). Both instructions are ready in the same
+ * block with no dependence between them, so this is purely the EE
+ * scheduler's tie-break; permuter territory. --- */
+typedef struct
+{
+    signed char aHandle[32]; /* 0x00 */
+    int nUsed;               /* 0x20 */
+    char pad24[0x30 - 0x24];
+} SEF_EFFREC;
+
+void sefClearEffectCf(void *pArg)
+{
+    SEF_EFFREC *pRec;
+    void *pLine;
+    int i;
+    int j;
+    int h;
+
+    if (pArg == 0) {
+        return;
+    }
+    pRec = (SEF_EFFREC *)((char *)pArg + 176);
+    for (i = 0; i < 32; i++) {
+        if (pRec->nUsed != 0) {
+            for (j = 0; j < 32; j++) {
+                h = pRec->aHandle[j];
+                if (h >= 0) {
+                    pLine = &_lineDataTbl[h];
+                    if (pLine != 0) {
+                        sefDestroyLocalData(pLine);
+                    }
+                }
+            }
+        }
+        pRec++;
+    }
+}
