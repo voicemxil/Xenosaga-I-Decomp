@@ -355,9 +355,14 @@ void xglFontDebugHex(int nX, int nY, unsigned int nValue, int nDigits)
     if (nDigits == 0) {
         return;
     }
+    /* set_xyz is called either way -- only the coordinate doubling is
+     * conditional (the original branches past the two slls, not past
+     * the call). */
     if (FS.nDebugMode == 0) {
-        set_xyz(nX << 1, nY << 1, -1);
+        nX <<= 1;
+        nY <<= 1;
     }
+    set_xyz(nX, nY, -1);
     p = FS.pStream;
     p[0] = 11;
     p[1] = 16;
