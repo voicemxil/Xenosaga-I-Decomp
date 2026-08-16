@@ -2972,3 +2972,96 @@ void setup_occlusion(CULLCELL *pCell, void *pCam)
         plane_from_points(vZero.f, v0.f, v3.f, pCell->aPlane[4]);
     }
 }
+
+/* One entry of the parent-buffer list at s_aParentBuf. */
+typedef struct {
+    int nUnk00;
+    int nUnk04;
+    int nUnk08;
+    int nUnk0C;
+} PARENT_BUF;
+
+extern PARENT_BUF s_aParentBuf[];
+
+/* The shadow-map parts list carried by a model layout. */
+typedef struct {
+    char pad000[0x278];
+    int nNum;               /* 0x278 */
+    char pad27C[0x64];
+    unsigned short aParts[24];  /* 0x2E0 */
+} SHADOW_PARTS;
+
+/* True when nParts is one of the parts registered for the shadow map on
+ * this layout. */
+int is_shadow_map_parts(SHADOW_PARTS *pLayout, int nParts)
+{
+    int nNum = pLayout->nNum;
+    int nRet = 0;
+    int i;
+
+    if (nNum != 0) {
+        for (i = 0; i < nNum; i++) {
+            if (pLayout->aParts[i] == nParts) {
+                nRet = 1;
+                break;
+            }
+        }
+    }
+    return nRet;
+}
+
+/* True when this model's parts id is in the transparency list. */
+int is_parts_transparency(void *pModel)
+{
+    int nRet = 0;
+    int i;
+
+    for (i = 0; i < s_nToumeiNum; i++) {
+        if (s_aToumeiId[i] == *(int *)((char *)pModel + 0x2C)) {
+            nRet = 1;
+            break;
+        }
+    }
+    return nRet;
+}
+
+/* True when this model's parts id is registered as a map last-entry. */
+int is_block_last_entry(void *pModel)
+{
+    int nRet = 0;
+    int i;
+
+    for (i = 0; i < s_nMapLast; i++) {
+        if (*(int *)((char *)pModel + 0x2C) == s_aMapLast[i]) {
+            nRet = 1;
+            break;
+        }
+    }
+    return nRet;
+}
+
+/* Take the next free parent-buffer entry, or NULL when the list is full.
+ *
+ * TODO: near-miss, 4 words SHORT, NOT registered. Retail re-loads
+ * s_nParentBuf after the first store and recomputes the entry address a
+ * second time (with the two `addu` operands in the opposite order), i.e.
+ * its CSE treated the store through the entry pointer as possibly
+ * aliasing the counter. Swept: one pointer local, two pointer locals,
+ * indexed `s_aParentBuf[s_nParentBuf].f` for every store, the increment
+ * before/after the last store, and `s_nParentBuf = s_nParentBuf + 1`
+ * spelled out -- every form lets gcc 2.96 prove non-aliasing and CSE both
+ * the load and the address, so the function comes out 15 words instead of
+ * 19. No source spelling found that defeats it. */
+PARENT_BUF *parent_buf_entry(void)
+{
+    PARENT_BUF *p = 0;
+
+    if (s_nParentBuf < 512) {
+        p = &s_aParentBuf[s_nParentBuf];
+        p->nUnk00 = 0;
+        s_aParentBuf[s_nParentBuf].nUnk08 = 0;
+        s_aParentBuf[s_nParentBuf].nUnk0C = 0;
+        s_nParentBuf++;
+    }
+    return p;
+}
