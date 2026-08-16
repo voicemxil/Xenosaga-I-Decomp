@@ -2772,3 +2772,4 @@ _pictureHeader = 0x00213F10, 0xC4; // sceMpegDec.c
 _quantMatrixExtension = 0x00214450, 0xC4; // sceMpegDec.c
 sefAllocLocalData = 0x002E3520, 0xB4; // sef.c
 _outputFrame = 0x00214770, 0x90; // sceMpegDec.c
+sefCreateEffect = 0x002E7570, 0xAC; // sef.c

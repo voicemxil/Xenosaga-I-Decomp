@@ -1781,3 +1781,35 @@ int sefAllocLocalData(SEF_LOCAL_DATA *p)
     p->nCur = (i + 1) & 0xFF;
     return i;
 }
+
+/* Publish one effect record into the shared _battleData slot and hand
+ * it to the script engine. The 36-byte header is copied as a struct:
+ * it is only 4-aligned, so gcc's block move does the four 8-byte chunks
+ * with unaligned ldl/ldr + sdl/sdr pairs and the odd 4-byte tail with a
+ * plain lw/sw. Type 55 additionally sets the flag at +22. */
+typedef struct {
+    int   w0[5];
+    short nType;
+    short nFlag;
+    int   w1[3];
+} SEF_EFT_HDR;
+
+extern void sefCnvDeathEffectNo(void *p);
+extern void scCreateScript(void *p);
+
+void sefCreateEffect(SEF_EFT_HDR *p)
+{
+    if (p->nType > 0) {
+        if (p->nType == 55) {
+            p->nFlag = 1;
+        }
+        *(SEF_EFT_HDR *)_battleData = *p;
+        /* The quadword at +48 is cleared straight out of vf0 -- real
+         * hardware asm, no C equivalent. */
+        PS2_ASM(".set noreorder\n"
+            "sqc2 $vf0, 0x0(%0)\n"
+            ".set reorder" : : "r"((char *)_battleData + 48) : "memory");
+        sefCnvDeathEffectNo(_battleData);
+        scCreateScript(_battleData);
+    }
+}
