@@ -2882,3 +2882,4 @@ AlphaGroupSortEntry = 0x00230B98, 0x68; // nmlModel.c
 sefLerpIVector = 0x002E1970, 0x10C; // sef.c
 sceSifGetOtherData = 0x00203288, 0x158; // sceSif.c
 tskUmnMailMenu = 0x00A07EB0, 0x430; // tskUmn.c
+xglMenuDrawType1Sub = 0x0021C968, 0x178; // xglMenu.c
