@@ -53,23 +53,38 @@ void xglSleep()
 /* Bring up the four engine threads: copy each entry out of the static
  * system table into the active table and into the ThreadParam block,
  * carving the stacks downward from 0x1f8000. */
+/* TODO: near-miss (54/64 words, 10 differing; was 26).
+ * Two levers landed here: the active-list store is written BEFORE the
+ * sThreadParam one and the chained assignments run
+ * `sThreadParam.x = asActiveThreadList[i].x = ...` (26 -> 15), and the
+ * gp pointer is spelled `&_gp` at its use instead of being hoisted into
+ * a `void *gp` local (15 -> 10) -- as a local it becomes a loop
+ * invariant that global_alloc ranks ahead of the sThreadParam giv, so
+ * $s6/$s7 come out the other way round.
+ * RESIDUE: retail holds sThreadParam+12 in $s7 and reaches +8 with an
+ * immediate; gcc holds +8 and reaches +12 with an immediate, which also
+ * swaps $a1/$a2 between the stack and stackSize values and moves one
+ * store.  Swept with no further gain: all six positions of the gpReg
+ * store in the loop body; stackSize before stack (14); each of the two
+ * chains flipped independently and together (10/11/11); splitting the
+ * chains into separate statements (one form is four words short, the
+ * other still 10); declaring gp before next_stack; PIN(gp,"$22"). */
 void xglThreadInitial()
 {
     static struct ThreadParam sThreadParam;
     void* next_stack = (void*)0x1f8000;
-    void* gp = &_gp;
     u32 i;
 
     for (i = 0; i < 4; i++)
     {
-        sThreadParam.initPriority = asSystemThreadList[i].initPriority;
         asActiveThreadList[i].initPriority = asSystemThreadList[i].initPriority;
-        asActiveThreadList[i].entry = sThreadParam.entry = asSystemThreadList[i].entry;
-        asActiveThreadList[i].stack = sThreadParam.stack =
+        sThreadParam.initPriority = asSystemThreadList[i].initPriority;
+        sThreadParam.entry = asActiveThreadList[i].entry = asSystemThreadList[i].entry;
+        sThreadParam.stack = asActiveThreadList[i].stack =
             (char*)next_stack - asSystemThreadList[i].stackSize;
-        asActiveThreadList[i].stackSize = sThreadParam.stackSize =
+        sThreadParam.stackSize = asActiveThreadList[i].stackSize =
             asSystemThreadList[i].stackSize;
-        sThreadParam.gpReg = gp;
+        sThreadParam.gpReg = &_gp;
 
         asActiveThreadList[i].id = CreateThread(&sThreadParam);
         StartThread(asActiveThreadList[i].id, 0);
