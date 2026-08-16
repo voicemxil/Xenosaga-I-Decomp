@@ -799,3 +799,83 @@ int subLine2_OpenType_0(ETLINE2 *p)
     }
     return 0;
 }
+
+/* PARKED at 128 words vs 126 -- every instruction of the body matches
+   one-for-one and the whole difference is TWO nops the assembler puts
+   between the last hoisted constant (`mtc1 $at,$f20`) and the loop top.
+   gcc emits `.p2align 3,,7` before this loop and gas pads it; the
+   original build has no padding there at all. fix_cc_asm is NOT the
+   source (running it over the .s leaves the site untouched), so this is
+   an assembler alignment/COP1-hazard interaction, not a source shape.
+
+   Everything else here IS solved and should not be re-swept:
+     * the fan-out dispatch is a SWITCH, not an if/else-if chain. gcc
+       sorts switch tests but emits the bodies after the join, which is
+       the original's `beq 2 / beq 3 / b join` + out-of-line arms. An
+       if/else-if inlines both arms and rewrites the whole block.
+     * the case labels must be LITERAL 2 and 3 (and so must `i == 2`):
+       LICM then hoists their `li` into the preheader as $s4/$s5, and the
+       same hoisting is what puts all six float constants in $f20-$f25.
+       Naming them as locals instead moves the whole group ABOVE the
+       loop's guard branch.
+     * `n = 0` goes before the `if`, not in the else arm -- the original
+       has `move $19,$0` in the guard's delay slot.
+     * `c->pos.z` is written before `c->pos.y`, which is what puts the
+       node->pos.z load ahead of the `sw $0` in the schedule.
+
+   Lay out one subtree vertically: every child is placed 57 to the right
+   and one deeper, spread by its parent's fan-out, then the whole node is
+   recentred by the number of leaves it turned out to carry. Returns that
+   leaf count. */
+int subPosSet(ETNODE *node)
+{
+    ETNODE *c;
+    float y;
+    int n;
+    int i;
+
+    n = 0;
+    if (node->nChildren == 0) {
+        n = 1;
+    } else {
+        for (i = 0; i < node->nChildren; i++) {
+            c = node->pChild[i];
+            c->pos.x = 57.0f;
+            c->pos.z = node->pos.z + 1.0f;
+            c->pos.y = 0.0f;
+            /* A switch, not an if/else-if chain: gcc sorts the case
+               TESTS but emits the BODIES after the join, which is the
+               original's layout (two forward beq, an unconditional b to
+               the join, then the two blocks). */
+            switch (node->nChildren) {
+            case 2:
+                if (i == 0) {
+                    c->pos.y = -36.0f;
+                } else {
+                    c->pos.y = 36.0f;
+                }
+                break;
+            case 3:
+                if (i == 0) {
+                    c->pos.y = -72.0f;
+                } else if (i == 2) {
+                    c->pos.y = 72.0f;
+                }
+                break;
+            }
+            n += subPosSet(c);
+        }
+    }
+    /* `n - 1` is spelled twice on purpose: the original rematerialises it
+       in each arm's branch delay slot. */
+    y = node->pos.y;
+    if (y < 0.0f) {
+        node->pos.y = y - (float)(n - 1) * 36.0f;
+    } else if (y > 0.0f) {
+        node->pos.y = y + (float)(n - 1) * 36.0f;
+    }
+    if (EtherTreeSystem->wId == 6 && (node->bFlags & 0x20) != 0) {
+        node->pChild[2]->pos.y = node->pChild[2]->pos.y + 36.0f;
+    }
+    return n;
+}
