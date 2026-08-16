@@ -2001,13 +2001,25 @@ extern SEV_PTALLOC _ptAllocTbl __asm__("_ptAlloc");
 void *sevGetPtAllocator(int nIdx) { return &_ptAllocTbl.pt[nIdx]; }
 void *sevGetPtAllocator2(int nIdx) { return &_ptAllocTbl.pt[nIdx]; }
 
+/* SWEPT, 12 diffs, whole body matches: retail's prologue keeps ONE
+ * register for both roles -- base in $s0, `move $a0,$s0` for the memset,
+ * then `addu $s0,$at,$s0` with the +0xA07FE bias materialised in $at,
+ * i.e. gas expanding a single large-constant `addu`. Every C spelling
+ * tried (pointer local + &p->nFree[1023]; one char* advanced after the
+ * calls; explicit (char*)p + 0xA07FE; the bare symbol, which folds the
+ * bias into the relocation) makes gcc load the constant into an
+ * allocatable register instead of $at, so the add reads s0,s0,v0. No
+ * source shape found that reaches the $at form. */
 void sevInitPtAllocator(void)
 {
+    /* Through a pointer local: naming the member on the symbol folds
+     * +0xA07FE into the relocation, where retail adds it to a held base. */
+    SEV_PTALLOC *p = &_ptAllocTbl;
     short *q;
     int i;
 
-    q = &_ptAllocTbl.nFree[1023];
-    memset(&_ptAllocTbl, 0, sizeof(SEV_PTALLOC));
+    q = (short *)((char *)p + 0xA07FE);
+    memset(p, 0, sizeof(SEV_PTALLOC));
     memset(_battleData, 0, 560);
     for (i = 1023; i >= 0; i--) {
         *q = i;
@@ -2030,15 +2042,21 @@ int sevAllocPtAllocator(void)
     return p->nFree[nRead];
 }
 
+/* SWEPT, 18 diffs, SCHEDULING only: identical multiset. Retail leaves a
+ * genuine nop in the `beqz` delay slot and loads p->nWrite in the block
+ * ABOVE the range check; gcc fills that slot with the load whichever way
+ * the source is written. Flat early-returns (this form), the nested
+ * `if (h < 1024) { ... }` form and hoisting/sinking the nRead load were
+ * all tried; the nested form is worse (LOGIC 18, handle copied to $a3). */
 void sevFreePtAllocator(int nHandle)
 {
     SEV_PTALLOC *p = &_ptAllocTbl;
     int nWrite;
 
+    nWrite = p->nWrite;
     if ((unsigned int)nHandle >= 1024) {
         return;
     }
-    nWrite = p->nWrite;
     if (p->nRead == nWrite) {
         return;
     }
