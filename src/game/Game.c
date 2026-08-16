@@ -160,7 +160,14 @@ extern void nullfunc(void);
 extern int xglCdReadFile(char *name, int addr, int a2, int a3);
 
 /* The saved copy of studio camera 0, restored when a cinematic ends */
-typedef struct { long long pad[190]; } SAVE_CAM;   /* 0x5F0 */
+typedef struct {                 /* 0x5F0 */
+    int nUnk00;                    /* 0x000 */
+    int nUnk04;                     /* 0x004 */
+    long long pad08[20];             /* 0x008 */
+    int nUnkA8;                       /* 0x0A8 */
+    int nUnkAC;                        /* 0x0AC */
+    long long padB0[168];               /* 0x0B0 */
+} SAVE_CAM;
 
 extern SAVE_CAM save_cam;
 extern SAVE_CAM *xglStudioGetCamera2(int nCamera);
@@ -172,6 +179,56 @@ void GameCameraStateSave(void)
     save_cam = *xglStudioGetCamera2(0);
     GameLoopState.quad240 = D_00362EB0;
     GameLoopState.nUnk230 = GameLoopState.nUnk28;
+}
+
+extern SAVE_CAM *xglStudioGetActiveCamera(void);
+
+/* Camera interpolation state, cleared when the saved camera is restored */
+typedef struct {
+    int nUnk00;
+    int nUnk04;
+    int nUnk08;
+    int nUnk0C;
+} HOKAN;
+
+extern HOKAN HokanNow;
+
+/* TODO: near-miss, 41 diffs of 57 words, RIGHT LENGTH -- pure register
+ * allocation. The shape is settled: the goto-form loop is what produces
+ * the original's `beqz` + unconditional `b` (a for(;;)/break gave a
+ * `bnezl` and cost two words). Residue: the original spends TEN registers
+ * on the 0x5F0 block move (bound v0, loop temps v1/a1/t0/t1, tail temps
+ * t2/t3, src walker a2, dst walker a0, camera pointer a3); gcc here
+ * coalesces the tail temps with the loop temps and spends only eight, so
+ * every role shifts. Not a permutation of the original's registers, so
+ * --swap-regs cannot reach it. Swept: all six orderings of the quad
+ * copy / GameLoopState scalar / HokanNow.nUnk0C block (41-42), declaring
+ * pActive first, splitting the declaration from the call, and typing
+ * pActive as int * -- all 42. */
+/* Restore studio camera 0 from the snapshot GameCameraStateSave() took and
+ * drop every active camera back to camera 0 */
+void GameCameraStateRestore(void)
+{
+    SAVE_CAM *p = xglStudioGetCamera2(0);
+    SAVE_CAM *pActive;
+
+    *p = save_cam;
+    p->nUnk04 = 4;
+    p->nUnkA8 = 0;
+    D_00362EB0 = GameLoopState.quad240;
+    HokanNow.nUnk0C = 0;
+    GameLoopState.nUnk28 = GameLoopState.nUnk230;
+    HokanNow.nUnk00 = 0;
+    HokanNow.nUnk04 = 0;
+    HokanNow.nUnk08 = 0;
+loop:
+    /* goto form: the original branches back with an unconditional `b` */
+    pActive = xglStudioGetActiveCamera();
+    if (pActive != 0) {
+        pActive->nUnk00 = 0;
+        goto loop;
+    }
+    xglStudioGetCamera2(0)->nUnk00 = 1;
 }
 
 extern void xglSoundLoadEffect(char *pName, int nAddr, int nNo);

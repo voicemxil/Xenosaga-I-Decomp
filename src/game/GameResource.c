@@ -57,29 +57,71 @@ next:
  * returned by resource_get_free(), splitting it into the allocated entry
  * and a shrunk successor entry. Returns the allocated entry's nId, or 0 if
  * no free entry was available. */
-/* TODO: near-miss, 2 attempts tried. Struct-index form (31/45 words differ,
- * same length -- LOGIC class, register roles for the four field addresses
- * don't line up) is closer than a flat int* form (wrong register count
- * entirely, 34 vs 45 words). Original computes a shared base pointer to
- * .nUnk04 once (&GameResource[0].nUnk04) and indexes off it for both the
- * current and index+1 entries -- needs that exact pointer-sharing idiom. */
+/* TODO: near-miss, 6 diffs of 45 words, OPERANDS. Improved 31 -> 6 by two
+ * levers: (a) transform the parameter in place (`nSize = (nSize+63)&~63;`)
+ * INSIDE the guarded region -- a separate `nAligned` local merges the copy
+ * and the addiu and steals the jal delay slot from `move s0,a0`; (b) read
+ * BOTH .nUnk04 and .nId into locals before any store, which is the order
+ * the original loads them in. Residue: the two &GameResource[index+1]
+ * addresses land in the mirror-image pair of $a0/$a1, and `addiu a0,s2,4`
+ * schedules one slot late. All 12 load/store orderings swept (floor 6),
+ * plus inlining either load (10/12) and an `int next = index+1` local
+ * (34). GameResourceRealloc below has the identical residue. */
 unsigned int GameResourceAlloc(unsigned int nSize)
 {
-    int index;
-    unsigned int nAligned;
-
-    index = resource_get_free();
-    nAligned = (nSize + 63) & ~63;
+    int index = resource_get_free();
+    unsigned int nFree;
+    unsigned int nAddr;
 
     if (index == -1) {
         return 0;
     }
-
-    GameResource[index + 1].nUnk04 = GameResource[index].nUnk04 - nAligned;
-    GameResource[index].nUnk04 = nAligned;
-    GameResource[index + 1].nId = GameResource[index].nId + nAligned;
+    nSize = (nSize + 63) & ~63;
+    nFree = GameResource[index].nUnk04;
+    nAddr = GameResource[index].nId;
+    GameResource[index + 1].nUnk04 = nFree - nSize;
+    GameResource[index].nUnk04 = nSize;
+    GameResource[index + 1].nId = nAddr + nSize;
     GameResource[index].nUnk0C = 9;
     GameResource[index].nUnk08 = xglSRand();
 
     return GameResource[index].nId;
+}
+
+extern int GameResourceGetIndex(int nId);
+
+/* TODO: near-miss, 9 diffs of 42 words, RIGHT LENGTH. Residue is a single
+ * allocator tie-break: the original keeps the byte offset (index*16+16) in
+ * $a0 and the &GameResource[index+1] pointer in $a1 (loading the flag into
+ * $v0, which is why both `return 0` paths need their own `move v0,zero`);
+ * gcc here picks the mirror image, so the second return cross-jumps into
+ * the epilogue and reuses the v0 already zeroed in the first delay slot.
+ * Swept: single-exit vs early returns, `||`-joined test (18), a named
+ * GAME_RESOURCE *pNext for the flag (43 words), (&GameResource[index])[1]
+ * (31), a local for the flag value (9), both operand orders of the nUnk04
+ * sum and three store orders (9/13/20 -- 9 is the floor). Whole-function
+ * $a0/$a1 swap is unusable: $a0 is the incoming argument register. */
+/* Resize an already-allocated resource entry in place, absorbing the free
+ * successor entry that follows it. Returns the id on success, 0 when the
+ * id is unknown or the next entry is not free. */
+int GameResourceRealloc(int nId, unsigned int nSize)
+{
+    int index = GameResourceGetIndex(nId);
+
+    if (index < 0) {
+        return 0;
+    }
+    if (GameResource[index + 1].nUnk0C != -1) {
+        return 0;
+    }
+    {
+        int nRest = GameResource[index + 1].nUnk04 + GameResource[index].nUnk04;
+        int nAddr = GameResource[index].nId;
+
+        nSize = (nSize + 63) & ~63;
+        GameResource[index].nUnk04 = nSize;
+        GameResource[index + 1].nId = nAddr + nSize;
+        GameResource[index + 1].nUnk04 = nRest - nSize;
+    }
+    return nId;
 }
