@@ -2440,3 +2440,7 @@ __kernel_cosf = 0x00328438, 0x170; // libm.c
 __kernel_rem_pio2f = 0x003285A8, 0x8A4; // libm.c
 DrillCrashFunc = 0x002CA4C0, 0x1A4; // Drill.c
 CharactorAllRecovery = 0x00275D18, 0x70; // Char.c
+Java_xeno_util_Format_toString__F = 0x002F68B0, 0xA0; // Java_util.c
+taskEvtItemGet = 0x002C66C0, 0xD0; // task.c
+taskMapChange = 0x00246470, 0xBC; // task.c
+DrillXMoveFunc = 0x002CA260, 0x260; // Drill.c
