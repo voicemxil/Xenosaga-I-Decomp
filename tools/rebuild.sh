@@ -15,4 +15,20 @@ find src -name '*.c' -exec touch {} +
 # Serialized: concurrent ninja runs corrupt the shared intermediate
 # .o.s files. See tools/build.sh.
 sh tools/build.sh
+
+# verify.py alone cannot catch a whole class of breakage: it checks each
+# function against the object that DEFINES it, but the linker picks which
+# definition actually ships. Duplicate definitions under
+# --allow-multiple-definition once meant the image carried mismatching
+# copies of _dtoa_r, quorem and six more while verify.py checked the
+# byte-exact ones next door and reported OK. Comparing the linked image
+# to retail is the only check that sees what actually shipped.
+# Non-fatal: with several agents editing at once the link may be
+# transiently broken, and that must not mask the per-function results.
+if ! python3 tools/verify_elf.py --strict -q 2>/dev/null; then
+    echo "WARNING: linked image does NOT match retail byte-for-byte."
+    echo "  Run: python3 tools/verify_elf.py --strict   (see docs/LINKING.md)"
+    echo "  If the link itself failed, this is probably another agent mid-edit."
+fi
+
 exec python3 tools/verify.py "$@"
