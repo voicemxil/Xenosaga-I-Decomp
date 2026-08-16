@@ -25,7 +25,7 @@ extern int _sdvAmbient[];
 extern void sdvSetAmbient(void *a, void *b);
 void sdvRestoreAmbient(void) { sdvSetAmbient(_sdvMapRgb, _sdvAmbient); }
 
-extern int _sdvSpecialBuf[];
+extern short _sdvSpecialBuf[];
 extern void *memset(void *, int, unsigned int);
 void sdvInitSpecialWork(void) { memset(_sdvSpecialBuf, 0, 0x10); }
 
@@ -221,4 +221,26 @@ void sdvScheduleSound(SDV_SEQ *p)
             }
         }
     }
+}
+
+/* Claim a special-effect work slot: slot 0 is the reserved one, slots
+ * 1..7 are the general pool. Returns the slot index, or -1 if busy. */
+int sdvAllocSpecialWork(int nType)
+{
+    int i;
+
+    if (nType == 0) {
+        if (_sdvSpecialBuf[0] == 0) {
+            _sdvSpecialBuf[0] = 1;
+            return 0;
+        }
+        return -1;
+    }
+    for (i = 1; i < 8; i++) {
+        if (_sdvSpecialBuf[i] == 0) {
+            _sdvSpecialBuf[i] = 1;
+            return i;
+        }
+    }
+    return -1;
 }

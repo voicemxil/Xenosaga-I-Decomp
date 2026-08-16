@@ -2699,3 +2699,4 @@ sefSetSeSignal = 0x002E6860, 0x68; // sefIs.c
 sceSync = 0x00206828, 0x198; // sceFs.c
 sceMkdir = 0x00205930, 0x1AC; // sceFs.c
 GameResourceSearch = 0x0024A7D0, 0xC8; // GameResource.c
+sdvAllocSpecialWork = 0x002ED350, 0x7C; // sdv.c
