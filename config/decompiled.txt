@@ -2780,3 +2780,4 @@ nmlPacketAddGsFlushWide = 0x002367D0, 0x17C; // nmlPacket.c
 _skipMB0 = 0x00212DF0, 0xBC; // sceMpegDec.c
 nmlPacketSendCircleTexture = 0x00237AC0, 0x178; // nmlPacket.c
 _decode_motion_vector = 0x00213358, 0x88; // sceMpegDec.c
+xglCullingMapSet = 0x0023EC98, 0x17C; // xglCulling.c

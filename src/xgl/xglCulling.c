@@ -200,8 +200,8 @@ void xglCullingMapCreate(void)
 
 typedef struct {
     char *pName;
-    int nUnk04;
-    int nUnk08;
+    float *pData;
+    int *pMap;
     int nUnk0C;
 } XGLCULLINGMAP;
 
@@ -216,7 +216,7 @@ int check_culling_map(char *pName)
 
     nFound = -1;
     i = 0;
-    while (s_aCullingMap[i].nUnk04 != 0 || s_aCullingMap[i].nUnk08 != 0) {
+    while (s_aCullingMap[i].pData != 0 || s_aCullingMap[i].pMap != 0) {
         if (strcmp(s_aCullingMap[i].pName, pName) == 0) {
             nFound = i;
             break;
@@ -224,4 +224,63 @@ int check_culling_map(char *pName)
         i++;
     }
     return nFound;
+}
+
+unsigned int strlen(const char *p);
+char *strcpy(char *pDst, const char *pSrc);
+
+/* Bind the culling cells for the map this model belongs to: look the map
+ * name up, then build one occlusion cell per 9-float record until the
+ * table runs out, the cell array fills up, or a record is marked unused */
+void xglCullingMapSet(void *pModel)
+{
+    float **ppData;
+    float *pSrc;
+    float *pDst;
+    int nOfs;
+    int i;
+    int n;
+
+    s_inCulling.nCount = 0;
+    s_inCulling.pMap = 0;
+    if (strlen((char *)pModel + 16) < 32) {
+        strcpy(s_inCulling.szName, (char *)pModel + 17);
+    }
+    i = check_culling_map(s_inCulling.szName);
+    if (i < 0) {
+        return;
+    }
+    s_inCulling.nModel = (int)pModel;
+    s_inCulling.pMap = s_aCullingMap[i].pMap;
+    ppData = &s_aCullingMap[i].pData;
+    if (*ppData == 0) {
+        return;
+    }
+    nOfs = 0;
+    for (;;) {
+        __asm__ __volatile__("" : : : "memory");
+        n = s_inCulling.nCount;
+        pSrc = (float *)((char *)s_aCullingMap[i].pData + nOfs);
+        pDst = (float *)&s_inCulling.aCell[n];
+        nOfs += 36;
+        if (n >= 10) {
+            return;
+        }
+        if (pSrc[6] < 0.0f) {
+            return;
+        }
+        pDst[0] = pSrc[0];
+        pDst[1] = pSrc[1];
+        pDst[2] = pSrc[2];
+        pDst[3] = 1.0f;
+        pDst[4] = pSrc[3];
+        pDst[5] = pSrc[4];
+        pDst[6] = pSrc[5];
+        pDst[8] = pSrc[6];
+        pDst[9] = pSrc[7];
+        pDst[10] = pSrc[8];
+        pDst[11] = 1.0f;
+        culling_matrix(pDst);
+        s_inCulling.nCount++;
+    }
 }
