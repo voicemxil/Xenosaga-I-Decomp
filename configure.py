@@ -182,6 +182,7 @@ def cflags_for(name):
 # their .lit4 gp-relative load and match the original's inline immediate
 # once BOTH cc and as see -G0.
 FILE_ASFLAGS_OVERRIDE = {
+    "tskUmnBgCube.c": " -G0",
     "libm.c": "-G0",
 }
 
@@ -193,6 +194,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "tskUmnBgCube.c": " --as-g0 --fp-pair-hazard tskUmnBgCubeMain",
     "sdv.c": "--branch-unlikely sdvScheduleSound:1",
     "File.c": "--branch-unlikely FileObjectJpegDecChange:1 --swap-adjacent FileObjectJpegDecChange:3",
     "xglRender.c": "--fp-pair-hazard xglRenderGlobalFadeSet",

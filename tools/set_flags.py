@@ -8,6 +8,7 @@ landed between the read and the write. This tool makes that impossible.
 
     python3 tools/set_flags.py --cflags scePad.c "-O2 -G0"
     python3 tools/set_flags.py --fix Menu.c "--swap-adjacent MenuFoo:12"
+    python3 tools/set_flags.py --asflags tsk.c "-G0"
     python3 tools/set_flags.py --show Menu.c
     python3 tools/set_flags.py --unset-fix Menu.c
 
@@ -37,7 +38,8 @@ import sys
 
 CONFIGURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "..", "configure.py")
-DICTS = {"cflags": "FILE_CFLAGS_OVERRIDE", "fix": "FILE_FIX_FLAGS"}
+DICTS = {"cflags": "FILE_CFLAGS_OVERRIDE", "fix": "FILE_FIX_FLAGS",
+         "asflags": "FILE_ASFLAGS_OVERRIDE"}
 
 
 def find_dict(tree, name):
@@ -92,10 +94,13 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cflags", nargs=2, metavar=("FILE.c", "FLAGS"))
     ap.add_argument("--fix", nargs=2, metavar=("FILE.c", "FLAGS"))
+    ap.add_argument("--asflags", nargs=2, metavar=("FILE.c", "FLAGS"),
+                    help="assembler-only flags (see configure.py asflags_for);\n`-G0' is what stops gas pooling a li.s float literal in .lit4")
     ap.add_argument("--replace", action="store_true",
                     help="allow --fix to DROP flags the entry already has")
     ap.add_argument("--unset-cflags", metavar="FILE.c")
     ap.add_argument("--unset-fix", metavar="FILE.c")
+    ap.add_argument("--unset-asflags", metavar="FILE.c")
     ap.add_argument("--show", metavar="FILE.c",
                     help="print both entries for FILE.c and exit")
     args = ap.parse_args()
@@ -117,12 +122,17 @@ def main():
             ops.append(("cflags", args.cflags[0], args.cflags[1]))
         if args.fix:
             ops.append(("fix", args.fix[0], args.fix[1]))
+        if args.asflags:
+            ops.append(("asflags", args.asflags[0], args.asflags[1]))
         if args.unset_cflags:
             ops.append(("cflags", args.unset_cflags, None))
         if args.unset_fix:
             ops.append(("fix", args.unset_fix, None))
+        if args.unset_asflags:
+            ops.append(("asflags", args.unset_asflags, None))
         if not ops:
-            ap.error("nothing to do -- pass --cflags/--fix/--unset-*/--show")
+            ap.error("nothing to do -- pass --cflags/--fix/--asflags/"
+                     "--unset-*/--show")
 
         # --fix REPLACES, so passing a partial string silently drops the
         # flags already there -- and a dropped flag does not fail, it just
