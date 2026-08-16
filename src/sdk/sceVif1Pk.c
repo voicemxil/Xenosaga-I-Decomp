@@ -618,32 +618,87 @@ void sceVif1PkOpenGifTag(Vif1Packet *pkt, u128 tag);
    EOP GIF tag constant before the non-EOP one (-2 words).  Introducing a fresh
    `src` local for the walking address aligns the entire prologue (indices 0-28)
    but pushes `pkt` into $s8 and spills, ending up worse (62). */
+/* Build a VIF1 packet that uploads an image to the GS: a DIRECTHL block sets up
+   BITBLTBUF/TRXPOS/TRXREG/TRXDIR through a GIF A+D tag, then the pixel data is
+   chained in as REF transfers of at most 32767 quadwords each. */
+/* TODO: near-miss (20 of 122 words, was 58).  The instruction stream and the
+   register allocation are now EXACT -- every one of the 122 words is present,
+   in the right register, and `tools/scratch_diff.py --all` shows only ordering
+   differences.  What is left is entirely gcc's post-reload scheduler, in two
+   places:
+     (a) the four sceVif1PkAddGsAD calls (12 words).  gcc treats the whole call
+         sequence as ONE basic block -- a jal does not end a scheduling region --
+         so it hoists each call's argument setup above the preceding calls and
+         then lets reorg fill the delay slot with the NEXT call's shift instead
+         of that call's own `li $a1,code`.  The original build's scheduler kept
+         each argument group with its call.
+     (b) the REF loop tail (8 words): the original puts `qwc -= n` in the
+         sceVif1PkRef delay slot and `n <<= 4` after it; ours does the reverse.
+   Neither is expressible with the current fixer flags: (a) needs an
+   instruction moved from before a call to after its delay slot, and
+   --swap-into-slot only exchanges the slot with the insn directly before the
+   call; (b) is the same shape.  Ruled out for both: every statement order of
+   the loop tail, of the mask/tag/copy block (all 720 permutations of the head
+   were not needed -- 12 representative orders all collapse to the same
+   schedule), storing the A+D words through named locals, and extra LAUNDER_V
+   fences before each call (20 -> 18 at best, not worth two more constructs).
+
+   The levers that DID land, in the order they mattered:
+     1. `(n == qwc) ? EOP : NONEOP` written as a plain `eop` temp assigned
+        BEFORE gt, so the EOP value is evaluated first: that is what makes the
+        GIF tag select a `movz` off `n ^ qwc` with the non-EOP value updated in
+        place, instead of gcc's `movn` with the roles swapped.
+     2. The five callee-saved parameter copies had to be pinned to hit the
+        original's $s2..$s6 assignment; gcc's global-alloc priority
+        (log2(refs)*freq/live_length) ranks `addr` below dsax/dsay and rrw
+        below dpsm, the original ranks them the other way.
+     3. The DOUBLE-PINNED ALIAS trick: a PIN'd variable is a hard register, so
+        gcc will not compute a derived value into it and emits a scratch
+        register instead.  Declaring a SECOND pinned local of the wider type on
+        the SAME register (sx/sxq on $22, sy/syq on $21) and assigning the shift
+        to it restores the original's in-place `dsll32 $s6,$s6,0`.
+     4. One LAUNDER_V scheduling fence after sceVif1PkOpenGifTag; without it
+        gcc hoists all four GS field shifts into the prologue block, across
+        three calls (46 -> 29 words).  This one is masking (a) above, not
+        explaining it. */
 void sceVif1PkRefLoadImage(Vif1Packet *pkt, unsigned int dbp, unsigned int dpsm,
                            unsigned int dbw, unsigned int addr, unsigned int qwc,
                            unsigned int dsax, unsigned int dsay,
                            unsigned int rrw, unsigned int rrh)
 {
     U128 tag;
-    long g0, g1;
-
-    dpsm = dpsm & 0xFF;
-    dbw  = dbw & 0xFFFF;
-    dbp  = dbp & 0xFFFF;
+    long g0;
+    PIN(long g1, "$12");
+    PIN(unsigned long psm, "$19");
+    PIN(unsigned int sx, "$22");
+    PIN(unsigned long sxq, "$22");   /* alias: lets the shift land in $s6 */
+    PIN(unsigned int sy, "$21");
+    PIN(unsigned long syq, "$21");   /* alias: lets the shift land in $s5 */
 
     g0 = D_004D53C0[0];
     g1 = D_004D53C0[1];
     tag.d[0] = g0;
     tag.d[1] = g1;
+    psm  = dpsm & 0xFF;
+    dbw  = dbw & 0xFFFF;
+    dbp  = dbp & 0xFFFF;
+    sx = dsax;
+    sy = dsay;
 
     sceVif1PkCnt(pkt, 0);
     sceVif1PkOpenDirectHLCode(pkt, 0);
     sceVif1PkOpenGifTag(pkt, tag.q);
+    LAUNDER_V(dbp);   /* fence: gcc hoists the GS field shifts across the calls */
 
-    sceVif1PkAddGsAD(pkt, 0x50, ((unsigned long)dbp << 32) | ((unsigned long)dbw << 48)
-                                | ((unsigned long)dpsm << 56));
-    sceVif1PkAddGsAD(pkt, 0x51, ((unsigned long)dsax << 32) | ((unsigned long)dsay << 48));
-    sceVif1PkAddGsAD(pkt, 0x52, (unsigned long)rrw | ((unsigned long)rrh << 32));
-    sceVif1PkAddGsAD(pkt, 0x53, 0);
+    psm = psm << 56;
+    sceVif1PkAddGsAD(pkt, 0x50, ((unsigned long)dbp << 32)      /* BITBLTBUF */
+                                | ((unsigned long)dbw << 48) | psm);
+    sxq = (unsigned long)sx << 32;
+    syq = (unsigned long)sy << 48;
+    sceVif1PkAddGsAD(pkt, 0x51, sxq | syq);                     /* TRXPOS */
+    sceVif1PkAddGsAD(pkt, 0x52, (unsigned long)rrw              /* TRXREG */
+                                | ((unsigned long)rrh << 32));
+    sceVif1PkAddGsAD(pkt, 0x53, 0);                             /* TRXDIR */
 
     sceVif1PkCloseGifTag(pkt);
     sceVif1PkCloseDirectHLCode(pkt);
@@ -655,6 +710,7 @@ void sceVif1PkRefLoadImage(Vif1Packet *pkt, unsigned int dbp, unsigned int dpsm,
             unsigned int n;
             unsigned long *p;
             unsigned long gt;
+            PIN(unsigned long eop, "$4");
 
             n = (0x7FFF < qwc) ? 0x7FFF : qwc;
 
@@ -663,9 +719,12 @@ void sceVif1PkRefLoadImage(Vif1Packet *pkt, unsigned int dbp, unsigned int dpsm,
             sceVif1PkAddCode(pkt, 0x51000001);
             p = (unsigned long *)sceVif1PkReserve(pkt, 4);
 
-            gt = (unsigned long)n | 0x0800000000008000L;
-            if (n != qwc)
-                gt = (unsigned long)n | 0x0800000000000000L;
+            /* eop first, gt second: the second one is folded in place into the
+               register holding n, which is what selects movz over movn. */
+            eop = (unsigned long)n | 0x0800000000008000L;
+            gt  = (unsigned long)n | 0x0800000000000000L;
+            if (n == qwc)
+                gt = eop;
             p[1] = 0;
             p[0] = gt;
 
