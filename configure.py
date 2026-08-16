@@ -91,6 +91,13 @@ def cc_for(name):
 # stride stays 8 bytes/reg (2.96), ruling out the SDK 2.9-ee compiler --
 # this is a lone -G threshold difference, not a compiler-family swap.
 FILE_CFLAGS_OVERRIDE = {
+    # These SDK translation units were built WITHOUT -fno-schedule-insns:
+    # the original pairs independent multiplies onto the R5900's two
+    # multiplier units (mult1 + mult), which only the first scheduling
+    # pass emits. Verified per-file -- adding it to SDK_CFLAGS globally
+    # breaks sceMpeg.c (1 -> 7) and sceVif1Pk.c (6 -> 15).
+    "sceMc.c": "-O2 -G0",
+    "sceDeci2.c": "-O2 -G0",
     "libm.c": "-O2 -G0",
     # Three camera functions need -fno-strict-aliasing; verified per-file
     # only (the flag regresses xglTask.c's matches if applied globally).
@@ -142,9 +149,17 @@ for _f in ("newlib_reallocr.c", "newlib_callocr.c", "newlib_ungetc.c",
 
 
 def cflags_for(name):
+    # A per-file override wins over BOTH defaults. It used to be consulted
+    # only for game code, so an override on an sce* file was silently dead
+    # -- which hid that several SDK units were built without
+    # -fno-schedule-insns (their originals pair independent multiplies
+    # across the R5900's two multiplier units, which only the first
+    # scheduling pass emits).
+    if name in FILE_CFLAGS_OVERRIDE:
+        return FILE_CFLAGS_OVERRIDE[name]
     if is_sdk(name):
         return SDK_CFLAGS
-    return FILE_CFLAGS_OVERRIDE.get(name, "-O2 -G8")
+    return "-O2 -G8"
 
 
 # The ASSEMBLER also has its own small-data threshold (default -G8, same
