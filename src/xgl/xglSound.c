@@ -759,6 +759,33 @@ int xglSoundLoadSwd(char *pName, void *pBuf);
 /* Load one effect's wave bank and effect bank into a slot: first
  * "sed\<name>" through the SWD loader, then
  * "data\sound\sed\<name>.SED" straight off the disc */
+/* TODO: near-miss (109/116 words, 7 differing) -- xglSoundLoadEffect and
+ * xglSoundLoadRequestSmd are the same shape and have the same residue.
+ * Fixed this session (13 -> 7 diffs): the destination pointer is a
+ * SEPARATE local per phase (`p` for the .SWD path, `p2` for the data
+ * path).  One shared `p` is one pseudo, so it took $a2 in both phases;
+ * retail uses $a1 in the first and $a2 in the second, and splitting it
+ * also recovered the `bnezl` branch-likely form of the pBuf guard.
+ * RESIDUE, two sites:
+ *   - the SoundEffectPath/SoundSequencePath base: retail computes
+ *     `addiu $s3,$gp,-14400` into the callee-saved register that keeps
+ *     the address for the second phase and copies it into $a0 for the
+ *     walk; gcc computes it into $a0 and copies to $s3.  Four words,
+ *     registers only.
+ *   - the pName loop is entered with its first `lbu` PEELED into the
+ *     preheader and the `b` aimed at the `sll` test; gcc aims the `b`
+ *     at the loop's own `lbu` and the .p2align then costs a pad nop.
+ *     Three words.
+ * Swept for the peel, all 10-13 diffs: while-form, comma-increment
+ * form, `*q != 0` test with the store in the body plus a trailing NUL
+ * store, `*q++` post-increment, an explicit `char c` temp with the load
+ * peeled by hand, the same with `goto test` into a do/while, a
+ * q = pName-1 / p-- pre-decrement rotation (7, i.e. no change), and
+ * a separate `q` for the pName loop (7).
+ * Swept for the base register: a named `pDir` local for the twice-used
+ * path (CSE then drops three words), and assigning it before vs after
+ * the guard.  Guard shapes swept: nested ifs (14), operand order
+ * swapped (18), `!pName || !pBuf` (13). */
 void xglSoundLoadEffect(char *pNameArg, void *pBufArg, int nNo)
 {
     static char ext[8] = ".SED";
@@ -767,6 +794,7 @@ void xglSoundLoadEffect(char *pNameArg, void *pBufArg, int nNo)
     PIN(char *pName, "$16");
     PIN(void *pBuf, "$17");
     char *p;
+    char *p2;
     char *q;
 
     pName = pNameArg;
@@ -789,18 +817,18 @@ void xglSoundLoadEffect(char *pNameArg, void *pBufArg, int nNo)
             ;
         }
     }
-    p = szPath;
+    p2 = szPath;
     for (q = SoundDataPath; *q != '\0'; q++) {
-        *p++ = *q;
+        *p2++ = *q;
     }
     for (q = SoundEffectPath; *q != '\0'; q++) {
-        *p++ = *q;
+        *p2++ = *q;
     }
     for (q = pName; *q != '\0'; q++) {
-        *p++ = *q;
+        *p2++ = *q;
     }
-    for (q = ext; (*p = *q) != '\0'; q++) {
-        p++;
+    for (q = ext; (*p2 = *q) != '\0'; q++) {
+        p2++;
     }
     if (xglCdReadFile(szPath, pBuf, 0, 0) > 0) {
         xglSoundSendSed(pBuf, nNo);
@@ -831,6 +859,7 @@ void xglSoundLoadRequestSmd(char *pNameArg, void *pBufArg)
     PIN(char *pName, "$16");
     PIN(void *pBuf, "$17");
     char *p;
+    char *p2;
     char *q;
 
     pName = pNameArg;
@@ -854,18 +883,18 @@ void xglSoundLoadRequestSmd(char *pNameArg, void *pBufArg)
             ;
         }
     }
-    p = szPath;
+    p2 = szPath;
     for (q = SoundDataPath; *q != '\0'; q++) {
-        *p++ = *q;
+        *p2++ = *q;
     }
     for (q = SoundSequencePath; *q != '\0'; q++) {
-        *p++ = *q;
+        *p2++ = *q;
     }
     for (q = pName; *q != '\0'; q++) {
-        *p++ = *q;
+        *p2++ = *q;
     }
-    for (q = ext; (*p = *q) != '\0'; q++) {
-        p++;
+    for (q = ext; (*p2 = *q) != '\0'; q++) {
+        p2++;
     }
     if (xglCdReadFile(szPath, pBuf, 0, 0) > 0) {
         xglSoundSendSmd2(pBuf, 0);
