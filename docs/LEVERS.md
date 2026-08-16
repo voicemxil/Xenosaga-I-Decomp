@@ -2334,3 +2334,53 @@ the same window, applied in order; `xglHddMcCheckCore` needed
 `10-11:50`, `3-10:52-55` and `11-3:52` to name its accumulator retail's
 way. Reach for it only after the source sweep has bottomed out -- it is
 assembly post-processing, so it costs a port nothing.
+
+**A field STORED then TESTED gives retail's `move` + compare, not a
+reload.** `w->nNum = X; if (w->nNum > 12) w->nNum = 12;` -- CSE forwards
+the just-stored value, so the read compiles to `move v1,a0` and the test
+to `sltiu` on it, which is exactly what retail emits. Writing the test
+against a named local (`n = X; w->nNum = n; if (n > 12)`) drops the
+`move`; re-reading the SOURCE (`if (UmnWork.u.name.nNum > 12)`) emits a
+second `lbu`. Only the store-then-test spelling matches, and it decides
+the unsigned-ness of the compare for free (the field's type wins).
+
+**One `nDone++` plus `continue` is how gcc fills two `bnel` delay
+slots.** Where the original has a run of `bnel <cond>, L` whose delay
+slots each hold the SAME increment, the source has one increment at the
+bottom of the guarded block and `continue` above it -- gas steals the
+shared instruction into each likely-branch slot and retargets one past
+it. Spelling the arms out as `if (a) n++; else if (b) n++; else {...}`
+costs four words and turns one branch into a `beq`/`b` pair.
+`tskUmnDataBaseName` went 244 -> 115 diffs on that one edit.
+
+**Let gcc's own strength reduction make the walking pointer.** When the
+original walks an `int *` through a local array across calls, write
+`int n = aOrder[i];` and index normally: gcc's giv machinery emits the
+`move s7,base` in the loop PREHEADER and `addiu s7,s7,4` at the latch,
+which is what retail has. Declaring an explicit `int *p` walker instead
+makes it a real pseudo whose live range starts before the loop guard, so
+it takes the wrong callee-saved number and the base gets spilled.
+
+**`--short-loop-pad` sites come in pairs.** Two blocks in one function
+needed `FUNC:0:3` (this toolchain pads to 8, the original to 10) AND
+`FUNC:1:0` (a pad the original did not emit at all). Missing the second
+leaves the function two words long with the whole tail shifted, which
+reads like a codegen difference and is not one.
+
+**Fixer site indices are not raw gcc-asm indices either.** The earlier
+passes expand `%hi/%lo` and symbol loads, so an index counted off gcc's
+own `-S` output can be several LOW. Probe it: fire the site once, see
+which instruction actually moved, and shift by the observed delta (it
+was +4 for the whole of `tskUmnDataBaseName`).
+
+**PIN + PASSTHRU splits a register chain gcc coalesces into one.** Where
+retail keeps three registers -- an arithmetic chain, an index derived
+from it, and the element address derived from that -- gcc coalesces all
+three into the chain's register, and no source spelling reached it
+(fifteen were swept). `PIN` alone is ignored on a plain dereference and
+`LAUNDER_V` after the assignment pins the value at the price of a
+scheduling barrier that strands the loop increment. What works is
+`PIN(a,"$2"); a = chain; LAUNDER_V(a); PASSTHRU(b, a + i);
+PASSTHRU(pp, base + b); ... *pp` -- `PASSTHRU` forces the pinned register
+WITHOUT being a barrier, so the scheduler still hoists the increment.
+Four remaining words became two adjacent-swap sites.
