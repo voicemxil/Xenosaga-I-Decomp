@@ -597,33 +597,30 @@ int _nextHeader(MPEGSTREAM *pStream)
     MPEGCBMSG msg;
     u_int nCode;
 
+    /* The picture-header tail lives INSIDE the loop: that is what lets
+     * loop-invariant motion hoist the callback message's 5 and -1 into
+     * callee-saved registers ahead of the loop. */
     for (;;) {
         _nextStartCode(pStream);
         nCode = _nextBit(pStream, 32);
-        if (nCode == 0x1B3) {
+        switch (nCode) {
+        case 0x1B3:
             _sequenceHeader(pStream);
-            continue;
-        }
-        if (nCode < 436) {
-            if (nCode == 0x100) {
-                break;
-            }
-            continue;
-        }
-        if (nCode == 0x1B7) {
+            break;
+        case 0x1B8:
+            _groupOfPicturesHeader(pStream);
+            break;
+        case 0x100:
+            _pictureHeader(pStream);
+            msg.nEvent = 5;
+            msg.llPts = -1;
+            msg.llDts = -1;
+            _dispatchMpegCallback(pStream->pUnk858, &msg);
+            pStream->llUnk830 = msg.llDts;
+            pStream->llUnk828 = msg.llPts;
+            return pStream->nUnk150;
+        case 0x1B7:
             return 0;
         }
-        if (nCode == 0x1B8) {
-            _groupOfPicturesHeader(pStream);
-            continue;
-        }
     }
-    _pictureHeader(pStream);
-    msg.nEvent = 5;
-    msg.llDts = -1;
-    msg.llPts = -1;
-    _dispatchMpegCallback(pStream->pUnk858, &msg);
-    pStream->llUnk830 = msg.llDts;
-    pStream->llUnk828 = msg.llPts;
-    return pStream->nUnk150;
 }
