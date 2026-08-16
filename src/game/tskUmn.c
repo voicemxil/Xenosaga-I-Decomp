@@ -1932,6 +1932,24 @@ typedef struct {
 extern void eSpriteSet(DBEXSPR *pSpr, int nId);
 extern void eSpriteMain(DBEXSPR *pSpr);
 
+/* TODO: PARKED at 19 differing words of 249.  Length, frame layout and
+ * every branch offset are right; what is left is three register/order
+ * tie-breaks:
+ *
+ *  - the init arm materialises the caption y (288) before the invariant
+ *    x (-196), and the sprite x (-45) before the emsg colour base
+ *    w+16; retail does both the other way round.
+ *  - the page-49 arm loads PadData's trigger halfword three times where
+ *    retail loads it twice and widens each with `andi 0xffff'.  Reading
+ *    the field at each use (rather than caching it in an int) is what
+ *    produced the two `andi's and took this function from 25 to 19;
+ *    caching it after the bShow xor instead costs a word back (28).
+ *
+ * Swept: all six orders of the three sprite-header stores crossed with
+ * both orders of the caption x/y stores (twelve builds: nX-first on the
+ * sprite header is worth 6 words, the caption order is worth nothing);
+ * the trigger halfword as `unsigned short' + `int', as one `int', read
+ * once before the test, once after, and at every use. */
 void tskUmnDataBaseExWin(TSK_TASK *pTask, UMN_DBEX *w)
 {
     static char *text[] = {
@@ -1994,29 +2012,29 @@ void tskUmnDataBaseExWin(TSK_TASK *pTask, UMN_DBEX *w)
         nSprTarget[0] = -45;
         nSprTarget[1] = 528;
         if (UmnWork.nPage == 49) {
-            int nTrig;
-
             for (i = 0; i < 5; i++) {
                 nTarget[i] = 16;
             }
-            nTrig = PadData.trig.b.h;
-            if (nTrig & 0x80) {
+            /* Read the field at each use rather than caching it in a
+               local: CSE folds the three reads into one load, but the
+               two equality tests still need it widened to int, which is
+               the `andi 0xffff' pair retail emits.  The store to bShow
+               may alias, so the second half reloads. */
+            if (PadData.trig.b.h & 0x80) {
                 w->row[0].bShow ^= 1;
-                nTrig = PadData.trig.b.h;
             }
             nSprTarget[0] = 8;
             nSprTarget[1] = 475;
-            if (nTrig == 4) {
+            if (PadData.trig.b.h == 4) {
                 w->nSlide[0] = -6;
             }
-            if (nTrig == 8) {
+            if (PadData.trig.b.h == 8) {
                 w->nSlide[1] = 6;
             }
         } else {
             w->row[0].bShow = 1;
         }
-        e = &w->row[4].emsg.p;
-        for (i = 0; i < 5; i++) {
+        for (i = 0, e = &w->row[4].emsg.p; i < 5; i++) {
             MoveSlide(&w->row[i].nX, &nTarget[i], 3.0f);
             w->row[i].emsg.p.nX = w->row[i].nX;
             w->row[i].emsg.p.nY = w->row[i].nY;
@@ -2085,7 +2103,7 @@ typedef struct {
     short nUmlSel;                      /* 0x83A */
     char pad83C[0x840 - 0x83C];         /* 0x83C */
     short nUmlX;                        /* 0x840 */
-    short nUmlY;                        /* 0x842 */
+    unsigned short nUmlY;               /* 0x842 */
     int nUmlSelI;                       /* 0x844 */
     int nUmlTotalI;                     /* 0x848 */
     EXTAGFONT tag;                      /* 0x84C */
@@ -2098,6 +2116,28 @@ typedef struct {
 extern void tyaUmlDispParamReset(void *pUml, int nMode);
 extern signed char tyaUmlDatabaseMain(void *pUml);
 
+/* TODO: PARKED at 216 built words against 210 original.  Behaviour,
+ * every constant, every struct offset and both dispatch shapes are
+ * recovered; the six extra words are all register-allocation:
+ *
+ *  - the init arm computes the two record pointers into $t4/$t5 and
+ *    then `move's them into $a2/$a3 for eRibbonSet, where retail builds
+ *    them in $a2/$a3 once and stores from there (2 words).  Swept: all
+ *    six group rotations of the eleven header stores (the emitted order
+ *    is a left-rotation of the source order by three GROUPS, which is
+ *    how the block got from an 11-store scramble to the two pointer
+ *    stores being the only ones out of place); the pointers as locals,
+ *    as casts, and read back out of the struct; eRibbonSet prototyped
+ *    and unprototyped.
+ *  - the trailer materialises the constants 48 and 3 twice each and
+ *    loads tag.nY/tag.nColor once per use, where retail keeps each in
+ *    the argument register across the store.  Swept: locals for both
+ *    constants and both fields (costs two `move's instead, same
+ *    length), the stores before and after the argument setup, and
+ *    nDigits/nAlign in both orders.
+ *
+ * Whoever picks this up should look for what puts the loaded value in
+ * $a1/$a2 directly rather than for another statement order. */
 void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
 {
     if (UmnWork.nScene != 2) {
@@ -2110,17 +2150,17 @@ void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
 
         w->nColor = 0x00F00000;
         tyaUmlDispParamReset(w->aUml, 0);
+        w->nUmlH2 = 314;
+        w->nUmlX = -272;
+        w->nUmlY = 48;
+        w->pUmlList = w->aList;
+        w->pUmlRec = w->aRec;
         w->pUmlName = w->aName;
         w->pUmlText = w->aText;
         w->nUmlW = 1808;
         w->nUmlH = 480;
         w->nUmlW2 = 1920;
         w->nUmlColor = (unsigned int)w->nColor;
-        w->nUmlH2 = 314;
-        w->nUmlX = -272;
-        w->nUmlY = 48;
-        w->pUmlList = w->aList;
-        w->pUmlRec = w->aRec;
         eRibbonSet(&w->rib, 3, w->aName, w->aText);
         w->rib.nW = 256;
         w->rib.nH = 24;
@@ -2202,8 +2242,8 @@ void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
             w->num.nY = w->tag.nY;
             w->num.nColor = w->tag.nColor;
             w->num.nValue = (w->nUmlTotalI << 16) + (unsigned short)w->nUmlSelI;
-            w->num.nAlign = 3;
             w->num.nDigits = 3;
+            w->num.nAlign = 3;
             eNumberMain(&w->num, w->tag.nY, w->tag.nColor, 3);
         }
         break;
