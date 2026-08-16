@@ -534,3 +534,96 @@ int _decPicture(MPEGSTREAM *pStream)
     }
     return nRet;
 }
+
+/* ---- slice and header dispatch ---------------------------------------- */
+
+extern char D_004D5C28[];  /* bad slice_start_code */
+extern char D_004D5C50[];  /* slice ran off the end of the buffer */
+
+extern void _Error1(MPEGSTREAM *pStream, char *pMsg, u_int nArg);
+extern int _mbAddressIncrement(MPEGSTREAM *pStream);
+extern void _sequenceHeader(MPEGSTREAM *pStream);
+extern void _dispatchMpegCallback(int *pCb, void *pArg);
+
+/* The message block handed to the per-picture callback. */
+typedef struct {
+    int nEvent;                  /* 0x00 */
+    char pad04[0x4];
+    long long llPts;             /* 0x08 */
+    long long llDts;             /* 0x10 */
+    char pad18[0x8];
+} MPEGCBMSG;
+
+/* slice(): header + first macroblock address, A-picture variant */
+int _sliceA0(MPEGSTREAM *pStream, int nUnused, int *pMBAddr, int *pFirst,
+             int *pMV)
+{
+    u_int nCode;
+    int nQ;
+    int nInc;
+
+    pStream->nUnk11C = 0;
+    _nextStartCode(pStream);
+    nCode = _peepBit(pStream, 32);
+    if (nCode - 257 >= 175) {
+        _Error1(pStream, D_004D5C28, nCode);
+        return 2;
+    }
+    _flushBuf(pStream, 32);
+    nQ = _sliceB(pStream);
+    nInc = _mbAddressIncrement(pStream);
+    *pFirst = nInc;
+    if (pStream->nUnk11C != 0) {
+        _Error(pStream, D_004D5C50);
+        return 1;
+    }
+    *pMBAddr = ((nQ << 7) + (nCode & 0xFF) - 1) * pStream->nUnk12C + nInc - 1;
+    *pFirst = 1;
+    pStream->nUnk1B0 = 1;
+    pMV[5] = 0;
+    pMV[4] = 0;
+    pMV[1] = 0;
+    pMV[0] = 0;
+    pMV[7] = 0;
+    pMV[6] = 0;
+    pMV[3] = 0;
+    pMV[2] = 0;
+    return 0;
+}
+
+/* Skip to the next picture header, running the sequence/GOP parsers. */
+int _nextHeader(MPEGSTREAM *pStream)
+{
+    MPEGCBMSG msg;
+    u_int nCode;
+
+    for (;;) {
+        _nextStartCode(pStream);
+        nCode = _nextBit(pStream, 32);
+        if (nCode == 0x1B3) {
+            _sequenceHeader(pStream);
+            continue;
+        }
+        if (nCode < 436) {
+            if (nCode == 0x100) {
+                break;
+            }
+            continue;
+        }
+        if (nCode == 0x1B7) {
+            return 0;
+        }
+        if (nCode == 0x1B8) {
+            _groupOfPicturesHeader(pStream);
+            continue;
+        }
+    }
+    _pictureHeader(pStream);
+    msg.nEvent = 5;
+    msg.llDts = -1;
+    msg.llPts = -1;
+    _dispatchMpegCallback(pStream->pUnk858, &msg);
+    pStream->llUnk830 = msg.llDts;
+    pStream->llUnk828 = msg.llPts;
+    return pStream->nUnk150;
+}

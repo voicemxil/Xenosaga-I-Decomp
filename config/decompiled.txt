@@ -2783,3 +2783,4 @@ _decode_motion_vector = 0x00213358, 0x88; // sceMpegDec.c
 xglCullingMapSet = 0x0023EC98, 0x17C; // xglCulling.c
 sdvDrawAlters = 0x002EEB88, 0xC4; // sdv.c
 RSRC_alloc = 0x0026D7A0, 0x110; // RSRC.c
+_sliceA0 = 0x00212AD0, 0x12C; // sceMpegDec.c
