@@ -1822,6 +1822,42 @@ static void set_circle_shadow_ratio(int nRatio)
     }
 }
 
+int nmlModelRenderProreal(LAYOUT *pM, int nArg);
+
+/* Render the circle shadow for the first visible model in the given index
+ * ring, then draw it through the pro-real path */
+int nmlModelRenderCircle(void *pHdr, int nStep, int nArg)
+{
+    LAYOUT *pM;
+    int i;
+    int nRet;
+
+    pM = 0;
+    nRet = 0;
+    if (*(float *)(*(char **)((char *)pHdr + 0xC) + 0x26C) <= 0.001f) {
+        goto done;
+    }
+    i = *(short *)pHdr - nStep;
+    goto test;
+    do {
+        i += nStep;
+        pM = D_009550B0[D_00952410[i]];
+        if ((pM->nStatus & 0x100000) == 0) {
+            break;
+        }
+        pM = 0;
+test:   ;
+    } while (i != (short)*(unsigned short *)pHdr
+                  + (short)*(unsigned short *)((char *)pHdr + 2) * nStep - nStep);
+    if (pM != 0) {
+        set_circle_shadow_ratio((int)((float)pM->nTexMapAlpha * pM->fTransparency));
+        nmlPacketSendCircleTexture(D_00955900, D_00956920);
+        nRet = nmlModelRenderProreal(pM, nArg);
+    }
+done:
+    return nRet;
+}
+
 /* Render the drop-shadow circle for the first visible model in the
  * given index ring */
 /* TODO: near-miss, 15/52 words (REGISTER + scheduling; instruction counts
