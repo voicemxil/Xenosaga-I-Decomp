@@ -713,15 +713,46 @@ void Java_xeno_Camera_setClipRange__FF(void *pEnv, JVAL *pArgs, JVAL *pRet)
 
 
 /* TODO: not matching (27 built vs 25 original words).  The logic and the
-   0x21-entry sweep are right; two things block it, both TI-mode codegen:
-    - the `por $r,$0,$0` zero-materialisation wall, which the fix_cc_asm
-      peephole requested in Java_Chr.c's setPointLightReset note removes
-      (verified: `sq zero` does appear under a prototype of that pass);
-    - with that applied the only remainder is that gcc folds the 0x60 and
-      0x70 displacements into the two `sq`s, where the original keeps two
-      separate address registers and stores at offset 0.  That costs the
-      two loop-padding nops gcc inserts instead, which is the whole 2-word
-      difference.
+   0x21-entry sweep are right.  MECHANISM (established, not guessed):
+
+   The two extra words are gcc's R5900 SHORT-LOOP PADDING.  Look at the
+   raw -S output: the loop body ends with two bare
+   `.set noreorder / nop / .set reorder` blocks.  They are not hazard
+   pads for `sq` -- a standalone TI-mode store compiles with no nop at
+   all (checked on a minimal test case).  They appear because gcc's loop
+   body is only five real instructions.  The original's loop is seven,
+   so it needs no padding:
+
+       addiu v0,a0,96      addiu v1,a0,112     addiu a1,a1,-1
+       sq    zero,0(v0)    sq    zero,0(v1)    bnez  a1,loop
+                                               addiu a0,a0,160
+
+   i.e. the original spends those two slots on separate address temps and
+   stores at offset 0, while gcc folds 96/112 into the `sq` displacements
+   and pads.  So this is ONE difference, not two: get the address temps
+   and the padding goes away by itself.
+
+   Swept without success: pointer locals for the two addresses, a T128*
+   array subscript, `(char *)pDef + 0x60`, an incremented fog pointer,
+   a loop indexed by CfCameraDefine[i] (that one DOES reach 25 words, but
+   only because gcc fills the guard's delay slot with the zero
+   materialisation -- 20 diffs, wrong for the right length), a for-loop
+   form, and --zero-quad-store (no effect here, confirmed).
+
+   What DOES reproduce the address temps: LAUNDER on each of the two
+   pointer locals.  That yields exactly
+
+       addu $3,$4,96 / addu $2,$4,112 / por $6,$0,$0 / addu $5,$5,-1
+       sq $6,0($3) / addu $4,$4,160 / bne / sq $6,0($2)
+
+   -- the padding nops are gone, confirming the short-loop story.  The
+   only remaining word is the `por $6,$0,$0` zero materialisation, which
+   the original does not have (it stores $0 directly).  --zero-quad-store
+   turns `por $X,$0,$0` + `sq $X` into `nop` + `sq $0`, which keeps the
+   instruction count; closing this needs a mode of that pass which DELETES
+   the por rather than replacing it with a nop.  With that, plus a
+   reorder for the store/counter interleave, this function lands.  Two
+   LAUNDERs and a tool change was judged too much steering to spend here.
 
    Clear the eight fog parameters of one camera definition, or of every
    definition when the index is negative.  Both halves go out as TI-mode
