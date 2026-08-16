@@ -32,15 +32,33 @@ typedef struct {
 typedef struct {
     char pad0[4];
     signed char nSignal;        /* 0x04 */
-    char pad5[0x3F];
+    char pad5[0x28];
+    signed char nShape;         /* 0x2D  (map unit + 0x1CD) */
+    char pad2E[0x16];
     int nUnk44;                 /* 0x44 */
 } UWAMONO;
 
+/* The map unit's collision bounds, copied whole (ld/sd pairs) when the
+   corner test needs a scratch copy -- one union type, never two structs. */
+typedef union {
+    struct {
+        float radius;           /* 0x00 */
+        float height;           /* 0x04 */
+        float corner;           /* 0x08 */
+        float unknown;          /* 0x0C */
+    } value;
+    long long alignment[2];
+} BOUNDS;
+
 typedef struct {
     int nFlags;                 /* 0x00 */
-    char pad04[0xA0];
+    char pad04[0xC];
+    VECTOR pos;                 /* 0x10 */
+    char pad20[0x84];
     short nUnkA4;               /* 0xA4 */
-    char padA6[0xFA];
+    char padA6[0xA];
+    BOUNDS bounds;              /* 0xB0 */
+    char padC0[0xE0];
     UWAMONO uwamono;            /* 0x1A0 */
 } MAPUNIT;
 
@@ -548,4 +566,42 @@ int CheckIntersect(VECTOR *p1, VECTOR *p2, VECTOR *p3, VECTOR *p4)
         nRet = 0;
     }
     return nRet;
+}
+
+extern float CheckDist2D(VECTOR *a, VECTOR *b);
+
+/* Distance from the point to the map unit's collision shape: circle,
+   rounded box (corner), or plain centre distance. */
+float CheckCornerDist(VECTOR *p, MAPUNIT *unit)
+{
+    float d;
+
+    switch (unit->uwamono.nShape) {
+    case 1:
+        d = CheckDist2D(p, &unit->pos) - unit->bounds.value.radius;
+        break;
+    case 2:
+        {
+            BOUNDS b;
+            float t;
+
+            b = unit->bounds;
+            t = __builtin_fabsf(p->x - unit->pos.x);
+            if (t < b.value.radius) {
+                b.value.radius = t;
+            }
+            t = __builtin_fabsf(p->z - unit->pos.z);
+            if (t < b.value.corner) {
+                b.value.corner = t;
+            }
+            d = CheckDist2D(p, &unit->pos);
+            d = d - sqrtf(b.value.radius * b.value.radius +
+                          b.value.corner * b.value.corner);
+        }
+        break;
+    default:
+        d = CheckDist2D(p, &unit->pos);
+        break;
+    }
+    return d;
 }

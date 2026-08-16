@@ -2761,3 +2761,4 @@ xglMpeg2Open = 0x002221A0, 0x14C; // xglMovie.c
 _sendIpuCommand = 0x002136D0, 0x2C; // sceMpegDec.c
 _nextStartCode = 0x00213D18, 0x7C; // sceMpegDec.c
 _extrainfo = 0x002142F0, 0x48; // sceMpegDec.c
+CheckCornerDist = 0x002C3C70, 0x114; // Check.c
