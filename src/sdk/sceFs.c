@@ -885,3 +885,68 @@ int sceReadlink(char *name, void *buf, unsigned int len)
     DeleteSema(semid);
     return result;
 }
+
+/* The two-path request layout: two 1024-byte names back to back
+ * starting at +12, 2060 bytes on the wire. */
+typedef struct t_fs_send_2path {
+    int   semid;
+    void *dst;
+    int   size;
+    char  path1[1024];          /* +12 */
+    char  path2[1024];          /* +1036 */
+} fs_send_2path_t;
+
+/* sceSymlink: the same capped copy twice over.  Only the first copy
+ * pulls its terminator store back into the beql slot from the block
+ * that follows; the second one has no following block, which is why the
+ * second loop's cap store is the last thing in the region. */
+int sceSymlink(char *existing, char *newpath)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_2path_t *sd;
+    int done;
+    int i;
+
+    sd = (fs_send_2path_t *)&_send_data;
+    _sceFsWaitS(17);
+    if (_fs_init == 0)
+        sceFsInit();
+    for (i = 0; i < 1024; i++) {
+        sd->path1[i] = existing[i];
+        if (sd->path1[i] == 0)
+            break;
+    }
+    if (i == 1024)
+        sd->path1[1023] = 0;
+    for (i = 0; i < 1024; i++) {
+        sd->path2[i] = newpath[i];
+        if (sd->path2[i] == 0)
+            break;
+    }
+    if (i == 1024)
+        sd->path2[1023] = 0;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->dst = &result;
+    sd->semid = semid;
+    sd->size = 4;
+    if (sceSifCallRpc(&_cd, 24, 0, &_send_data, 2060, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}
