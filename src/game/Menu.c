@@ -1985,7 +1985,111 @@ int MenuBulletCheck2(int nId, int nType)
     }
 }
 
-extern void *MenuTextGet(int);
+/* A resolved menu text: the string, its terminator and the display copy.
+   Three file-scope instances stand in for the three answer shapes. */
+typedef struct {
+    unsigned char *pStr;       /* 0x00 */
+    unsigned char *pEnd;       /* 0x04 */
+    unsigned char *pDisp;      /* 0x08 */
+    char pad0C[4];
+} MENUTEXT;
+extern MENUTEXT dumm_msg __asm__("dumm_msg.8");
+extern MENUTEXT dumm __asm__("dumm.9");
+extern MENUTEXT dumm2 __asm__("dumm2.10");
+extern void *func_A2C5F8(int);
+extern void *func_A2C698(int);
+extern void *func_A2C6E8(int);
+extern void *func_A2C738(int);
+extern void *func_A2C5A8(int);
+extern void *func_A2C7D8(int);
+extern void *func_A2C918(int);
+extern void *func_A2C968(int);
+extern unsigned char *dataEvtItmNameGet(int);
+
+/* Resolve a packed (category << 16 | id) menu text handle to its text
+   object.  Category 2 (event items) is built into dumm2 on the fly. */
+void *MenuTextGet(int nId)
+{
+    void *pRet;
+    int nLo;
+    int nCat;
+
+    nCat = (unsigned int)nId >> 16;
+    nLo = nId & 0xFFFF;
+    pRet = 0;
+    if (nLo == 0) {
+        return &dumm_msg;
+    }
+    switch (nCat) {
+    case 1:
+        pRet = func_A2C5F8(nLo);
+        break;
+    case 2:
+        {
+            unsigned char *pText;
+            unsigned char c;
+
+            pText = dataEvtItmNameGet(nLo);
+            dumm2.pStr = pText;
+            dumm2.pDisp = pText;
+            do {
+                c = *pText;
+                pText++;
+            } while (c != 0);
+            dumm2.pEnd = pText;
+            pRet = &dumm2;
+        }
+        break;
+    case 3:
+        pRet = &dumm_msg;
+        if (MenuEquipStealMaskCheck() == 0) {
+            if (nLo == 69) {
+                if (MenuShionMwsCheck() != 0) {
+                    pRet = func_A2C6E8(69);
+                }
+            } else {
+                pRet = func_A2C6E8(nLo);
+            }
+        }
+        break;
+    case 4:
+        if (MenuEquipStealMaskCheck() != 0) {
+            pRet = &dumm_msg;
+        } else {
+            pRet = func_A2C738(nLo);
+        }
+        break;
+    case 5:
+        if (MenuEquipStealMaskCheck() == 0) {
+            pRet = func_A2C698(nLo);
+        } else {
+            pRet = &dumm_msg;
+        }
+        break;
+    case 6:
+    case 7:
+        dumm.pStr = MenuCharNameGet(nLo);
+        pRet = &dumm;
+        break;
+    case 8:
+        pRet = (void *)func_A2C648(nLo);
+        break;
+    case 9:
+        pRet = func_A2C5A8(nLo);
+        break;
+    case 10:
+        pRet = func_A2C7D8(nLo);
+        break;
+    case 11:
+        pRet = func_A2C968(nLo);
+        break;
+    case 12:
+        pRet = func_A2C918(nLo);
+        break;
+    }
+    return pRet;
+}
+
 
 /* Swap two sort keys if the first name-string sorts higher (descending) */
 void MenuSortSubType04(int *a, int *b)
@@ -2665,7 +2769,8 @@ int MenuItemUseCheck(short nId)
     if ((*(unsigned short *)(p + 4) & 0x8000) == 0) {
         return 0;
     }
-    if (nId == 36) {
+    nRet = 36;
+    if (nId == nRet) {
         nRet = (GameLoopState.f10 & 0x20400000) ? 2 : -1;
     } else {
         v = *(unsigned short *)(p + 12);
