@@ -170,6 +170,21 @@ void INIT_BACK_BUFFER(void);
 void nmlModelFogPara(float *pPara, float fNear, float fFar, float fMin, float fMax);
 void INIT_FADE_CONTROL(void *pFade);
 void CLEAR_LAYOUT_MODEL(void *pLayout);
+/* Componentwise sort of two vectors: pMin gets the elementwise minimum
+ * and pMax the elementwise maximum (w untouched). */
+void _MinMaxSort(void *pMin, void *pMax)
+{
+    PS2_ASM(".set noreorder\n"
+            "lqc2 $vf20, 0x0(%0)\n"
+            "lqc2 $vf21, 0x0(%1)\n"
+            "vmini.xyz $vf22, $vf20, $vf21\n"
+            "vmax.xyz $vf23, $vf20, $vf21\n"
+            "sqc2 $vf22, 0x0(%0)\n"
+            "sqc2 $vf23, 0x0(%1)\n"
+            ".set reorder"
+            : : "r"(pMin), "r"(pMax) : "memory");
+}
+
 void CLEAR_PROREAL(void *pProReal)
 {
     *(int *)((char *)pProReal + 0x1C0) = 0;
@@ -2178,4 +2193,56 @@ int nmlModelCalcEntryClip(void *pModel)
         }
     }
     return 0;
+}
+
+/* The "current" matrix lives in VU0 registers vf27-vf30 for the whole
+ * transform pipeline; these three move it in, out, and compose it. */
+void _CurMatrixSet(void *pMtx)
+{
+    PS2_ASM(".set noreorder\n"
+            "lqc2 $vf27, 0x0(%0)\n"
+            "lqc2 $vf28, 0x10(%0)\n"
+            "lqc2 $vf29, 0x20(%0)\n"
+            "lqc2 $vf30, 0x30(%0)\n"
+            ".set reorder" : : "r"(pMtx));
+}
+
+void _CurMatrixGet(void *pMtx)
+{
+    PS2_ASM(".set noreorder\n"
+            "sqc2 $vf27, 0x0(%0)\n"
+            "sqc2 $vf28, 0x10(%0)\n"
+            "sqc2 $vf29, 0x20(%0)\n"
+            "sqc2 $vf30, 0x30(%0)\n"
+            ".set reorder" : : "r"(pMtx) : "memory");
+}
+
+/* Post-multiply the current matrix by pMtx. */
+void _CurMatrixMul(void *pMtx)
+{
+    PS2_ASM(".set noreorder\n"
+            "lqc2 $vf2, 0x0(%0)\n"
+            "lqc2 $vf3, 0x10(%0)\n"
+            "lqc2 $vf4, 0x20(%0)\n"
+            "lqc2 $vf5, 0x30(%0)\n"
+            "vmulax.xyzw $ACC, $vf27, $vf2x\n"
+            "vmadday.xyzw $ACC, $vf28, $vf2y\n"
+            "vmaddaz.xyzw $ACC, $vf29, $vf2z\n"
+            "vmaddw.xyzw $vf2, $vf30, $vf2w\n"
+            "vmulax.xyzw $ACC, $vf27, $vf3x\n"
+            "vmadday.xyzw $ACC, $vf28, $vf3y\n"
+            "vmaddaz.xyzw $ACC, $vf29, $vf3z\n"
+            "vmaddw.xyzw $vf3, $vf30, $vf3w\n"
+            "vmulax.xyzw $ACC, $vf27, $vf4x\n"
+            "vmadday.xyzw $ACC, $vf28, $vf4y\n"
+            "vmaddaz.xyzw $ACC, $vf29, $vf4z\n"
+            "vmaddw.xyzw $vf4, $vf30, $vf4w\n"
+            "vmulax.xyzw $ACC, $vf27, $vf5x\n"
+            "vmadday.xyzw $ACC, $vf28, $vf5y\n"
+            "vmaddaz.xyzw $ACC, $vf29, $vf5z\n"
+            "vmaddw.xyzw $vf30, $vf30, $vf5w\n"
+            "vmulw.xyzw $vf27, $vf2, $vf0w\n"
+            "vmulw.xyzw $vf28, $vf3, $vf0w\n"
+            "vmulw.xyzw $vf29, $vf4, $vf0w\n"
+            ".set reorder" : : "r"(pMtx));
 }
