@@ -25,6 +25,11 @@ sh tools/build.sh
 # to retail is the only check that sees what actually shipped.
 # Non-fatal: with several agents editing at once the link may be
 # transiently broken, and that must not mask the per-function results.
+# Functions defined by two source objects: the linker picks one and
+# verify.py may be checking the other. This has produced both a wrong
+# shipped image and three phantom "registered-and-failing" reports.
+python3 tools/audit_dupes.py --quiet 2>/dev/null || true
+
 if ! python3 tools/verify_elf.py --strict -q 2>/dev/null; then
     echo "WARNING: linked image does NOT match retail byte-for-byte."
     echo "  Run: python3 tools/verify_elf.py --strict   (see docs/LINKING.md)"

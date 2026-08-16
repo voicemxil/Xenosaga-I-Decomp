@@ -460,6 +460,15 @@ real hazard.** One cost an agent 30 minutes and briefly broke a
 registered match, because the comment invited experimentation on
 working code. `checkfile.py` is the authority, not the file comments.
 
+**GREP THE WHOLE TERRITORY for a function name before writing it**, not
+just the file you expect it in. A function defined in two TUs has caused
+two separate incidents: the linker shipped a mismatching `libc.c` copy
+while verify.py checked the byte-exact one next door, and three `sef.c`
+near-misses shadowed byte-exact `sefIs.c` versions so checkfile reported
+them as registered-and-failing when they had never been broken. In both
+cases the symptom pointed somewhere other than the cause.
+`tools/audit_dupes.py` now runs in rebuild.sh.
+
 **Never leave an entry registered-and-failing.** A registered entry
 claims a byte-exact match; if it does not match, the ledger is lying and
 the whole verification is worth less. Either match it or remove the
