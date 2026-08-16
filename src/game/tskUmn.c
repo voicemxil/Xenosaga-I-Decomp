@@ -1970,24 +1970,26 @@ void tskUmnDataBaseExWin(TSK_TASK *pTask, UMN_DBEX *w)
     case 0: {
         int nY;
         int nX;
+        int nSprX;
 
         w->row[0].nColor = 0x00FFFFF0;
+        nX = -196;
         nY = 288;
         for (i = 0; i < 5; i++) {
             w->row[i].nY = nY;
             nY += 24;
-            w->row[i].nX = -196;
+            w->row[i].nX = nX;
             eMessageSet(&w->row[i].emsg, text[i]);
             eMessageModeChange(&w->row[i].emsg, 32);
         }
         {
             short nId[2] = { 274, 272 };
 
-            nX = -45;
+            nSprX = -45;
             for (i = 0; i < 2; i++) {
                 eSpriteSet(&w->spr[i], nId[i]);
-                w->spr[i].nX = nX;
-                nX += 573;
+                w->spr[i].nX = nSprX;
+                nSprX += 573;
                 w->spr[i].nColor = w->row[0].nColor;
                 w->spr[i].nY = 214;
                 w->nSlide[i] = 0;
