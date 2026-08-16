@@ -77,7 +77,8 @@ struct MAPUNIT;
 typedef struct MAPUNITSET {
     short nKind;                    /* 0x1A0 */
     u16 nNo;                        /* 0x1A2 */
-    u8 pad004[0x2];                 /* 0x1A4 */
+    u8 pad004[0x1];                 /* 0x1A4 */
+    s8 nUnk005;                     /* 0x1A5 */
     s8 nContainer;                  /* 0x1A6 */
     s8 nHasContainer;               /* 0x1A7 */
     u8 pad008[0x20];                /* 0x1A8 */
@@ -98,8 +99,8 @@ typedef struct MAPUNITSET {
 typedef struct MAPUNIT {
     int nFlags;                     /* 0x000 */
     void (*pUpdate)(struct MAPUNIT *);/* 0x004 */
-    int nUnk008;                    /* 0x008 */
-    void (*pDraw)(struct MAPUNIT *);/* 0x00C */
+    void (*pDraw)(struct MAPUNIT *);/* 0x008 */
+    int nUnk00C;                    /* 0x00C */
     float fPos[4];                  /* 0x010 */
     float fRot[3];                  /* 0x020 */
     u8 pad02C[0x4];                 /* 0x02C */
@@ -115,7 +116,8 @@ typedef struct MAPUNIT {
     short nUnk0A6;                  /* 0x0A6 */
     short nUnk0A8;                  /* 0x0A8 */
     short nUnk0AA;                  /* 0x0AA */
-    u8 pad0AC[0x14];                /* 0x0AC */
+    u8 pad0AC[0x4];                 /* 0x0AC */
+    float fUnk0B0[4];               /* 0x0B0 */
     float fSubPos[4];               /* 0x0C0 */
     int nUnk0D0;                    /* 0x0D0 */
     int nUnk0D4;                    /* 0x0D4 */
@@ -210,7 +212,28 @@ typedef struct {
     long long field_38;
 } UNDU_PARAM;
 
+/* The position vector as the item-box registration copies it: the
+ * original moves all 16 bytes with two aligned 64-bit ld/sd pairs, which
+ * needs a type whose alignment says the vector really is 8-byte aligned
+ * (it is -- MAPUNIT is 0x300 bytes and fPos sits at 0x10). */
+typedef struct {
+    long long nLo;                  /* 0x00 */
+    long long nHi;                  /* 0x08 */
+} INITVECTOR;
+
+/* Model resource: the parts table lives at +nPartsOffset+0x40 */
+typedef struct {
+    u8 pad000[0x30];                /* 0x00 */
+    float fPos[3];                  /* 0x30 */
+} MODELPARTS;
+
+typedef struct {
+    u8 pad000[0x50];                /* 0x00 */
+    int nPartsOffset;               /* 0x50 */
+} MODELRES;
+
 extern INITGAMELOOP GameLoopState;
+extern MAPUNIT MapUnit[];
 extern int *pDrillFlag;
 extern INITACTOR *tActor;
 extern CLEARENV ClearEnv;
@@ -247,6 +270,8 @@ void InitDrill(MAPUNIT *);
 void InitItemBox(MAPUNIT *);
 void InitMapTrap(MAPUNIT *);
 void MAP_updateUnitDrill(MAPUNIT *);
+void MAP_updateUnitItemBox(MAPUNIT *);
+void MAP_drawUnitItemBox(MAPUNIT *);
 void UnduParamInit(UNDU_PARAM *);
 int UnduDataGetHeader(int, int);
 float UnduCheck(float *, int, UNDU_PARAM *);
@@ -477,7 +502,7 @@ void InitItemSymbol(MAPUNIT *pUnit)
     if (pSet->nNo >= 602) {
         pUnit->nAlive = -1;
         pUnit->pUpdate = 0;
-        pUnit->nUnk008 = 0;
+        pUnit->pDraw = 0;
         printf("ItemSymbol serial error!! %d\n", (short)pSet->nNo);
         return;
     }
@@ -744,4 +769,110 @@ void InitializeSystem(void)
     xglFontInitial();
     xglMovieInit();
     xglMenuInitial();
+}
+
+/* Treasure chest: pick the chest model by serial, hang its lid transform
+ * off the model's parts table, and register the box in the map-unit list */
+/* TODO: near-miss (10/170 words, REGISTER class) - the two per-serial
+ * model/texture temporaries and the 6/57 type constant land in
+ * $a1/$a0/$v0 where the original used $a0/$a1 (and $a1 again for the
+ * default arm's texture).  Swept: statement order inside and across the
+ * three switch arms, an explicit goto-shared tail, direct stores in the
+ * default arm, declaration order, and hoisting the scrutinee - every
+ * variant is >= 9 words and several are far worse.  Everything else in
+ * the function, including the 64-bit MapUnit vector copy, matches. */
+void InitItemBox(MAPUNIT *pUnit)
+{
+    MAPUNITSET *pSet;
+    MODELRES *pRes;
+    MODELPARTS *pParts;
+    MAPUNIT *pSlot;
+    float *pMatrix;
+    float *pPos;
+    int *pEffect;
+    int nModel;
+    int nTexture;
+    int i;
+
+    pSet = &pUnit->set;
+    switch ((short)pUnit->nAlive) {
+    case 0x7005:
+        nModel = uwares_tbl[4];
+        nTexture = xtxres_tbl[4];
+        pUnit->pModel[0] = nModel;
+        pUnit->pModel[1] = nTexture;
+        pSet->nUnk034 = 6;
+        break;
+    case 0x7008:
+        nModel = uwares_tbl[7];
+        nTexture = xtxres_tbl[7];
+        pUnit->pModel[0] = nModel;
+        pUnit->pModel[1] = nTexture;
+        pSet->nUnk034 = 57;
+        break;
+    default:
+        nModel = uwares_tbl[4];
+        nTexture = xtxres_tbl[4];
+        pUnit->pModel[0] = nModel;
+        pUnit->pModel[1] = nTexture;
+        break;
+    }
+    pRes = (MODELRES *)pUnit->pModel[0];
+    pParts = (MODELPARTS *)((char *)pRes + pRes->nPartsOffset + 0x40);
+    pUnit->nUnk230 = (int)pParts;
+    pUnit->fSubPos[0] = pParts->fPos[0];
+    pUnit->fSubPos[1] = pParts->fPos[1];
+    pUnit->fSubPos[2] = pParts->fPos[2];
+    pUnit->fSubPos[3] = 1.0f;
+    xglMatrixStackUnit();
+    xglMatrixStackTrans(pUnit->fSubPos);
+    xglMatrixStackSave((float *)pUnit->nUnk230);
+    if (pSet->nSerial == -1) {
+        pSet->nSerial = 2;
+    }
+    pSet->nUnk044 = 0;
+    pPos = pUnit->fPos;
+    pMatrix = pUnit->fMatrix;
+    pUnit->nFlags |= 4;
+    pUnit->fUnk0B0[0] = 0.3f;
+    pUnit->fUnk0B0[1] = 0.5f;
+    pUnit->fUnk0B0[2] = 0.2f;
+    xglMatrixStackUnit();
+    xglMatrixStackTrans(pPos);
+    xglMatrixStackRotX(pUnit->fRot[0]);
+    xglMatrixStackRotY(pUnit->fRot[1]);
+    xglMatrixStackRotZ(pUnit->fRot[2]);
+    xglMatrixStackSave(pMatrix);
+    pUnit->pMatrix = pMatrix;
+    pUnit->pUpdate = MAP_updateUnitItemBox;
+    pUnit->pDraw = MAP_drawUnitItemBox;
+    pUnit->nFlags |= 0x10000;
+    pUnit->nFlags |= 0x8000000;
+    pUnit->nUnk0A1 = 0;
+    pUnit->nUnk0A8 = 0;
+    pUnit->nUnk0AA = 0;
+    pUnit->nUnk0A2 = 0;
+    if (pSet->nUnk005 != -1) {
+        pSlot = &MapUnit[pSet->nUnk005];
+        pSlot->nFlags |= 4;
+        *(INITVECTOR *)pSlot->fPos = *(INITVECTOR *)pUnit->fPos;
+    }
+    if (pSet->nNo >= 602) {
+        pUnit->nAlive = -1;
+        pUnit->pUpdate = 0;
+        pUnit->pDraw = 0;
+        printf("ItemBox serial error!! %d\n", (short)pSet->nNo);
+        return;
+    }
+    if (xglFlagsGet1((short)pSet->nNo + 0x79EC7) == 1) {
+        pUnit->nUnk0A8 = 16;
+        pUnit->nUnk0A2 = 3;
+        pEffect = pUnit->nEffect;
+        for (i = 2; i >= 0; i--) {
+            if (*pEffect != 0) {
+                sefDeleteEffectCf(*pEffect);
+            }
+            pEffect++;
+        }
+    }
 }
