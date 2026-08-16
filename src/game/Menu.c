@@ -3807,10 +3807,14 @@ int MenuFaceEpidGet(int nType, int nFlag)
 /* --- Shop list window work --- */
 typedef struct {
     unsigned char nPage;       /* 0x00: page id the help bar keys off */
-    char pad01[0x10 - 1];
+    char pad01[0x06 - 1];
+    unsigned short hFlags;     /* 0x06: which shop categories have stock */
+    char pad08[0x10 - 8];
     unsigned char nBusy;       /* 0x10: non-zero while the page is changing */
     unsigned char nSel;        /* 0x11: hint-slot cursor */
-    char pad12[0x20 - 0x12];
+    char pad12[0x17 - 0x12];
+    unsigned char bNoSale;     /* 0x17: suppress the stock scan entirely */
+    char pad18[0x20 - 0x18];
     int nCur;                  /* 0x20: sort-list cursor row */
     char pad24[2];
     short nModelSel;           /* 0x26: row the model window is showing */
@@ -3836,6 +3840,89 @@ typedef struct {
 } SHOPWINSP;
 extern SHOPWORK *MenuShopWork;
 extern SHOPWINSP *MenuShopWinSP;
+typedef struct {
+    unsigned short list[9][20]; /* 0x000: nine 20-entry shop stock id lists */
+    unsigned short agws[4];    /* 0x168: AGWS units offered for trade-in */
+} SHOPDATA;
+extern SHOPDATA ShopData;
+extern void MenuSortSet(int nIdx, int nType, int nArg);
+extern int dataEvtBoxChk(int nId);
+
+/* Work out which shop categories have anything to offer.  While the page
+   is changing the answer comes from the live sort lists; otherwise it is
+   read straight off the shop stock tables. */
+void MenuShopInfoSet(void)
+{
+    MenuShopWork->hFlags = 0;
+    if (MenuShopWork->nBusy == 0) {
+        if (MenuShopWork->bNoSale != 0) {
+            return;
+        }
+        if (ShopData.list[0][0] != 0) {
+            MenuShopWork->hFlags |= 1;
+        }
+        if (ShopData.list[1][0] != 0) {
+            MenuShopWork->hFlags |= 2;
+        }
+        if (ShopData.list[2][0] != 0) {
+            MenuShopWork->hFlags |= 4;
+        }
+        if (ShopData.list[3][0] != 0) {
+            MenuShopWork->hFlags |= 8;
+        }
+        if (ShopData.list[4][0] != 0) {
+            MenuShopWork->hFlags |= 0x10;
+        }
+        if (ShopData.list[5][0] != 0) {
+            MenuShopWork->hFlags |= 0x20;
+        }
+        if (ShopData.list[6][0] != 0) {
+            MenuShopWork->hFlags |= 0x40;
+        }
+        if (ShopData.agws[0] != 0) {
+            MenuShopWork->hFlags |= 0x80;
+        }
+        if (MenuScenarioNo >= 115) {
+            MenuShopWork->hFlags |= 0x100;
+        }
+        return;
+    } else {
+        MenuSortSet(0, 1, 0);
+        if (MenuSortCheck(0) != 0) {
+            MenuShopWork->hFlags |= 1;
+        }
+        MenuSortSet(0, 4, -1);
+        if (MenuSortCheck(0) != 0) {
+            MenuShopWork->hFlags |= 2;
+        }
+        MenuSortSet(0, 16, -1);
+        if (MenuSortCheck(0) != 0) {
+            MenuShopWork->hFlags |= 4;
+        }
+        MenuSortSet(0, 8, -1);
+        if (MenuSortCheck(0) != 0) {
+            MenuShopWork->hFlags |= 8;
+        }
+        MenuSortSet(0, 4, -2);
+        if (MenuSortCheck(0) != 0) {
+            MenuShopWork->hFlags |= 0x10;
+        }
+        MenuSortSet(0, 16, -2);
+        if (MenuSortCheck(0) != 0) {
+            MenuShopWork->hFlags |= 0x20;
+        }
+        MenuSortSet(0, 8, -2);
+        if (MenuSortCheck(0) != 0) {
+            MenuShopWork->hFlags |= 0x40;
+        }
+        if (dataEvtBoxChk(53) == 0 && dataEvtBoxChk(54) == 0 &&
+            dataEvtBoxChk(55) == 0) {
+            return;
+        }
+    }
+    MenuShopWork->hFlags |= 0x100;
+}
+
 
 /* One gouraud vertex of the shop underline strip */
 typedef struct {
@@ -3953,11 +4040,6 @@ typedef struct {
     int nCat;
     int nMax;
 } SHOPSORTENT;
-typedef struct {
-    short list[9][20];         /* 0x000: nine 20-entry shop stock id lists */
-    unsigned short agws[4];    /* 0x168: AGWS units offered for trade-in */
-} SHOPDATA;
-extern SHOPDATA ShopData;
 
 /* Rebuild sort row nRow from shop id list nType, tagging each id with its
    category; sort id 8 is the scenario-gated special list. */
@@ -3968,17 +4050,17 @@ void MenuShopSortSet(int nRow, int nType, int arg2, int arg3)
     pOut = MenuSortAddrGet(nRow);
     {
         SHOPSORTENT tbl[11] = {
-            { ShopData.list[0], 1, 20 },
-            { ShopData.list[1], 3, 20 },
-            { ShopData.list[2], 5, 20 },
-            { ShopData.list[3], 4, 20 },
-            { ShopData.list[4], 3, 20 },
-            { ShopData.list[5], 5, 20 },
-            { ShopData.list[6], 4, 20 },
+            { (short *)ShopData.list[0], 1, 20 },
+            { (short *)ShopData.list[1], 3, 20 },
+            { (short *)ShopData.list[2], 5, 20 },
+            { (short *)ShopData.list[3], 4, 20 },
+            { (short *)ShopData.list[4], 3, 20 },
+            { (short *)ShopData.list[5], 5, 20 },
+            { (short *)ShopData.list[6], 4, 20 },
             { (short *)ShopData.agws, 7, 4 },
             { 0, 0, 0 },
-            { ShopData.list[7], 11, 20 },
-            { ShopData.list[8], 12, 20 }
+            { (short *)ShopData.list[7], 11, 20 },
+            { (short *)ShopData.list[8], 12, 20 }
         };
         short *p;
         int n;
@@ -4226,7 +4308,7 @@ void MenuAgwsListMake_Wpn(void)
     PIN(int *pSort, "$18");
     PIN(void *ptr, "$16");
     PIN(MENUTECWORK *w2, "$19");
-    PIN(SHOPWINSP *win, "$20");
+    SHOPWINSP *win;
     PIN(int n, "$17");
     int cnt;
     int nCnt;
