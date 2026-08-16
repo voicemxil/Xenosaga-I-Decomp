@@ -2890,3 +2890,4 @@ CharListMake_Acc = 0x00295748, 0x144; // Char.c
 sceMcRename = 0x0020FE58, 0x168; // sceMc.c
 xglMcSetMapName = 0x0021FD10, 0x184; // xglMc.c
 _isOutSizeOK = 0x00214AB8, 0xA0; // sceMpegDec.c
+xglFlagsGet = 0x00222A50, 0x74; // xglFlags.c

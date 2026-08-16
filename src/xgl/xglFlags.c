@@ -101,14 +101,14 @@ int xglFlagsGet(int nFlag, int nSize)
 {
     long long nChunk;
     int nShift;
-    int nBytes;
-    int nLim;
     int i;
 
     nShift = nFlag & 7;
-    nBytes = (nSize + nShift + 7) >> 3;
-    nLim = nBytes;
-    for (i = 0; i < nLim; i++) {
+    /* The loop bound is written inline, not via a named nBytes local:
+       jump.c's duplicate_loop_exit_test copies the test ahead of the
+       loop, and LICM then hoists the invariant as a SECOND pseudo, which
+       is retail's `move t0,a2`. A named local coalesces the two. */
+    for (i = 0; i < (nSize + nShift + 7) >> 3; i++) {
         ((unsigned char *)&nChunk)[i] = D_00491824[(nFlag >> 3) + i];
     }
     return (int)(nChunk >> nShift) & ((1 << nSize) - 1);
