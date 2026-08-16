@@ -428,12 +428,13 @@ delay slot.
 `sltu v0,zero,v0` only appears when the negation is spelled as an XOR;
 `!x` and `x == 0` both fold to one `sltiu v0,v0,1`.
 
-**Runs of same-block stores come out in REVERSE source order.** Three
-independent field stores closing a UI panel had to be written
-`nWidth / nMode / bFlags` to be emitted `nWidth`, `nMode`... no: to be
-emitted in the original's `nWidth`, `bFlags`, `nMode` order. When a short
-run of stores is the only difference, try the reversal before anything
-else, then permute exhaustively -- it is a six-case script.
+**A short run of independent stores does not come out in source order.**
+Three field stores closing a UI panel had to be written
+`nWidth / nMode / bFlags` to be emitted in the original's
+`nWidth / bFlags / nMode` order -- writing them in emitted order gives
+the full reversal instead. Do not reason about it: permute exhaustively.
+Three statements is a six-case script, four is twenty-four, and this has
+now paid off in two separate files.
 
 **An unaligned struct copy is order-sensitive against float work.** In
 Check_Undu, writing the 16-byte start-point copy before the direction
