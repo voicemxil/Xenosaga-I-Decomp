@@ -751,25 +751,26 @@ one:
 
 int xglSoundLoadSwd(char *pName, void *pBuf);
 
-/* TODO: near-miss (24 words, 116/116). Everything is structurally right;
- * the residue is a register tie-break -- the original puts pName in $s0
- * and pBuf in $s1, gcc here does the reverse, which renames every use of
- * both -- plus the guard branch being `bnez` where the original has the
- * branch-likely `bnezl` with `move a1,sp` annulled, and the second copy
- * loop's entry `lbu` sitting one slot later (a `nop` in its place).
- * Swept: swapping the `char *p; char *q;` declaration order; the guard
- * as nested ifs with a goto (111); hoisting `p = szPath` above the
- * guard (118 words); no spelling changes which parameter wins $s0. */
+/* TODO: near-miss (13 words). Identical residue to
+ * xglSoundLoadRequestSmd below -- see the note there. The $s0/$s1
+ * parameter tie-break is fixed by the PINs; what is left is the guard
+ * being `bnez` where the original has `bnezl`, and the resulting $a1
+ * vs $a2 choice for the destination pointer. */
 /* Load one effect's wave bank and effect bank into a slot: first
  * "sed\<name>" through the SWD loader, then
  * "data\sound\sed\<name>.SED" straight off the disc */
-void xglSoundLoadEffect(char *pName, void *pBuf, int nNo)
+void xglSoundLoadEffect(char *pNameArg, void *pBufArg, int nNo)
 {
     static char ext[8] = ".SED";
     char szPath[256];
+    /* PIN: the parameters' $s0/$s1 tie-break goes the other way here. */
+    PIN(char *pName, "$16");
+    PIN(void *pBuf, "$17");
     char *p;
     char *q;
 
+    pName = pNameArg;
+    pBuf = pBufArg;
     if (pName == 0 || pBuf == 0) {
         xglSoundSendSwd(0, nNo);
         xglSoundSendSed(0, nNo);
