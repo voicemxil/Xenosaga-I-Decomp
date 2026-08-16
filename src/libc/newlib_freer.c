@@ -13,6 +13,8 @@
  * worse, break _malloc_trim_r too).  Pure sched2+regalloc tie-break,
  * same hard-tail category as _vfprintf_r's ndig cluster.
  */
+/* See newlib_mallocr.c: the EE's size_t is narrower than its long. */
+#define SIZE_T_SMALLER_THAN_LONG
 #define INTERNAL_NEWLIB
 #define HAVE_MMAP 0
 #define MALLOC_ALIGNMENT 16

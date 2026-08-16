@@ -448,26 +448,52 @@ def unfill_gcc_slots(flat, scope, owner_of):
     this pass the slot instruction is moved ABOVE the branch and a
     literal nop takes its place. Safe because gcc only fills a slot
     with an instruction that neither feeds the branch condition nor
-    depends on it. Opt-in per function like the barrier passes.
+    depends on it.
+
+    Scope entries are either a bare FUNC (every gcc-filled slot in that
+    function -- the original blanket behaviour) or a FUNC:N SITE, where
+    N is the 0-based index of the gcc-filled slot within FUNC, counted
+    over the emitted asm in order.
+
+    Per-site is the useful mode and blanket is usually not: the original
+    build FILLS most of these slots and declines only a handful, so
+    unfilling all of them is far worse than unfilling none. _vfprintf_r
+    is the standing example -- it needs exactly the isinf/isnan result
+    tests unfilled and everything else left alone.
+
+    The index is the dual of pin_slot_nops': that pass counts
+    REORDER-mode branches (the ones gas fills), this one counts
+    NOREORDER-mode branch blocks (the ones gcc already filled), so a
+    branch is only ever countable by one of the two. Both are 0-based
+    and in asm order, and because gcc wraps these blocks in
+    `.set nomacro` no macro can expand inside one -- so for this pass
+    asm order is also binary order, and a site index read off a
+    disassembly is valid.
     """
     res = []
     i = 0
+    counts = {}
     while i < len(flat):
-        if (flat[i].strip() == ".set	noreorder" or
+        if flat[i].startswith("\t.ent\t"):
+            counts[flat[i].split("\t")[-1]] = 0
+        if (flat[i].strip() == ".set\tnoreorder" or
                 flat[i].strip() == ".set noreorder") and i + 3 < len(flat):
             block = [x.strip().replace("\t", " ") for x in flat[i:i+4]]
             if (block[1].startswith(".set") and "nomacro" in block[1]
                     and RE_ANY_BRANCH.match(flat[i+2])
                     and flat[i+3].startswith("\t")
-                    and not flat[i+3].strip().startswith(".")
-                    and in_scope(owner_of(i), scope)):
-                res.append(flat[i+3])          # hoisted slot insn
-                res.append(flat[i])            # .set noreorder
-                res.append(flat[i+1])          # .set nomacro
-                res.append(flat[i+2])          # branch
-                res.append("\tnop")
-                i += 4
-                continue
+                    and not flat[i+3].strip().startswith(".")):
+                owner = owner_of(i)
+                n = counts.get(owner, 0)
+                counts[owner] = n + 1
+                if not scope or owner in scope or f"{owner}:{n}" in scope:
+                    res.append(flat[i+3])      # hoisted slot insn
+                    res.append(flat[i])        # .set noreorder
+                    res.append(flat[i+1])      # .set nomacro
+                    res.append(flat[i+2])      # branch
+                    res.append("\tnop")
+                    i += 4
+                    continue
         res.append(flat[i])
         i += 1
     return res
@@ -1388,9 +1414,14 @@ if __name__ == "__main__":
                         help="keep %%lo() loads and la macros out of a "
                              "following call/branch delay slot")
     parser.add_argument("--unfill-gcc-slots", nargs="?", const="",
-                        default=None, metavar="FUNCS",
+                        default=None, metavar="FUNCS_OR_SITES",
                         help="hoist gcc's own branch-delay-slot fills back "
-                             "above the branch, leaving a literal nop")
+                             "above the branch, leaving a literal nop. "
+                             "Entries are FUNC (all of that function's "
+                             "gcc-filled slots) or FUNC:N (just the Nth, "
+                             "0-based, asm order). Per-site is normally "
+                             "what you want -- the original fills most of "
+                             "these slots and declines only a few")
     parser.add_argument("--pin-slot-nop", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose Nth "
                              "reorder-mode branch/jump (0-based, asm order) "

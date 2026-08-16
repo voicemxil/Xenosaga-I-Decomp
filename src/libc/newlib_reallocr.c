@@ -4,6 +4,8 @@
  * PS2 malloc aligns to the quadword, visible in the original's
  * request2size constants (+19 / &-16 instead of +11 / &-8).
  */
+/* See newlib_mallocr.c: the EE's size_t is narrower than its long. */
+#define SIZE_T_SMALLER_THAN_LONG
 #define INTERNAL_NEWLIB
 #define HAVE_MMAP 0
 #define MALLOC_ALIGNMENT 16
