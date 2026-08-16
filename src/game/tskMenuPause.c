@@ -39,9 +39,16 @@ static void DrawShadow(VIFPK *pk)
 }
 
 /* Build and queue an 8-quadword sprite packet for the credit screen.
- * PARKED 7-word diff: the shared -1 constant is allocated s4 here but s2
- * in retail (priority coloring of the one 2-use pseudo); every statement
- * permutation tried keeps it last among the callee-saved constants. */
+ * PARKED 6-word diff: the five constants that get callee-saved registers
+ * are the right five, but the roles of $s2/$s3/$s4 are rotated -- retail
+ * puts the twice-used -1 in $s2 and the two single-use constants after it,
+ * we put -1 last. This is a coloring-priority effect of that one 2-use
+ * pseudo, and it is NOT reachable by store order: an exhaustive sweep of
+ * all 720 orderings of the six constant stores and a hill climb over all
+ * 23 statements in the packet both bottom out at 6 (from 7), which is the
+ * 0x50/0x54 pair swapped as written here. Whoever picks this up should
+ * look for what shortens the -1 pseudo's live range or lengthens the other
+ * two, not for another permutation. */
 static void DrawCredit(VIFPK *pk)
 {
     unsigned int *q = (unsigned int *)((char *)pk + 0x30);
@@ -66,8 +73,8 @@ static void DrawCredit(VIFPK *pk)
     q[0x40 / 4] = 4096;
     q[0x44 / 4] = 432;
     q[0x58 / 4] = -1;
-    q[0x50 / 4] = 30072;
     q[0x54 / 4] = 0x8C37;
+    q[0x50 / 4] = 30072;
     q[0x78 / 4] = -1;
     sceVif1PkAddDirectDataN(pk->pPk, q, 8);
 }

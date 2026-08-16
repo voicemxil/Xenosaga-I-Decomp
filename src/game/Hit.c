@@ -348,20 +348,30 @@ int HitCheckMapUnitPosAt(void *position, void *map_unit)
 }
 
 /* Test a circular probe against one oriented map-unit box. */
-/* TODO: LOGIC near-match: the aligned aggregate copies now give the original
- * 51-word length, but gcc schedules the two local copies and floating-point
- * operand loads differently, cascading through 29 encoded instructions. */
+/* TODO: near-miss, 23 of 51 words (was 29). Length is exact and every
+ * arithmetic step is the original's; what differs is the FP register
+ * numbering and, feeding it, two scheduling choices: the original loads
+ * the high half of the position copy first (ours loads the low half
+ * first, and the two loads are independent so the scheduler is free), and
+ * it interleaves the unit_position reload with the two subtractions
+ * instead of doing both reloads up front. The declaration order above is
+ * the best of an exhaustive 7! sweep of the initialised locals (5040
+ * orderings, 29 -> 23); bounds must stay first or it loses its sp+0 stack
+ * slot. What is left is not reachable by reordering these declarations --
+ * it needs whatever makes gcc emit the 16-byte union copy high-word-first,
+ * which the sweep never produced for the position copy while producing it
+ * for the bounds copy in the same function. */
 int HitCheckBox(void *position, void *map_unit)
 {
     HitProbe *probe = (HitProbe *)position;
     HitMapUnit *unit = (HitMapUnit *)map_unit;
     HitAlignedBounds bounds = unit->bounds;
-    HitAlignedVector unit_position = unit->position;
     HitVector *axis = unit->direction;
+    HitAlignedVector unit_position = unit->position;
     float z_delta = probe->position.z - unit_position.value.z;
+    float expansion = probe->size * 1.5f;
     float x_delta = probe->position.x - unit_position.value.x;
     float projection = x_delta * axis->x + z_delta * axis->z;
-    float expansion = probe->size * 1.5f;
     float nearest_x;
     float nearest_z;
     float radius;
