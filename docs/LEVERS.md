@@ -899,6 +899,66 @@ of all 120 permutations. Search, do not assume.
 
 ---
 
+## From the task/screen state machines (wave 4)
+
+**A field read that the original hoists ABOVE a run of stores has to be
+written as a local.** gcc cannot move a load above a store to the same
+object -- it must assume they alias -- so `w->win.nColor = w->nColor;`
+written in place emits its load in the middle of the header block, while
+the original loads the colour once as soon as the setup call returns and
+holds it across every store. Reading it into a local right after the
+call reproduces that, and because the local is then live across the
+whole block, every other value in it lands one register later. That
+knock-on is worth far more than the load: it was the last word between
+`tskUmnMailMenu` and a match, and it fixed nine other differing words at
+the same time. Symptom: one load in the wrong place plus a whole block
+whose registers are uniformly shifted by one slot.
+
+**Two fields of DIFFERENT modes assigned the same constant get two
+registers.** `w->win2.nState = 1; w->bVisible2 = 1;` (a `sb` and a `sw`)
+materialises the 1 twice; the original shares one register for both. A
+single local assigned once and stored to both recovers it. This is the
+mirror of the existing "two statements, not a chain" entry -- the
+direction is decided by whether the original shares the register, and
+both directions really occur. Worth checking the knock-on too: removing
+that one word also removed a `.p2align` pad two switch arms later, which
+is what made the function the right length.
+
+**The same applies to a value that is stored AND passed.** When the
+original keeps one register for a constant it both stores and passes as
+an argument (`w->rib.nY = 48; eRibbonMain(&w->rib, 48);`), or for a field
+it stores into another struct and also passes, naming it once is what
+merges them; repeated literals and repeated field reads each get their
+own materialisation for the argument. Six differing words in
+`tskUmnDataBaseKeyWord` were exactly this.
+
+**Write the POSITIVE form when the original merges the two negative
+arms.** `if (a == 0) x = 1; else if (b == 0) x = 1; else x = 0;` makes
+gcc reach for a `bnezl` and lay the blocks out in the other order;
+`if (a && b) x = 0; else x = 1;` gives two `beqz`es to a shared block
+plus an explicit `b` over it, with the constant in each delay slot --
+which is what the original does. Read it off the original: two
+conditional branches to the SAME later address, and a `b` just before
+that address, means the source tested the conjunction.
+
+**A frame array that is quadword-copied wants a union, not a cast.**
+`float mtx[16]` copied through `((TI *)mtx)[i]` is still a 4-byte-aligned
+object to gcc, and its scheduler interleaves unrelated word stores into
+the four `lq`/`sq` pairs. Declaring `union { float f[16]; TI q[4]; }`
+gives the object the alignment it really has and the copy comes out as
+one contiguous block. (`updateCursorMode1`, 17 -> 14.) A whole-struct
+assignment is NOT the same thing -- gcc drops to word-sized pieces and
+the copy gets seven words longer.
+
+**"One local, two roles" also applies to loop-invariant constants.** In
+`tskUmnDataBaseExWin` one `nX` served the row loop's invariant -196 and
+the sprite loop's -45 accumulator. One C local is one pseudo, so the
+shared register decided which constant was materialised first. Two
+locals, with the one whose constant the original emits first assigned
+first, fixed it.
+
+---
+
 ## Axes that DON'T work — don't spend runs on these
 
 **Local declaration order does not move gcc 2.96's allocation.** Four
