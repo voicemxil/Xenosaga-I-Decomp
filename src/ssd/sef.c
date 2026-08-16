@@ -1382,3 +1382,38 @@ void sefMemZero(void *pDst, int nSize)
         pW[i] = 0;
     }
 }
+
+/* Cold-start the whole effect system: hand the effect heap to the
+ * small-block allocator, bring up the sub-systems in order, clear the
+ * two battle tables, then mark the driver initialised. */
+extern char _eftBuffer[];
+extern void smInitilize(void *base, unsigned int size);
+extern void sresInitMemoryRes(void);
+extern void srsInitCdRead(void);
+extern void sevInitPtAllocator(void);
+extern void svInitImageMapper(void);
+extern void sefInitScheduler(void);
+extern void scInitScript(void);
+extern void sdvInitSpecialWork(void);
+extern void sdvInitAmbient(void);
+extern void sresLoadCommonMemory(void);
+extern void *memset(void *, int, unsigned int);
+extern short _initialize;
+
+void sefInitEffect(void)
+{
+    smInitilize(_eftBuffer, 0xD4800);
+    sresInitMemoryRes();
+    srsInitCdRead();
+    sevInitPtAllocator();
+    svInitImageMapper();
+    sefInitScheduler();
+    scInitScript();
+    memset(_battlePrm, 0, 52);
+    memset(_battleData, 0, 560);
+    sdvInitSpecialWork();
+    sdvInitAmbient();
+    sresLoadCommonMemory();
+    _sefLoadEftQue = 0;
+    _initialize = 1;
+}
