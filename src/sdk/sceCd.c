@@ -196,7 +196,7 @@ extern int CreateSema(sceSemaParam *param);
 extern int DeleteSema(int sid);
 extern int WaitSema(int sid);
 extern int SetAlarm(unsigned short time, void *handler, void *arg);
-extern void CB_DelayTh(void);
+extern void CB_DelayTh(int id, unsigned short time, void *common);
 extern int scePrintf(const char *fmt, ...);
 extern int sceSifCheckStatRpc(void *rd);
 extern int SCE_CD_debug;
@@ -571,6 +571,182 @@ int sceCdMmode(int media)
         SignalSema(_sceCd_scmd_semid);
         return 0;
     }
+    r = *(volatile int *)((int)p | 0x20000000);
+    SignalSema(_sceCd_scmd_semid);
+    return r;
+}
+
+/* ------------------------------------------------------------------
+ * Semaphores, the alarm callback and teardown.
+ * ------------------------------------------------------------------ */
+
+extern int iSignalSema(int sid);
+extern int _sceCd_scmd_semid;
+extern int cb_semid;
+
+/* The alarm handler sceCdDelayThread arms: signal the waiting thread's
+ * semaphore from interrupt context, then re-enable interrupts.  `ei`
+ * cannot be reached from C, so it is a PS2_ASM site (same idiom as
+ * _sceFs_Poff_Intr in sceFs.c). */
+void CB_DelayTh(int id, unsigned short time, void *common)
+{
+    iSignalSema((int)common);
+    PS2_ASM("sync.l\n\tei");
+}
+
+/* cmd_sem_init: create the three libcdvd semaphores, but only if either
+ * command semaphore is still -1 -- the two tests are separate `if`s
+ * because the original branches on each independently rather than
+ * folding them.  One sceSemaParam on the stack is filled once and
+ * reused; only initCount changes between the second and third call. */
+void cmd_sem_init(void)
+{
+    sceSemaParam sp;
+
+    if (_sceCd_ncmd_semid != -1 && _sceCd_scmd_semid != -1)
+        return;
+    sp.option = 0;
+    sp.maxCount = 1;
+    sp.initCount = 1;
+    _sceCd_ncmd_semid = CreateSema(&sp);
+    _sceCd_scmd_semid = CreateSema(&sp);
+    sp.initCount = 0;
+    cb_semid = CreateSema(&sp);
+    _sceCd_c_cb_sem = 0;
+}
+
+/* cdvd_exit: wake the callback thread with a poison command code if it
+ * is running, drop the three semaphores, and unhook the SIF command
+ * handler.  The trailing EIntr() is a real tail call -- gcc 2.9 emits
+ * `j` for a void call in the tail position of a void function. */
+
+extern void sceSifRemoveCmdHandler(unsigned int cid);
+
+void cdvd_exit(void)
+{
+    if (cb_thid != 0) {
+        sceCdCbfunc_num = -1;
+        SignalSema(cb_semid);
+    }
+    DeleteSema(_sceCd_ncmd_semid);
+    DeleteSema(_sceCd_scmd_semid);
+    DeleteSema(cb_semid);
+    DIntr();
+    sceSifRemoveCmdHandler(0x80000012);
+    EIntr();
+}
+
+/* ------------------------------------------------------------------
+ * Power-off callback plumbing.
+ * ------------------------------------------------------------------ */
+
+extern void (*sceCdPoffCbfunc)(void *);
+extern void *sceCdPoffCbdata;
+extern int Init_seq;
+extern int _icmd_bind;
+extern void sceSifAddCmdHandler(unsigned int cid, void *func, void *data);
+
+/* The SIF command handler the IOP fires when the power button is
+ * pressed: run the user callback, unless none is installed or libcdvd
+ * is still initialising. */
+void _sceCd_Poff_Intr(void)
+{
+    if (sceCdPoffCbfunc != 0 && Init_seq == 0)
+        sceCdPoffCbfunc(sceCdPoffCbdata);
+}
+
+/* Bind that handler, with Init_seq raised for the duration so a command
+ * arriving mid-registration is ignored.  The 1 stored into Init_seq and
+ * the 1 stored into _icmd_bind (and returned) are the same value in the
+ * same register -- one local, three roles. */
+int PowerOffCB(void)
+{
+    int one = 1;
+
+    Init_seq = one;
+    DIntr();
+    sceSifAddCmdHandler(0x80000012, (void *)_sceCd_Poff_Intr, 0);
+    EIntr();
+    Init_seq = 0;
+    _icmd_bind = one;
+    return one;
+}
+
+/* Install a power-off callback, binding the SIF handler first if it has
+ * never been bound (_icmd_bind still negative).  Returns the previous
+ * callback; the swap is done with interrupts disabled. */
+void *sceCdPOffCallback(void (*func)(void *), void *data)
+{
+    void (*old)(void *);
+
+    if (_icmd_bind < 0)
+        PowerOffCB();
+    DIntr();
+    old = sceCdPoffCbfunc;
+    sceCdPoffCbdata = data;
+    sceCdPoffCbfunc = func;
+    EIntr();
+    return (void *)old;
+}
+
+/* ------------------------------------------------------------------
+ * _sceCdSetTimeout and sceCdReadClock.
+ * ------------------------------------------------------------------ */
+
+/* Two-word outbound payload version of sceCdMmode: the parameter goes
+ * in the send buffer's first word inside the prechk branch's annulled
+ * delay slot, the value in its second word afterwards. */
+int _sceCdSetTimeout(int param, int timeout)
+{
+    int *p;
+    int *sd;
+    int r;
+
+    sd = &_sceCd_scmdsdata;
+    if (_sceCd_scmd_prechk(37) == 0)
+        return 0;
+    sd[0] = param;
+    sd[1] = timeout;
+    sceSifWriteBackDCache(sd, 8);
+    p = &_sceCd_scmdrdata;
+    if (sceSifCallRpc(&_sceCd_cd_scmd, 37, 0, sd, 8, p, 4, 0, 0) < 0) {
+        SignalSema(_sceCd_scmd_semid);
+        return 0;
+    }
+    r = *(volatile int *)((int)p | 0x20000000);
+    SignalSema(_sceCd_scmd_semid);
+    return r;
+}
+
+/* sceCdReadClock: a 16-byte reply whose second and third words are the
+ * eight BCD clock bytes.  They are copied out as ONE 8-byte struct
+ * assignment: the struct's 4-byte alignment is what picks gcc's
+ * ldl/ldr + sdl/sdr idiom rather than four lwl/lwr pairs (see
+ * "struct-copy alignment picks the move idiom" in docs/LEVERS.md).
+ * Both debug traces are gated the same way sceCdSyncS gates its own. */
+
+typedef struct sceCdCLOCK32 {
+    int w[2];
+} sceCdCLOCK32;
+
+int sceCdReadClock(void *clock)
+{
+    int *p;
+    int r;
+
+    if (_sceCd_scmd_prechk(15) == 0)
+        return 0;
+    if (SCE_CD_debug > 0)
+        scePrintf("Libcdvd call Clock read 1\n");
+    p = &_sceCd_scmdrdata;
+    if (sceSifCallRpc(&_sceCd_cd_scmd, 1, 0, 0, 0, p, 16, 0, 0) < 0) {
+        SignalSema(_sceCd_scmd_semid);
+        return 0;
+    }
+    *(sceCdCLOCK32 *)clock =
+        *(sceCdCLOCK32 *)(((int)p + 4) | 0x20000000);
+    if (SCE_CD_debug > 0)
+        scePrintf("Libcdvd call Clock read 2\n");
     r = *(volatile int *)((int)p | 0x20000000);
     SignalSema(_sceCd_scmd_semid);
     return r;
