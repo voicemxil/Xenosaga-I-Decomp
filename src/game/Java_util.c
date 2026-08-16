@@ -893,8 +893,13 @@ void Java_xeno_util_Runtime_setPartyData__II(JThread *thread, JValue *args, JVal
     if (args[0].i == 0x100002C) {
         nId = args[1].i;
         chr = D_00338684[0];
+        /* The saved word is read before the test, not inside it: the
+         * original puts that load in the test's delay slot, so the test
+         * stays a plain beq. Left inside the `if`, gcc has nothing to
+         * fill the slot with and emits a branch-likely that annuls an
+         * epilogue restore instead, one instruction shorter. */
+        nSave = *(int *)(chr + 0x8D0);
         if (*(short *)(chr + 0x86) != nId) {
-            nSave = *(int *)(chr + 0x8D0);
             *(int *)(chr + 0x8D0) = 0;
             xglSleep();
             xglSleep();
