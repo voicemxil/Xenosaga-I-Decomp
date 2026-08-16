@@ -264,3 +264,24 @@ void subTreeLineDraw_type_1(ETLINE *line)
     nType = (unsigned char)(child->bFlags & 1) ? 2 : 1;
     subTreeLineDraw(line, &nType);
 }
+
+/* Ease *pCur toward *pDst by a fraction of the remaining gap, plus a 1.0
+   floor so it always closes, clamping so it never overshoots. */
+void subMoveSlide(float *pCur, float *pDst, float fRate)
+{
+    float d = *pCur - *pDst;
+
+    if (d != 0.0f) {
+        if (*pDst < *pCur) {
+            *pCur = *pCur - (d * fRate + 1.0f);
+            if (*pCur < *pDst) {
+                *pCur = *pDst;
+            }
+        } else {
+            *pCur = *pCur - (d * fRate - 1.0f);
+            if (*pDst < *pCur) {
+                *pCur = *pDst;
+            }
+        }
+    }
+}
