@@ -754,6 +754,28 @@ void Java_xeno_Camera_setClipRange__FF(void *pEnv, JVAL *pArgs, JVAL *pRet)
    reorder for the store/counter interleave, this function lands.  Two
    LAUNDERs and a tool change was judged too much steering to spend here.
 
+   THE SAME WALL BLOCKS Java_xeno_Chr_look_default__ (0x00300BA0, 156
+   bytes), which is why that function is still unwritten.  It clears six
+   quadwords straight-line (no loop, so no short-loop padding involved)
+   and the original spells every one of them the same way:
+
+       addiu $v1,$a0,0x600 / sq $0,0($v1)
+       addiu $v0,$a0,0x610 / sq $0,0($v0)   ... alternating $v1/$v0
+
+   while gcc emits one `por $X,$0,$0` plus six `sq $X,DISP($base)`.  A
+   plain mode(TI) version of that function is 28 diffs; adding LAUNDER to
+   the six address locals brings it to the original's shape and within a
+   single word (160 vs 156 bytes), the extra word being exactly the
+   `por`.  Alternating two source locals does NOT reproduce the $v1/$v0
+   alternation, and the base register comes out $v0 where the original
+   uses $a0.
+
+   TOOL REQUEST, with the above as the prototype evidence: a mode of
+   --zero-quad-store that DELETES the `por $X,$0,$0` instead of
+   substituting a nop for it.  The existing pass is deliberately
+   count-preserving because the function it was written for
+   (Java_xeno_Chr_setPointLightReset) has a nop there; these two do not.
+
    Clear the eight fog parameters of one camera definition, or of every
    definition when the index is negative.  Both halves go out as TI-mode
    quadword stores. */
