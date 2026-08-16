@@ -202,7 +202,12 @@ extern int sceSifCheckStatRpc(void *rd);
 extern int SCE_CD_debug;
 /* libcdvd's SIF-RPC client-data block for the "S" (synchronous)
  * command channel, 0x004AD448. */
-extern int _sceCd_cd_scmd;
+typedef struct sceCdRpcClient {
+    int pad[9];                 /*  0..35 */
+    void *serve;                /* 36  nonzero once the IOP side answers */
+} sceCdRpcClient;
+
+extern sceCdRpcClient _sceCd_cd_scmd;
 
 /* NEAR-MISS, not registered: matches byte for byte at "-O2 -G0" (26
  * words) but is 7 positions out of order under -fno-schedule-insns.
@@ -311,7 +316,7 @@ int sceCdStStat(void)
  * the other v0-constant tie-breaks -- permuter or a pin, not a shape. */
 
 extern int _sceCd_c_cb_sem;
-extern int _sceCd_cd_ncmd;
+extern sceCdRpcClient _sceCd_cd_ncmd;
 
 int sceCdSync(int mode)
 {
@@ -769,4 +774,126 @@ int sceCdReadClock(void *clock)
     r = *(volatile int *)((int)p | 0x20000000);
     SignalSema(_sceCd_scmd_semid);
     return r;
+}
+
+/* ------------------------------------------------------------------
+ * _sceCd_ncmd_prechk / _sceCd_scmd_prechk: the gate every libcdvd
+ * command goes through.  Identical twins over the two channels.
+ *
+ * Take the channel semaphore (PollSema returns the semaphore id on
+ * success, so "did I get it?" is a comparison against the id, loaded
+ * again after the call), record which command is in flight, make sure
+ * the drive is idle, then bring the RPC binding up if it has never been
+ * bound.  The bind is a retry loop around the same fixed-count delay
+ * spin sceSifInitIopHeap uses -- the entry jumps straight to the first
+ * bind attempt, and only the "bound but not yet serving" case falls
+ * back to the leading delay.
+ *
+ * PARKED NEAR-MISS, both twins at 94 words against 92. Everything from
+ * the prologue through the SignalSema arm is exact, and the bind retry
+ * loop is structurally right down to the annulled `bgezl` and the two
+ * separate fixed-count delay spins. Three residues:
+ *   - the `return 1` for an already-bound channel costs us
+ *     `li v0,1; b epilogue` where the original reaches the epilogue
+ *     with `bgez` and puts the `li` in its delay slot, then `b`s into
+ *     the middle of the bind block;
+ *   - the R5900 erratum pad nops in each delay spin sit one slot
+ *     earlier (lui/li/NOP/addiu/nop*3 rather than lui/li/addiu/nop*4),
+ *     and the original's loop-top .p2align pad is missing;
+ *   - s1 and s2 are swapped (we keep %hi(_Xcmd_bind) in s1 and %hi of
+ *     the client block in s2; the original is the other way round) --
+ *     that part is what --swap-regs exists for.
+ * Swept: the two delay spins written as ONE loop inside a for(;;) with
+ * an if/else (gcc merges them, 79 words -- the original really does
+ * duplicate the spin, so the goto form is right); `_Xcmd_bind < 0` as
+ * the branch polarity (identical output); PollSema compared in both
+ * operand orders (the `_Xcmd_semid != PollSema(...)` order shown here
+ * is what gives the original's `beq v1,v0`). */
+ * ------------------------------------------------------------------ */
+
+extern int PollSema(int sid);
+extern int ncmd_sema_keep_cmd;
+extern int scmd_sema_keep_cmd;
+extern int _ncmd_bind;
+extern int _scmd_bind;
+extern int my_thid;
+extern int my_th_info;
+extern int ReferThreadStatus(int thid, void *info);
+extern int sceSifInitRpc(int mode);
+extern int sceSifBindRpc(void *cd, unsigned int sid, int mode);
+
+int _sceCd_ncmd_prechk(int cmd)
+{
+    int i;
+
+    cmd_sem_init();
+    if (_sceCd_ncmd_semid != PollSema(_sceCd_ncmd_semid)) {
+        if (SCE_CD_debug > 0)
+            scePrintf("Ncmd fail sema cur_cmd:%d keep_cmd:%d\n",
+                      cmd, ncmd_sema_keep_cmd);
+        return 0;
+    }
+    ncmd_sema_keep_cmd = cmd;
+    ReferThreadStatus(my_thid, &my_th_info);
+    if (sceCdSync(1) != 0) {
+        SignalSema(_sceCd_ncmd_semid);
+        return 0;
+    }
+    sceSifInitRpc(0);
+    if (_ncmd_bind >= 0)
+        return 1;
+    goto bind;
+delay:
+    for (i = 0x100000; i != -1; i--)
+        ;
+bind:
+    if (sceSifBindRpc(&_sceCd_cd_ncmd, 0x80000595, 0) < 0) {
+        if (SCE_CD_debug > 0)
+            scePrintf("Libcdvd bind err N CMD\n");
+        for (i = 0x100000; i != -1; i--)
+            ;
+        goto bind;
+    }
+    if (_sceCd_cd_ncmd.serve == 0)
+        goto delay;
+    _ncmd_bind = 0;
+    return 1;
+}
+
+int _sceCd_scmd_prechk(int cmd)
+{
+    int i;
+
+    cmd_sem_init();
+    if (_sceCd_scmd_semid != PollSema(_sceCd_scmd_semid)) {
+        if (SCE_CD_debug > 0)
+            scePrintf("Scmd fail sema cur_cmd:%d keep_cmd:%d\n",
+                      cmd, scmd_sema_keep_cmd);
+        return 0;
+    }
+    scmd_sema_keep_cmd = cmd;
+    ReferThreadStatus(my_thid, &my_th_info);
+    if (sceCdSyncS(1) != 0) {
+        SignalSema(_sceCd_scmd_semid);
+        return 0;
+    }
+    sceSifInitRpc(0);
+    if (_scmd_bind >= 0)
+        return 1;
+    goto bind;
+delay:
+    for (i = 0x100000; i != -1; i--)
+        ;
+bind:
+    if (sceSifBindRpc(&_sceCd_cd_scmd, 0x80000593, 0) < 0) {
+        if (SCE_CD_debug > 0)
+            scePrintf("Libcdvd bind err S cmd\n");
+        for (i = 0x100000; i != -1; i--)
+            ;
+        goto bind;
+    }
+    if (_sceCd_cd_scmd.serve == 0)
+        goto delay;
+    _scmd_bind = 0;
+    return 1;
 }
