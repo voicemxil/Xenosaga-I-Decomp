@@ -30,7 +30,10 @@ typedef struct {
     unsigned char nScene;               /* 0x01 */
     char pad02[1];
     unsigned char nPage;                /* 0x03 */
-    char pad04[0x46 - 0x04];
+    char pad04[0x11 - 0x04];
+    signed char nUiLock;                /* 0x11: cleared while the
+                                         * database menu owns the cursor */
+    char pad12[0x46 - 0x12];
     signed char nDataBaseSel;           /* 0x46 */
     char pad47[0x50 - 0x47];
     union {
@@ -1212,5 +1215,200 @@ void tskUmnSimulationList(TSK_TASK *pTask, UMN_LIST *w)
         w->sp.nX = w->nX;
         w->sp.nY = w->nY;
         WindowSPMain(&w->sp);
+    }
+}
+
+/* --- Database screen: the top-level "Menu" select window --- */
+
+/* MenuSelectWindow's own header: same first bytes as a WindowDX, but the
+   +0x0C slot is the caption drawn in the title bar rather than padding. */
+typedef struct {
+    short nX;                           /* 0x00 */
+    short nY;                           /* 0x02 */
+    int nColor;                         /* 0x04 */
+    short nW;                           /* 0x08 */
+    short nH;                           /* 0x0A */
+    char *pTitle;                       /* 0x0C */
+    char nState;                        /* 0x10 */
+    char pad11[3];
+    void (*pFunc)(void);                /* 0x14 */
+    void *pMsg;                         /* 0x18 */
+    char pad1C[0x194 - 0x1C];
+} SELWIN;
+
+/* The parameter block MenuSelectWindow reads through pMsg. */
+typedef struct {
+    char pad00[2];
+    short nColumns;                     /* 0x02 */
+    int nSel;                           /* 0x04 */
+    char pad08[0x10 - 0x08];
+    SPROW *pRows;                       /* 0x10 */
+} SELPARAM;
+
+typedef struct {
+    unsigned char nState;               /* 0x000 */
+    unsigned char bReady;               /* 0x001 */
+    char pad002[2];
+    short nW;                           /* 0x004 */
+    short nH;                           /* 0x006 */
+    int nColor;                         /* 0x008 */
+    int bVisible;                       /* 0x00C */
+    SELWIN win;                         /* 0x010 */
+    char pad1A4[0x1A4 - 0x1A4];
+    SELPARAM sel;                       /* 0x1A4 */
+    char pad1B8[0x79C - 0x1B8];
+    SPROW row[4];                       /* 0x79C */
+} UMN_MENU;
+
+extern void MenuSelectWindow(void);
+
+/* TODO: PARKED at 29 diffs of 190 words -- the length, every opcode but
+ * two, and the whole control-flow shape are correct.  What is left is one
+ * register ROTATION and the two window-pointer instructions:
+ *
+ *  - the loop's three address givs are a 3-cycle away from the original
+ *    (orig a0 = the stride-1 giv at +1956, a2 = the stride-12 giv at
+ *    +1956, a1 = the stride-12 giv at +1948; we get a1/a0/a2), and the
+ *    same one-slot rotation swaps t0/t1 between the UmnWork base and the
+ *    `w+12' base.  Every other loop instruction is identical.
+ *  - the original keeps &w->win in a CALLEE-SAVED $s2 shared by states 20
+ *    and 21, yet still stores win.nState through $s1 in state 20.  A
+ *    pointer local reproduces the shared $s2 only if state 20 uses it
+ *    TWICE; with a single use gcc propagates it and the block falls back
+ *    to `addiu a0,s1,16' (189 words, the sd/ld $s2 pair vanishes).  So
+ *    `pWin->nState = 3' buys the register at the cost of that one store's
+ *    base, and the state-21 `lh' pair schedules the other way round.
+ *
+ * Swept without closing it: all six orders of the pRows/nSel/nState=1
+ * stores in state 20 (the 4th, nSel-first, order is worth 14 diffs and is
+ * the one kept); bVisible=1 before the loop, after the row terminator,
+ * and stored by name rather than through pVis; the row stores written as
+ * `w->row[i].X' throughout (191 words), all through one SPROW pointer
+ * (185), and every 2-of-3 split of pText/bGray between a pointer and the
+ * indexed form -- only "bGray=1 through the pointer, pText and the two
+ * bGray=0 by index" reaches this length; `if (i != 0)' first instead of
+ * `if (i == 0)'; both polarities of the nHi test; pGray assigned per-arm
+ * instead of at the top of the loop body (192 words); pVis block-scoped;
+ * and `int i' declared before and after pWin.  The permuter cannot be
+ * used here -- permute_setup.py cannot assemble overlay functions.
+ *
+ * Database screen: the three-row "Menu" window (Gnosis / Keywords /
+ * Cancel) that slides in from the right once the screen reaches page 17.
+ * The Gnosis row is greyed out until the player has actually met one.
+ *
+ * The window's own nState runs 0 -> 10 (wait for the page) -> 20 (build
+ * the row table and prime the window) -> 21 (slide in) -> 30 (accept
+ * input) -> 40 (slide out). */
+void tskUmnDataBaseMenu(TSK_TASK *pTask, UMN_MENU *w)
+{
+    static char *menu00[] = { "Gnosis", "Keywords", "Cancel", 0 };
+    short nTarget;
+    short nTargetOut;
+    int i;
+    /* One pointer shared by states 20 and 21: the original keeps it in a
+     * callee-saved register across both arms (see LEVERS.md). */
+    SELWIN *pWin;
+    /* The original addresses the row terminator off &bVisible; naming the
+     * flag through a pointer is what shares that base. */
+    int *pVis;
+
+    if (UmnWork.nScene != 2) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nW = 528;
+        w->nH = 48;
+        w->nColor = 0x00FFFFF0;
+        w->bVisible = 0;
+        WindowDXSet((WINDOWDX *)&w->win);
+        w->win.nColor = w->nColor;
+        w->win.nW = 125;
+        w->win.nH = 78;
+        w->sel.nColumns = 2;
+        w->win.pTitle = "Menu";
+        w->win.pFunc = MenuSelectWindow;
+        w->win.pMsg = &w->sel;
+        w->sel.pRows = 0;
+        w->nState = 0;
+        w->bReady = 0;
+        break;
+    case 2:
+        switch (w->nState) {
+        case 0:
+            w->bReady = 0;
+            w->nState = 10;
+            /* fallthrough: the page test runs on the same frame */
+        case 10:
+            if (UmnWork.nPage == 17) {
+                w->nState = 20;
+            }
+            break;
+        case 20:
+            for (i = 0; i < 3; i++) {
+                char *pGray = &w->row[i].bGray;
+
+                w->row[i].pText = menu00[i];
+                if (i == 0) {
+                    if (UmnWork.u.ex.nHi == 0) {
+                        *pGray = 1;
+                    } else {
+                        w->row[i].bGray = 0;
+                    }
+                } else {
+                    w->row[i].bGray = 0;
+                }
+            }
+            pVis = &w->bVisible;
+            *pVis = 1;
+            w->row[i].pText = 0;
+            w->win.nX = 528;
+            w->win.nY = 176;
+            w->sel.nSel = UmnWork.nDataBaseSel;
+            w->sel.pRows = w->row;
+            pWin = &w->win;
+            w->win.nState = 1;
+            WindowDXMain((WINDOWDX *)pWin);
+            pWin->nState = 3;
+            w->bReady = 1;
+            w->nState = 21;
+            break;
+        case 21:
+            nTarget = 192;
+            pWin = &w->win;
+            MoveSlide(&pWin->nX, &nTarget, 3.0f);
+            if (pWin->nX == nTarget) {
+                w->nState = 30;
+            }
+            break;
+        case 30:
+            w->sel.nSel = UmnWork.nDataBaseSel;
+            if (UmnWork.nPage != 17) {
+                w->nState = 40;
+            } else {
+                UmnWork.nUiLock = 0;
+            }
+            break;
+        case 40:
+            nTargetOut = -125;
+            if ((UmnWork.nPage >> 4) == 5) {
+                w->bReady = 0;
+                w->win.nX = -125;
+            } else {
+                MoveSlide(&w->win.nX, &nTargetOut, 3.0f);
+                if (w->win.nX == nTargetOut) {
+                    w->nState = 0;
+                    w->bVisible = 0;
+                }
+            }
+            break;
+        }
+        break;
+    }
+    if (w->bReady) {
+        if (w->bVisible) {
+            WindowDXMain((WINDOWDX *)&w->win);
+        }
     }
 }
