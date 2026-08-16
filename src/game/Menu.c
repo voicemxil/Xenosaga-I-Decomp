@@ -4934,7 +4934,9 @@ typedef struct {
     short nX;                  /* 0x04 */
     short nY;                  /* 0x06 */
     int nColor;                /* 0x08 */
-    char pad0C[0x44 - 0x0C];
+    char pad0C[0x18 - 0x0C];
+    char *pText;               /* 0x18 */
+    char pad1C[0x44 - 0x1C];
 } EMESSAGE;
 
 extern void eMessageSet(EMESSAGE *pMsg, char *pText);
@@ -5994,7 +5996,7 @@ void MenuSystemInfoMain(void)
 
 /* Item-name record returned by MenuTextGet */
 typedef struct {
-    char pad00[4];
+    char *pShort;              /* 0x00 */
     char *pName;               /* 0x04 */
 } MENUTEXTREC;
 
@@ -6609,4 +6611,98 @@ void MenuSkillListChange00(void)
     WindowSPSetSelect(win, &D_0036C200[MenuWork.b31 * 5]);
     win->b26 = 4;
     WindowSPSelect(win, 0);
+}
+
+/* TODO: near-miss (75 diffs, 136 orig vs 139 built) - the window setup, the
+   four-message init loop, the page test and the three-slot draw loop are all
+   recovered, and the draw loop now has the retail's two induction variables
+   (the entry base twelve bytes below the message, advanced 68 bytes at a
+   time, plus a separate EMESSAGE walker for the eMessageMain argument -
+   using one walker and &e->msg costs an addiu per iteration, and letting
+   MENU_PAS_ENTRY++ do the stepping gives 80 not 68). What is left is a
+   whole-function callee-saved rotation seeded by &w->win landing in $s3
+   where the retail build has $s5, plus three instructions in the loop's
+   exit shape (gcc rotates the loop and re-tests the head). */
+/* Skill screen "Set Skills" panel: up to three equipped-skill lines plus a
+   fixed slot-number caption */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    char pad001[3];
+    int nColor;                /* 0x004 */
+    WINDOWDX win;              /* 0x008 */
+    EMESSAGE msg[4];           /* 0x19C */
+} MENU_SKILL_SETLIST_WORK;
+
+extern MENU_SKILL_SETLIST_WORK *MenuSkillSetList;
+
+void MenuSkillSetListMain(void)
+{
+    static char *msg00[] = { " 1\241\246\n 2\241\246\n 3\241\246" };
+    MENU_SKILL_SETLIST_WORK *w;
+    MENU_PAS_ENTRY *e;
+    EMESSAGE *pm;
+    short *pSet;
+    short nTarget;
+    int nY;
+    int i;
+
+    w = MenuSkillSetList;
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.nX = -222;
+        w->win.pTitle = "Set Skills";
+        w->win.nColor = w->nColor;
+        w->win.nY = 280;
+        w->win.nW = 209;
+        w->win.nH = 78;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        for (i = 0; i < 4; i++) {
+            eMessageSet(&w->msg[i], 0);
+            w->msg[i].nFont = 32;
+            w->msg[i].nColor = w->nColor + 2;
+        }
+        w->nState = 2;
+        w->msg[3].pText = msg00[0];
+    case 2:
+        nTarget = -222;
+        if (MenuWork.state == 32) {
+            nTarget = 16;
+        } else if (MenuWork.state == 64) {
+            nTarget = 16;
+        }
+        MoveSlide(&w->win.nX, &nTarget, 3.0f);
+        WindowDXMain(&w->win);
+        pSet = (short *)((char *)func_A191C0_2(MenuWork.bChr) + 166);
+        nY = 0;
+        /* The retail loop walks the same twelve-bytes-below-the-message
+           entry base the help bars use, so the field stores and the
+           eMessageMain argument come from two givs off one induction. */
+        e = (MENU_PAS_ENTRY *)((char *)w->msg - 12);
+        pm = w->msg;
+        for (i = 2; i >= 0; i--) {
+            if (*pSet == 0) {
+                break;
+            }
+            e->msg.nX = w->win.nX + 43;
+            e->msg.nY = w->win.nY + nY + 3;
+            e->msg.pText =
+                ((MENUTEXTREC *)MenuTextGet(0x80000 + *(unsigned short *)pSet))
+                    ->pShort;
+            eMessageMain(pm);
+            pm++;
+            e = (MENU_PAS_ENTRY *)((char *)e + 68);
+            nY += 24;
+            pSet++;
+        }
+        w->msg[3].nX = w->win.nX + 3;
+        w->msg[3].nY = w->win.nY + 3;
+        eMessageMain(&w->msg[3]);
+        break;
+    default:
+        return;
+    }
 }
