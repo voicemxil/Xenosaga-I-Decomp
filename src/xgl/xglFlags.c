@@ -1,45 +1,61 @@
+#include "matching.h"
 /* Bit-packed persistent flag accessors */
 
 int xglFlagsGet(int, int);
 extern unsigned char SaveData[] __attribute__((section(".data")));
 extern unsigned char D_00491824[];
 
-/* TODO: near-match (41/48 words) - bit-packed field read/modify/write via
-   stack scratch buffer; nOld extraction (chunk>>shift)&mask vs. the final
-   dsll32/dsra32 sign-extend schedules differently than the original, which
-   ANDs-then-sign-extends where ours sign-extends-then-ANDs. Logic is
-   correct (matches xglFlagsGet's mirror-image pattern below); only
-   instruction scheduling differs. LOGIC class per triage.py. */
+/* TODO: near-match (37/48 words, 11 differing).
+   Fixed this session: the byte loops index D_00491824[nOfs + i] and
+   ((unsigned char *)&nChunk)[i] directly -- a `p` pointer local kills
+   retail's per-preheader lui/addiu rematerialisation, and a `pByte`
+   local costs an extra `move t4,sp`.  The two PINs are the register
+   tie-break (nShift $9, nOld $7); without them every register in the
+   function is shifted up by one (38 diffs).
+
+   RESIDUE: retail masks BEFORE the int truncation --
+       dsrav v0,v0,t1 ; and v0,v0,t2 ; dsll32 a3,v0 ; dsra32 a3,a3
+   while gcc folds trunc(x & m) -> trunc(x) & trunc(m) and emits
+       dsll32 a3,a3 ; dsra32 a3,a3 ; and a3,a3,t2
+   plus a v0/v1 rotation in the read-modify-write that follows from it.
+   Swept, all still 11: implicit conversion; (long long)/(unsigned int)/
+   (long long)(unsigned int) casts on mask; `long long mask`;
+   `unsigned long long mask`; `unsigned long long nChunk`; a named
+   long long temp with LAUNDER / LAUNDER_V (both +16 bytes); a local
+   `long long v = nChunk` copy feeding both the extract and the RMW;
+   a PIN'd long long temp (+16 bytes); computing the new chunk into a
+   temp first (31 diffs); swapping the extract and the RMW (31 diffs).
+   All four statement orderings of nShift/mask/nBytes/nOfs are
+   codegen-identical -- gcc reorders them freely.
+   No source spelling found that blocks the combine fold. */
 int xglFlagsSet(int nFlag, int nSize, int nValue)
 {
-    unsigned char *p;
     long long nChunk;
-    unsigned char *pByte = (unsigned char *)&nChunk;
-    int nShift;
+    PIN(int nShift, "$9");
     int nBytes;
     int i;
     int mask;
-    int nOld;
+    PIN(int nOld, "$7");
+    int nOfs;
 
     nShift = nFlag & 7;
     mask = (1 << nSize) - 1;
     nBytes = (nSize + nShift + 7) >> 3;
-    p = &D_00491824[nFlag >> 3];
+    nOfs = nFlag >> 3;
 
     for (i = 0; i < nBytes; i++) {
-        pByte[i] = p[i];
+        ((unsigned char *)&nChunk)[i] = D_00491824[nOfs + i];
     }
 
     nOld = (int)((nChunk >> nShift) & mask);
     nChunk = (nChunk & ~((long long)mask << nShift)) | ((long long)(nValue & mask) << nShift);
 
     for (i = 0; i < nBytes; i++) {
-        p[i] = pByte[i];
+        D_00491824[nOfs + i] = ((unsigned char *)&nChunk)[i];
     }
 
     return nOld;
 }
-
 int xglFlagsSet1(int nFlag, int nValue) { return xglFlagsSet(nFlag, 1, nValue); }
 int xglFlagsSet2(int nFlag, int nValue) { return xglFlagsSet(nFlag, 2, nValue); }
 int xglFlagsSet4(int nFlag, int nValue) { return xglFlagsSet(nFlag, 4, nValue); }
