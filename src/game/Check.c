@@ -349,3 +349,24 @@ int Check_EnemyFound(void)
     }
     return 0;
 }
+
+extern float Get_Distance3D(float *, float *);
+extern float Get_Angle(float *, float *);
+extern int Check_Angle(float, float, float);
+extern float D_004D81C8;
+
+/* Is b inside the cone of half-width fWidth (in degrees) centred on
+   fAngle at a, and no further than fDist? */
+int Check_InsideFan_Wooo(float *a, float *b, float fAngle, float fDist,
+                         float fWidth)
+{
+    float angle;
+    float half;
+
+    if (fDist < Get_Distance3D(a, b)) {
+        return 0;
+    }
+    angle = Get_Angle(a, b);
+    half = fWidth / 180.0f * D_004D81C8 * 0.5f;
+    return Check_Angle(angle, fAngle - half, fAngle + half) != 0;
+}
