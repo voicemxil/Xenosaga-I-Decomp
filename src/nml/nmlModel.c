@@ -3184,3 +3184,59 @@ void FLUSH_MODELSYSTEM(void)
     }
     s_nMainCameraWarp = 0;
 }
+
+float s_fSortOffset;
+
+/* One entry of the alpha-sorted block list. */
+typedef struct {
+    int nUnk00;
+    float fDepth;
+    int nUnk08;
+    int nUnk0C;
+} ALPHA_GROUP;
+
+extern ALPHA_GROUP s_aAlphaGroup[];
+
+void _CurSetMatrix(void *pMtx);
+void _CurSetViewScaleTrans(void *pScale, void *pTrans);
+float _VectorLengthSQ(void *pA, void *pB);
+float tanf(float x);
+
+/* Record the current model's sort depth in the alpha-group list. */
+void AlphaGroupSortEntry(void *pModel)
+{
+    void *pCam = xglStudioSelectGetActiveCamera(s_inLayout.nWindow);
+    float fLen = 0.0f;
+
+    if (pCam != 0) {
+        fLen = _VectorLengthSQ((char *)pCam + 208, pModel);
+    }
+    s_aAlphaGroup[s_nAlphaGroup].fDepth = fLen + s_fSortOffset;
+}
+
+/* Screen-space depth of pPos in the studio camera nWindow.
+ *
+ * TODO: near-miss, 3 words SHORT, NOT registered. Retail keeps TWO
+ * callee-saved FP registers -- $f21 for the fScale argument and $f20 for
+ * the 0.0 default -- and rematerialises the zero into $f20 after the
+ * first call; gcc here keeps only fScale callee-saved and rematerialises
+ * the zero straight into $f0, so the frame is 48 instead of 64 and the
+ * two latency nops before the `div.s` vanish. Swept: the zero in the
+ * declaration initialiser, assigned after the call, and hoisted into its
+ * own named local (the constant-range lever) -- all three give the same
+ * 37 words. */
+float deapth_for_studio(int nWindow, void *pPos, float fScale)
+{
+    int aClip[4];
+    float fRet = 0.0f;
+    void *pCam = xglStudioSelectGetActiveCamera(nWindow);
+
+    if (pCam != 0) {
+        _CurSetMatrix((char *)pCam + 1136);
+        _CurSetViewScaleTrans((char *)pCam + 128, (char *)pCam + 112);
+        _CurRotTransPersClip(aClip, (float *)pPos);
+        fRet = (float)aClip[2] * fScale
+             / tanf(*(float *)((char *)pCam + 148) * 0.5f);
+    }
+    return fRet;
+}
