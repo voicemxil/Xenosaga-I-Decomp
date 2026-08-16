@@ -2946,3 +2946,234 @@ void UmnSimulation(void)
     xglFontDebugPrintf(32, 208, D_00A132F8);
     xglFontDebugHex(0, 64, UmnWork.nPage, 2);
 }
+
+/* --- "manzai" (comedy skit) caption window ---------------------------- */
+
+typedef struct {
+    unsigned short nX;                  /* 0x00 */
+    unsigned short nY;                  /* 0x02 */
+    int nColor;                         /* 0x04 */
+    char nW;                            /* 0x08 */
+    char nH;                            /* 0x09 */
+    char nUnkA;                         /* 0x0A */
+    signed char nAlpha;                 /* 0x0B */
+} MANZAIBOX;
+
+typedef struct {
+    short nId;                          /* 0x00 */
+    char pad02[2];
+    char *pText;                        /* 0x04 */
+} MANZAITEXT;
+
+typedef struct {
+    unsigned char nMode;                /* 0x00 */
+    unsigned char nType;                /* 0x01 */
+    unsigned char bOpen;                /* 0x02 */
+    char pad03[1];
+    unsigned short nX;                  /* 0x04 */
+    unsigned short nY;                  /* 0x06 */
+    MANZAITEXT *pText;                  /* 0x08 */
+    MANZAIBOX box[6];                   /* 0x0C */
+    char pad54[4];
+    int nUnk58;                         /* 0x58 */
+    char pad5C[4];
+    struct {
+        char pad00[4];
+        short nX;                       /* 0x64 */
+        short nY;                       /* 0x66 */
+        int nColor;                     /* 0x68 */
+        char pad0C[0x1C - 0x0C];
+    } msg;                              /* 0x60 */
+    unsigned char n7C;                  /* 0x7C */
+} MANZAIWIN;
+
+/* PARKED at 53/271 differing words.  Everything is the right instruction
+   multiset; the residue is three scheduler/allocator tie-breaks that no
+   source shape reached:
+     - init loop setup: gcc emits `li 5' (the down-counter) before the
+       array base; the original emits it after.  Swapping the source
+       statements, splitting the declarations and moving the assignment
+       all leave it where it is.
+     - case 10's row loop: the pointer lands in $a0 and the two constants
+       in $a3/$a2, where retail has $v1/$a2/$a0, and the counter's
+       increment schedules before the store instead of after.
+     - cases 11/21: `&w->box[4].nX' and `nOld' get $s1/$s0 where retail
+       has $s0/$s1, and the aTarget address computation schedules late.
+       Same instructions, different order -- a --swap-adjacent/--rotate
+       job of about eight sites per arm, not worth the portability debt.
+   Shapes already tried and rejected: pointer-vs-index for both loops,
+   nOld/nNew/nTarget declaration order (all six permutations), an
+   explicit `unsigned short *pX' held across MoveSlide (57, worse),
+   hoisting the target read, and swapping the box[2]/box[3] stores. */
+extern int UmnManzaiFlag[];
+extern MANZAITEXT *UmnManzaiText[];
+extern void eMessageTextChange(void *pMsg, char *pText);
+extern char D_00A12080[];   /* "man_win %2d" */
+
+void tskUmnManzaiWin(TSK_TASK *t, MANZAIWIN *w)
+{
+    if (UmnWork.nScene != 1) {
+        t->nState = -1;
+        return;
+    }
+    if (t->nState == 0) {
+        int i;
+        int n;
+
+        w->nMode = 0;
+        if (w->nType == 1) {
+            w->nX = 0;
+            w->nY = 16;
+        } else {
+            w->nX = 0x30;
+            w->nY = 0x160;
+        }
+        n = 5;
+        i = 0;
+        for (; n >= 0; n--) {
+            w->box[i].nColor = 0xFFFFF0;
+            w->box[i].nUnkA = 0;
+            w->box[i].nH = 0;
+            w->box[i].nW = 0;
+            i++;
+        }
+        w->box[1].nAlpha = 0x20;
+        w->box[3].nAlpha = -0x80;
+        w->box[0].nAlpha = 0x20;
+        w->box[2].nAlpha = -0x80;
+        w->box[5].nAlpha = -1;
+        w->box[4].nAlpha = -1;
+        w->nUnk58 = 0;
+        eMessageSet(&w->msg, 0);
+        w->n7C = 2;
+        w->bOpen = 0;
+        w->msg.nColor = 0xFFFFF2;
+        w->pText = UmnManzaiText[0];
+        return;
+    }
+    switch (w->nMode) {
+    case 0:
+        w->nMode = 1;
+        /* fall through */
+    case 1:
+        if ((UmnManzaiFlag[0] & 0x30) == 0x30) {
+            if (w->pText->nId == w->nType) {
+                w->nMode = 10;
+            } else {
+                w->nMode = 2;
+            }
+        }
+        /* fall through */
+    case 2:
+        UmnManzaiFlag[0] &= ~0x200;
+        if (UmnManzaiFlag[0] & 8) {
+            MANZAITEXT *p = UmnManzaiText[0];
+
+            if (p->nId == w->nType) {
+                w->pText = p;
+                w->nMode = 10;
+            } else {
+                w->nMode = 0x14;
+            }
+            UmnManzaiFlag[0] |= 0x200;
+        }
+        if (UmnManzaiFlag[0] & 0x40) {
+            w->nMode = 0x14;
+        }
+        break;
+    case 10:
+        if (w->bOpen == 0) {
+            int i;
+            short *p;
+
+            p = &w->box[0].nY;
+            for (i = 0; i < 6; i++) {
+                int nY;
+
+                if (w->nType == 1) {
+                    p[-1] = 0;
+                } else {
+                    p[-1] = 0x200;
+                }
+                nY = w->nY;
+                if (i & 1) {
+                    nY += 0x50;
+                    /* without the fence gcc if-converts this to movn */
+                    LAUNDER(nY);
+                }
+                p[0] = nY;
+                p += 6;
+            }
+        }
+        w->nMode = 11;
+        w->bOpen = 1;
+        /* fall through */
+    case 11:
+        {
+            short aTarget[2] = {0x1D0, 0x30};
+            short nOld;
+            int nNew;
+            int nTarget;
+            int nX;
+
+            nOld = w->box[4].nX;
+            MoveSlide(&w->box[4].nX, &aTarget[w->nType - 1], 3.0f);
+            nNew = w->box[4].nX;
+            nTarget = aTarget[w->nType - 1];
+            w->box[5].nX = nNew;
+            nX = w->box[2].nX + (nNew - nOld);
+            w->box[2].nX = nX;
+            w->box[3].nX = nX;
+            if ((short)w->box[4].nX == nTarget) {
+                w->nMode = 2;
+                eMessageTextChange(&w->msg, w->pText->pText);
+                eMessageModeChange(&w->msg, 0x22);
+            }
+        }
+        break;
+    case 20:
+        w->nMode = 0x15;
+        eMessageModeChange(&w->msg, 0x70);
+        /* fall through */
+    case 21:
+        {
+            short aTarget[2] = {0, 0x200};
+            short nOld;
+            int nNew;
+            int nTarget;
+            int nX;
+
+            nOld = w->box[4].nX;
+            MoveSlide(&w->box[4].nX, &aTarget[w->nType - 1], 3.0f);
+            nNew = w->box[4].nX;
+            nTarget = aTarget[w->nType - 1];
+            w->box[5].nX = nNew;
+            nX = w->box[2].nX + (nNew - nOld);
+            w->box[2].nX = nX;
+            w->box[3].nX = nX;
+            if ((short)w->box[4].nX == nTarget) {
+                if (UmnManzaiFlag[0] & 0x40) {
+                    t->nState = -1;
+                    return;
+                }
+                w->bOpen = 0;
+                w->nMode = 2;
+            }
+        }
+        break;
+    }
+    if (w->bOpen) {
+        int n;
+
+        endPrintExtFunc(0, 3, &w->box[0]);
+        if (w->nType == 1) {
+            n = w->nX + 0x16;
+        } else {
+            n = w->nX + 2;
+        }
+        w->msg.nX = n;
+        w->msg.nY = w->nY + 4;
+        eMessageMain(&w->msg);
+    }
+    xglFontDebugPrintf(0x80, w->nType * 8 + 0x20, D_00A12080, w->nMode);
+}
