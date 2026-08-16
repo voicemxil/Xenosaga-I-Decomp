@@ -529,3 +529,193 @@ void scDestroyScript2(int slot, int a1) {
     }
     scDeleteTask(slot, a1);
 }
+
+/* ------------------------------------------------------------------ *
+ * Script command dispatch: the per-object wait/move state machines and
+ * the opcode handlers that drive them.
+ * ------------------------------------------------------------------ */
+
+typedef struct {
+    unsigned short flags;      /* 0x00 */
+    char pad02[6];
+    int cmdBuf[15];            /* 0x08 */
+    short eftNo;               /* 0x44 */
+    char pad46[14];
+    short field54;             /* 0x54 */
+    char pad56[4];
+    unsigned short waitState;  /* 0x5A */
+    unsigned short moveState;  /* 0x5C */
+    char pad5E[2];
+    short field60;             /* 0x60 */
+    char pad62[4];
+    short field66;             /* 0x66 */
+    short field68;             /* 0x68 */
+    char pad6A[6];
+    int field70;               /* 0x70 */
+} SCTASK;
+
+int scWaitParseNopScript(void) { return 1; }
+
+/* The gosub return-address stack is cmdBuf[]; field54 is its depth. As in
+ * scGetCmdScript, field54 is read once signed (for the depth test) and once
+ * through (unsigned short) (for the store and the subscript), which is what
+ * gives the original's lh+lhu pair rather than a single load. */
+int scONGOSUBScript(SCTASK *o)
+{
+    int adr = scONGOSUB((SCOBJ *)o);
+    int depth = o->field54;
+    int idx = (unsigned short)o->field54;
+    if (depth < 3) {
+        idx = idx + 1;
+        o->field54 = idx;
+        o->cmdBuf[(short)idx] = adr;
+    }
+    return 1;
+}
+
+extern int _nowEvent;
+extern short _scMslCate[];
+extern void srsAnalyzeEftNo(short no, void *out, short *cate);
+
+int scMISSILEScript(SCTASK *o)
+{
+    int work[4];
+    int adr = (int)scGetAdrImmScript((SCOBJ *)o);
+    if (adr != 0 && _nowEvent == 0) {
+        o->field70 = adr;
+        o->moveState = 1;
+        o->flags |= 0x20;
+        o->field66 = 0;
+        o->field68 = 0;
+        srsAnalyzeEftNo(o->eftNo, work, _scMslCate);
+    }
+    return 1;
+}
+
+int scMISSILE3Script(SCTASK *o)
+{
+    int work[4];
+    int delay = scGetNumScript((SCOBJ *)o);
+    int adr = (int)scGetAdrImmScript((SCOBJ *)o);
+    if (adr != 0) {
+        short lead = -delay * _nowEvent;
+        o->field70 = adr;
+        o->moveState = 1;
+        o->flags |= 0x20;
+        o->field68 = 0;
+        o->field66 = lead;
+        srsAnalyzeEftNo(o->eftNo, work, _scMslCate);
+    }
+    return 1;
+}
+
+extern int sefIsDeadSchduler(int id);
+
+int scWaitParseEftScript(SCTASK *o)
+{
+    int done = sefIsDeadSchduler(o->field60);
+    if (done != 0) {
+        short no = o->eftNo;
+        if (o->flags & 0x100) {
+            sdvSetAmbState2(2, no);
+        } else {
+            sdvSetAmbState(2, no);
+        }
+    }
+    return (short)done;
+}
+
+extern int scWaitParseCntScript();
+extern int scWaitParseEveScript();
+extern int scWaitParseMovieScript();
+extern int scWaitParseMovScript();
+extern int scWaitMissileScript();
+
+/* State out of range resets the machine; otherwise the handler decides.
+ * A nonzero handler result clears the "waiting" flag bit and is returned
+ * narrowed to short. */
+int scWaitParseScript(SCTASK *o)
+{
+    static int (*waitHandlerTbl[])() = {
+        scWaitParseNopScript, scWaitParseCntScript, scWaitParseEveScript,
+        scWaitParseEftScript, scWaitParseMovieScript, scWaitParseMovScript,
+    };
+    short r;
+    if (o->waitState >= 6) {
+        o->waitState = 0;
+        return 1;
+    }
+    r = waitHandlerTbl[(short)o->waitState](o);
+    if (r != 0) {
+        o->flags &= 0xFFEF;
+    }
+    return r;
+}
+
+int scMoveParseScript(SCTASK *o)
+{
+    static int (*moveHandlerTbl[])() = {
+        scWaitParseNopScript, scWaitMissileScript,
+    };
+    short r;
+    if (o->moveState >= 2) {
+        o->moveState = 0;
+        return 1;
+    }
+    r = moveHandlerTbl[(short)o->moveState](o);
+    if (r != 0) {
+        o->flags &= 0xFFDF;
+    }
+    return r;
+}
+
+extern int scParseScript(SCTASK *o);
+
+/* Flags==0 means the task is free; bit 2 means suspended. Bit 4 selects the
+ * wait state machine, bit 5 the move one; the wait handler may clear bit 4,
+ * in which case the parser is skipped for this frame. */
+int scDispatchScript(SCTASK *o)
+{
+    unsigned short f = o->flags;
+    if (f == 0) {
+        return 0;
+    }
+    if (f & 4) {
+        return 4;
+    }
+    if (f & 0x10) {
+        scWaitParseScript(o);
+        if (o->flags & 0x10) {
+            goto move;
+        }
+    }
+    scParseScript(o);
+move:
+    if (o->flags & 0x20) {
+        scMoveParseScript(o);
+    }
+    return 1;
+}
+
+extern int rand(void);
+
+int scRRNDScript(SCOBJ *o)
+{
+    int reg = scGetCmdScript(o);
+    int x = scGetNumScript(o);
+    int y = scGetNumScript(o);
+    short range;
+    int v;
+    if (y < x) {
+        int t = y;
+        y = x;
+        x = t;
+    }
+    range = y - x;
+    v = 0;
+    if (range != 0) {
+        v = (short)(rand() % range);
+    }
+    scSetReg(reg, v + x);
+    return 1;
+}

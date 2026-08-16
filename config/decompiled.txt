@@ -2612,3 +2612,6 @@ sceCdGetDiskType = 0x0020DF28, 0x98; // sceCd.c
 sceCdGetError = 0x0020DFC0, 0x98; // sceCd.c
 subTreeLineDraw_type_1 = 0x002BBFB8, 0x64; // sub.c
 MenuShopSortSet = 0x002A36D0, 0x1C8; // Menu.c
+scWaitParseNopScript = 0x002EBD90, 0x8; // sc.c
+scONGOSUBScript = 0x002EAAE0, 0x54; // sc.c
+scWaitParseEftScript = 0x002EBDF0, 0x74; // sc.c
