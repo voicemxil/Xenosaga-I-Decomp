@@ -690,11 +690,17 @@ void TMENU_updateDefault(TMENU *t)
     if (!(nFlags & 2)) {
         switch (t->h14) {
         case 16:
-            t->nFlags |= 2;
-            p = t->pComp[1];
-            t->h30 = 0;
-            p->u10.n |= 0x100;
-            p->u14.n = 0x808000;
+            {
+                /* Block-local: a function-wide EWCOMP* local spans the
+                 * other arms and the allocator then keeps this arm off
+                 * retail's $a0.  Scoping it here recovers the register. */
+                EWCOMP *pOpen = t->pComp[1];
+
+                t->nFlags |= 2;
+                t->h30 = 0;
+                pOpen->u10.n |= 0x100;
+                pOpen->u14.n = 0x808000;
+            }
             return;
         case 1:
             t->nFlags |= 2;
