@@ -52,31 +52,25 @@ void xglClockRead(XGLDAYTIME *pTime)
 extern unsigned short D_00491660[];   /* days in each month (Feb = 28) */
 extern unsigned short D_00491676[];   /* cumulative days before month m */
 
-/* TODO: near-miss (32 words, pure REGISTER rotation). Structure, term
- * grouping and every opcode match; the whole GPR assignment is rotated
- * one slot (orig gives the accumulator $a1 with highest priority, ours
- * allocates it last -> $t1, shifting hour/const/day/min down). Tried:
- * in-place += chain (fixed the addu shapes), unsigned year (srl), nDaySec
- * constant-range lever, declaration order. Wave 3: systematic
- * register-asm pinning (single pins and the full orig set, with and
- * without zero-code tied passthroughs) -- every pinned variant inserts
- * one extra reload word (176 vs 172 bytes) and hoists the month sltiu
- * from its late slot up into the load block; the closest pinned shape
- * still shifts every word after [5] by one. The rotation is an RA
- * priority artifact pins cannot reproduce without changing code.
- * Priority-lever hunt (coordinator directive): "+r" empty-asm touches
- * to inflate REG_N_REFS regress to 35-42d (gcc 2.96 sched treats every
- * ASM_OPERANDS as a barrier, splitting the compound chains); statement
- * reorders, merged/split assignments and ref-count changes ALL produce
- * byte-identical 32d output -- combine canonicalizes the arithmetic DAG
- * before RA, so user-variable granularity does not survive to the
- * allocator and no source spelling reaches the tie-break. Distinction
- * for the rotation family: rotations rooted in ADDRESS/COPY pseudos
- * (xglDmaMFIFOSetup, xglSoundStreamMute, xglMakeSePacket, xglMcRequest)
- * are solvable with the zero-code tied passthrough because the pinned
- * point is a real materialization; rotations inside a pure arithmetic
- * chain (here, xglMatrixRotV) are not reachable from source. */
-/* Convert a calendar date to seconds since 2000-01-01 */
+/* TODO: near-miss (25 words, was 32; pure REGISTER rotation of the
+ * lower half). Structure, term grouping and every opcode match; the
+ * remaining GPR assignment is rotated one slot (orig gives the
+ * accumulator $a1 with highest priority, ours allocates it last).
+ * Solved so far: reading the year-since-2000 through a second variable
+ * (see nY2000 below) is worth 7 words -- found by the decomp-permuter,
+ * NOT by hand.  Every hand sweep before it -- in-place += chains,
+ * unsigned year, nDaySec constant-range levers, declaration order,
+ * statement reorders, merged/split assignments, "+r" empty-asm touches
+ * to inflate REG_N_REFS -- came out byte-identical or worse, because
+ * combine canonicalizes the arithmetic DAG before RA and user-variable
+ * granularity does not survive to the allocator.  The lesson is that
+ * this class needs the permuter, not more hand sweeping.
+ * Family note: rotations rooted in ADDRESS/COPY pseudos
+ * (xglDmaMFIFOSetup, xglMcRequest) turned out to be reachable from
+ * source after all -- a LAUNDER on the base pointer immediately before
+ * the load, or a tied passthrough on the pointer, fences the schedule.
+ * Rotations inside a pure arithmetic chain (here, xglMatrixRotV) still
+ * are not. *//* Convert a calendar date to seconds since 2000-01-01 */
 unsigned int xglClockDayTime2UInt(XGLDAYTIME *pTime)
 {
     unsigned int nAcc;
@@ -98,11 +92,21 @@ unsigned int xglClockDayTime2UInt(XGLDAYTIME *pTime)
     nAcc += nHourTerm;
     nLeap = (nYear - 1997) >> 2;
     nYear -= 2000;
-    nAcc += pTime->nMinute * 60u;
-    if ((nYear & 3) == 0 && nMonth >= 3) {
-        nAcc += 86400u;
+    {
+        /* Reading the year-since-2000 through a SECOND variable is worth
+         * 7 words (32 -> 25): it splits the pseudo the leap test and the
+         * 31536000 multiply share, and the allocator then numbers the
+         * upper half of the chain the original's way.  Found by the
+         * decomp-permuter, not by hand -- every hand sweep of statement
+         * order and ref counts had come out byte-identical. */
+        unsigned int nY2000 = nYear;
+
+        nAcc += pTime->nMinute * 60u;
+        if ((nY2000 & 3) == 0 && nMonth >= 3) {
+            nAcc += 86400u;
+        }
+        return nAcc + (nLeap * nDaySec + nY2000 * 31536000u);
     }
-    return nAcc + (nLeap * nDaySec + nYear * 31536000u);
 }
 
 /* Convert seconds since 2000-01-01 back to a calendar date */
