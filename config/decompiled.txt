@@ -2750,3 +2750,4 @@ stream_check = 0x00226CA8, 0xB4; // xglSound.c
 TMENU_init = 0x0025ED60, 0x368; // TMENU.c
 create_file = 0x00227E68, 0xBC; // xglHdd.c
 videoCallback = 0x00221D30, 0x11C; // xglMovie.c
+ACT_DrawShadow = 0x0031A098, 0xEC; // ACT.c

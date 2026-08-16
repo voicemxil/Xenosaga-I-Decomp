@@ -1133,3 +1133,68 @@ void ACT_resetParent(ACTOR *pActor, ACTOR *pParent)
     }
     pActor->pParent = 0;
 }
+
+extern void DrawCircleShadow(ACTOR *);
+extern void DrawZeldaShadow(ACTOR *);
+extern void DrawDropCircle(ACTOR *);
+extern void DrawDropShadow(ACTOR *);
+extern void Footstep(ACTOR *);
+extern void *xglStudioGetLight2(void);
+
+/* Draw the actor's shadow, then its footstep decal.  The jump table
+   covers 0..10; everything else, and type 1, falls to the circle. */
+void ACT_DrawShadow(ACTOR *a)
+{
+    /* $a1: the quadword move's source address; gcc otherwise picks $v1. */
+    PIN(char *pLight, "$5");
+    char *pDst;
+
+    if (a->nFlags & 0x1000) {
+        return;
+    }
+    if (a->pMatrix == 0) {
+        return;
+    }
+    switch (a->nShadowType) {
+    default:
+        /* The default block is emitted FIRST, so it is written first:
+           gcc lays case blocks out in source order and the out-of-range
+           branch targets this one. */
+        DrawCircleShadow(a);
+        break;
+    case 0:
+        break;
+    case 2:
+        DrawZeldaShadow(a);
+        break;
+    case 3:
+        DrawDropCircle(a);
+        break;
+    case 4:
+        DrawDropShadow(a);
+        break;
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+    case 9:
+    case 10:
+        break;
+    }
+    if (a->nFlags & 0x8000) {
+        pLight = (char *)a + 0x510;
+    } else {
+        pLight = (char *)xglStudioGetLight2();
+    }
+    pLight += 32;
+    pDst = (char *)a + 0xA0;
+    /* PS2_ASM: 128-bit quadword move.  A mode(TI) assignment folds both
+       displacements into the lq/sq; the original holds each address in
+       its own register, which only the "r" constraints reproduce. */
+    __asm__ __volatile__(".set noreorder\n"
+        "lq $2, 0x0(%1)\n sq $2, 0x0(%0)\n"
+        ".set reorder" : : "r"(pDst), "r"(pLight) : "$2", "memory");
+    if ((a->nAlive & 0xF000) == 0 && (a->nFlags & 0x100) == 0) {
+        Footstep(a);
+    }
+}
