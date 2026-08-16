@@ -1,5 +1,51 @@
 /* Basic matrix helpers used by the game-side transform code. */
 
+void MATRIX_identity(float *m)
+{
+    float zero = 0.0f;
+    float one = 1.0f;
+
+    m[15] = one;
+    m[10] = one;
+    m[5] = one;
+    m[14] = zero;
+    m[13] = zero;
+    m[12] = zero;
+    m[11] = zero;
+    m[9] = zero;
+    m[8] = zero;
+    m[7] = zero;
+    m[6] = zero;
+    m[4] = zero;
+    m[3] = zero;
+    m[2] = zero;
+    m[1] = zero;
+    m[0] = one;
+}
+
+void MATRIX_identity4s(float *m)
+{
+    float zero = 0.0f;
+    float one = 1.0f;
+
+    m[15] = one;
+    m[11] = one;
+    m[10] = one;
+    m[7] = one;
+    m[5] = one;
+    m[3] = one;
+    m[14] = zero;
+    m[13] = zero;
+    m[12] = zero;
+    m[9] = zero;
+    m[8] = zero;
+    m[6] = zero;
+    m[4] = zero;
+    m[2] = zero;
+    m[1] = zero;
+    m[0] = one;
+}
+
 void MATRIX_transpose4(float *out, const float *in)
 {
     out[0] = in[0];
@@ -375,12 +421,12 @@ void MATRIX_rotate4(float *m, float angle, float x, float y, float z)
     m[12] = zero;
 
     m[0] = oneMinusCosine * (x * x) + cosine;
-    m[1] = oneMinusCosine * (x * y) + z * sine;
     m[2] = oneMinusCosine * (z * x) - y * sine;
+    m[1] = oneMinusCosine * (x * y) + z * sine;
     m[4] = oneMinusCosine * (x * y) - z * sine;
-    m[5] = oneMinusCosine * (y * y) + cosine;
     m[6] = oneMinusCosine * (y * z) + x * sine;
-    m[8] = oneMinusCosine * (z * x) + y * sine;
+    m[5] = oneMinusCosine * (y * y) + cosine;
     m[9] = oneMinusCosine * (y * z) - x * sine;
     m[10] = oneMinusCosine * (z * z) + cosine;
+    m[8] = oneMinusCosine * (z * x) + y * sine;
 }
