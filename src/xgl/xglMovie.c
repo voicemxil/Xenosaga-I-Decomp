@@ -13,7 +13,9 @@ typedef struct {
     char pad50[0x38];
     char *pBuf;          /* 0x88 */
     int nLeft;           /* 0x8C */
-    char pad90[8];
+    int nAudioTotal;     /* 0x90 */
+    unsigned char nAudioInit;/* 0x94 */
+    char pad95[3];
     unsigned char nErrCount;/* 0x98 */
     unsigned char nUnk99;/* 0x99 */
     unsigned char nUnk9A;/* 0x9A */
@@ -22,9 +24,11 @@ typedef struct {
     int nVideoSize;      /* 0xA0 */
     int nVideoWrite;     /* 0xA4 */
     int nVideoRead;      /* 0xA8 */
-    char padAC[0xC];
-    void *pIpuBuf;       /* 0xB8 */
-    void *pSpuBuf;       /* 0xBC */
+    char padAC[4];
+    char *pAudioBuf;     /* 0xB0 */
+    int nAudioSize;      /* 0xB4 */
+    int nAudioWrite;     /* 0xB8 */
+    int nAudioRead;      /* 0xBC */
     char padC0[9];
     char nUnkC9;         /* 0xC9 */
     unsigned char nUnkCA;/* 0xCA */
@@ -83,8 +87,8 @@ void xglMovieInfoInit(XGLMOVIEINFO *pInfo)
     int nInit = -1;
 
     xglCdStreamParamInit(pInfo);
-    pInfo->pIpuBuf = (void *)0x70000040;
-    pInfo->pSpuBuf = (void *)0x70001000;
+    pInfo->nAudioWrite = 0x70000040;
+    pInfo->nAudioRead = 0x70001000;
     pInfo->nUnk46 = nInit;
     pInfo->nUnk9A = 0;
     pInfo->nUnkC9 = nInit;
@@ -302,6 +306,8 @@ int videoCallback(int nCode, XGLMPEGPKT *pPkt, XGLMOVIEINFO *pInfo)
 {
     int nWrite;
     int nFree;
+    int nHi;
+    int nLo;
     int nSize;
     int nOver;
 
@@ -327,5 +333,48 @@ int videoCallback(int nCode, XGLMPEGPKT *pPkt, XGLMOVIEINFO *pInfo)
                pPkt->pData, nSize);
         pInfo->nVideoWrite += pPkt->nSize;
     }
+    return 1;
+}
+
+/* sceMpeg audio callback: strip the 44-byte WAV header from the first
+ * packet (and the 4-byte prefix from later ones), then append the PCM to
+ * the SPU stream ring, splitting it around the wrap */
+int audioCallback(int nCode, XGLMPEGPKT *pPkt, XGLMOVIEINFO *pInfo)
+{
+    unsigned char *p;
+    int nSize;
+    int nHead;
+    int nFree;
+    int nHi;
+    int nLo;
+
+    p = (unsigned char *)pPkt->pData;
+    nSize = pPkt->nSize;
+    if (pInfo->nAudioInit == 0) {
+        nHi = (p[19] << 24) + p[16];
+        nLo = (p[17] << 8) + (p[18] << 16);
+        pInfo->nAudioTotal = nHi + nLo;
+        pInfo->nAudioInit = 1;
+        nSize -= 44;
+        p += 44;
+    } else {
+        p += 4;
+        nSize -= 4;
+    }
+    nFree = pInfo->nAudioRead - pInfo->nAudioWrite;
+    if (nFree <= 0) {
+        nFree += pInfo->nAudioSize;
+    }
+    if (nSize >= nFree) {
+        return 0;
+    }
+    nHead = pInfo->nAudioSize - pInfo->nAudioWrite;
+    if (nHead >= nSize) {
+        memcpy(pInfo->pAudioBuf + pInfo->nAudioWrite, p, nSize);
+    } else {
+        memcpy(pInfo->pAudioBuf + pInfo->nAudioWrite, p, nHead);
+        memcpy(pInfo->pAudioBuf, p + nHead, nSize - nHead);
+    }
+    pInfo->nAudioWrite = (pInfo->nAudioWrite + nSize) % pInfo->nAudioSize;
     return 1;
 }
