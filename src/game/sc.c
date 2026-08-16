@@ -773,7 +773,12 @@ int scPRINTScript(SCOBJ *o)
 {
     int *cmd = &o->cmdBuf[0];
     char *s = 0;
-    int adr = cmd[o->field54];
+    /* Base-first addend: `cmd[i]` reassociates to offset+base (addu v0,v0,s1);
+       the original has base+offset, which only the explicit integer form
+       with the base written first produces. */
+    int *p0 = (int *)((int)cmd + o->field54 * 4);
+    int adr = *p0;
+    int *slot;
     int len;
     int step;
     if (adr != 0) {
@@ -782,7 +787,8 @@ int scPRINTScript(SCOBJ *o)
     len = strlen(s);
     step = (len & 1) ? len + 1 : len + 2;
     step = step / 2;
-    cmd[o->field54] = cmd[o->field54] + step;
+    slot = (int *)((int)cmd + (o->field54 << 2));
+    *slot = *slot + step;
     return 1;
 }
 
