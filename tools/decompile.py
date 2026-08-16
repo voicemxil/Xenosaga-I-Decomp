@@ -83,6 +83,8 @@ def main():
                     help="m2c translation passes (2 often untangles loops)")
     ap.add_argument("--keep-asm", action="store_true",
                     help="print the sliced assembly too")
+    ap.add_argument("--output", "-o",
+                    help="write the generated C draft to this file")
     args = ap.parse_args()
 
     path, block = find_function(args.function)
@@ -125,7 +127,12 @@ def main():
             print("/* NOTE: config/m2c_context.c did not apply here; this "
                   "draft is untyped. */")
             text = out2.stdout
-    print(text)
+    if args.output:
+        with open(args.output, "w") as fh:
+            fh.write(text)
+        print("wrote %s" % args.output)
+    else:
+        print(text)
     return 0
 
 
