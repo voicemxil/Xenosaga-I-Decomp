@@ -477,18 +477,101 @@ extern void _sceCd_cd_callback(void);
 
 int sceCdPause(void)
 {
+    int *pcmd;
+
     if (sceCdNcmdDiskReady() == 6)
         return 0;
     if (_sceCd_ncmd_prechk(12) == 0)
         return 0;
     sceCdCbfunc_num = 7;
+    pcmd = &sceCdCbfunc_num;
     _sceCd_c_cb_sem = 1;
     if (sceSifCallRpc(&_sceCd_cd_ncmd, 8, 1, 0, 0, 0, 0,
-                      (void *)_sceCd_cd_callback, &sceCdCbfunc_num) < 0) {
+                      (void *)_sceCd_cd_callback, pcmd) < 0) {
         sceCdCbfunc_num = 0;
         _sceCd_c_cb_sem = 0;
         SignalSema(_sceCd_ncmd_semid);
         return 0;
     }
     return 1;
+}
+
+/* ------------------------------------------------------------------
+ * Two-word reply variants.
+ *
+ * sceCdReadDvdDualInfo and sceCdPowerOff are the same function with a
+ * different command number: an 8-byte S-command reply whose second word
+ * is handed back through the caller's pointer and whose first word is
+ * the return value.  Both are read through the uncached alias, and the
+ * `lui v1,0x2000` for that alias is hoisted above the branch -- one
+ * shared constant, two `or`s, which is what writing the alias twice as
+ * two separate expressions off the same base gives.
+ * ------------------------------------------------------------------ */
+
+int sceCdReadDvdDualInfo(int *layer1Start)
+{
+    int *p;
+    int r;
+
+    if (_sceCd_scmd_prechk(39) == 0)
+        return 0;
+    p = &_sceCd_scmdrdata;
+    if (sceSifCallRpc(&_sceCd_cd_scmd, 39, 0, 0, 0, p, 8, 0, 0) < 0) {
+        SignalSema(_sceCd_scmd_semid);
+        return 0;
+    }
+    *layer1Start = *(volatile int *)(((int)p + 4) | 0x20000000);
+    r = *(volatile int *)((int)p | 0x20000000);
+    SignalSema(_sceCd_scmd_semid);
+    return r;
+}
+
+int sceCdPowerOff(int *result)
+{
+    int *p;
+    int r;
+
+    if (_sceCd_scmd_prechk(33) == 0)
+        return 0;
+    p = &_sceCd_scmdrdata;
+    if (sceSifCallRpc(&_sceCd_cd_scmd, 33, 0, 0, 0, p, 8, 0, 0) < 0) {
+        SignalSema(_sceCd_scmd_semid);
+        return 0;
+    }
+    *result = *(volatile int *)(((int)p + 4) | 0x20000000);
+    r = *(volatile int *)((int)p | 0x20000000);
+    SignalSema(_sceCd_scmd_semid);
+    return r;
+}
+
+/* sceCdMmode: the first S-command here with an outbound payload -- the
+ * media type goes into the fixed 4-byte send buffer _sceCd_scmdsdata,
+ * which must be written back out of the data cache before the IOP can
+ * DMA it.  The send buffer's address is formed BEFORE the prechk call
+ * (it survives in s2) and the store into it sits in the prechk branch's
+ * annulled delay slot, so the argument must stay live across the call:
+ * a plain local assigned from the parameter, stored afterwards. */
+
+extern int _sceCd_scmdsdata;
+extern void sceSifWriteBackDCache(void *addr, int size);
+
+int sceCdMmode(int media)
+{
+    int *p;
+    int *sd;
+    int r;
+
+    sd = &_sceCd_scmdsdata;
+    if (_sceCd_scmd_prechk(34) == 0)
+        return 0;
+    *sd = media;
+    sceSifWriteBackDCache(sd, 4);
+    p = &_sceCd_scmdrdata;
+    if (sceSifCallRpc(&_sceCd_cd_scmd, 34, 0, sd, 4, p, 4, 0, 0) < 0) {
+        SignalSema(_sceCd_scmd_semid);
+        return 0;
+    }
+    r = *(volatile int *)((int)p | 0x20000000);
+    SignalSema(_sceCd_scmd_semid);
+    return r;
 }

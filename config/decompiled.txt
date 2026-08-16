@@ -2629,3 +2629,6 @@ DrawBackReset = 0x0027E180, 0x74; // Draw.c
 DrawBackSet = 0x0027E108, 0x78; // Draw.c
 sefDestroyScriptScheduler2 = 0x002E5320, 0x7C; // sef.c
 FileObjectJpegDecChange = 0x00284D28, 0x54; // File.c
+sceCdReadDvdDualInfo = 0x0020E2A0, 0xB4; // sceCd.c
+sceCdPowerOff = 0x0020E358, 0xB4; // sceCd.c
+sceCdMmode = 0x0020DBA0, 0xC4; // sceCd.c
