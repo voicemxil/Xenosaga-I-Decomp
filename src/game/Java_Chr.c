@@ -145,7 +145,7 @@ void ACT_setHand(CHR *, int);
 void ACT_setVisible(CHR *, int, int);
 void ACT_setArms(CHR *, CHR *, int, int);
 void ACT_setRelation(CHR *, CHR *, int, int);
-void ACT_setParent(CHR *, int, CHR *);
+int ACT_setParent(CHR *, int, CHR *, int, int);
 void ACT_resetArms(CHR *, CHR *, int);
 void ACT_filterGuno(void);
 void ACT_filterStealth(void);
@@ -612,25 +612,29 @@ void Java_xeno_Chr_setElevatorMode__I(void *env, int *args, int *ret)
     }
 }
 
-/* Attach the character to a parent actor, optionally as a bone relation */
-/* TODO: not matching - args[4] is not hoisted out of the taken branch */
+/* Attach the character to a parent actor, optionally as a bone relation.
+ * ACT_setParent takes five arguments, not three -- ACT.c has the correct
+ * prototype and calls it that way. With the short prototype the mode and
+ * bone words never reach it, and the codegen is three instructions
+ * shorter: the original sets up $a3 and $t0 (arguments 4 and 5, this ABI
+ * passes eight in registers) before the mode test, because both callees
+ * need them, and only fixes $a3 up on the ACT_setRelation side. */
 void Java_xeno_Chr_setParent__Lxeno_Chr_III(void *env, int *args, int *ret)
 {
     char *obj = (char *)args[0];
     JAVA_FIELD *pField = lookupClassField(classJava_xeno_Chr, loadConstString(D_004DC190, -1), 0);
     int nMode = args[2];
+    int nType = args[3];
     int nBone = args[4];
     CHR *chr = *(CHR **)(obj + pField->nOffset);
     CHR *parent;
-    int nType;
 
     obj = (char *)args[1];
     parent = *(CHR **)(obj + pField->nOffset);
-    nType = args[3];
     if ((nMode & 0x8000) != 0) {
         ACT_setRelation(chr, parent, nMode, nBone);
     } else {
-        ACT_setParent(chr, nType, parent);
+        ACT_setParent(chr, nType, parent, nMode, nBone);
     }
 }
 
