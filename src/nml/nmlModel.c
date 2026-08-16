@@ -2323,3 +2323,85 @@ void _CurMatrixMul33norm(void *pDst, void *pMtx)
             "sqc2 $vf25, 0x20(%0)\n"
             ".set reorder" : : "r"(pDst), "r"(pMtx) : "memory");
 }
+
+/* Occlusion-cell debug draw: retail ships it empty. */
+void culling_cell_disp(void)
+{
+}
+
+/* Load the eight clip-plane quadwords at pMat into $vf12-$vf19, where the
+ * _ModelCalcClip* routines below expect them. */
+void _ModelCalcClipInit(void *pMat)
+{
+    PS2_ASM(".set noreorder\n"
+            "lqc2 $vf12, 0x0(%0)\n"
+            "lqc2 $vf13, 0x10(%0)\n"
+            "lqc2 $vf14, 0x20(%0)\n"
+            "lqc2 $vf15, 0x30(%0)\n"
+            "lqc2 $vf16, 0x40(%0)\n"
+            "lqc2 $vf17, 0x50(%0)\n"
+            "lqc2 $vf18, 0x60(%0)\n"
+            "lqc2 $vf19, 0x70(%0)\n"
+            ".set reorder" : : "r"(pMat));
+}
+
+/* pDst = 3x3 part of pMat * pSrc (no translation). */
+void _ApplyMatrix33(void *pDst, void *pMat, void *pSrc)
+{
+    PS2_ASM(".set noreorder\n"
+            "lqc2 $vf31, 0x0(%2)\n"
+            "lqc2 $vf27, 0x0(%1)\n"
+            "lqc2 $vf28, 0x10(%1)\n"
+            "lqc2 $vf29, 0x20(%1)\n"
+            "lqc2 $vf30, 0x30(%1)\n"
+            "vmulax.xyz $ACC, $vf27, $vf31x\n"
+            "vmadday.xyz $ACC, $vf28, $vf31y\n"
+            "vmaddz.xyz $vf31, $vf29, $vf31z\n"
+            "sqc2 $vf31, 0x0(%0)\n"
+            ".set reorder"
+            : : "r"(pDst), "r"(pMat), "r"(pSrc) : "memory");
+}
+
+/* pDst = pMat * pSrc, translation included. */
+void _ApplyMatrix(void *pDst, void *pMat, void *pSrc)
+{
+    PS2_ASM(".set noreorder\n"
+            "lqc2 $vf31, 0x0(%2)\n"
+            "lqc2 $vf27, 0x0(%1)\n"
+            "lqc2 $vf28, 0x10(%1)\n"
+            "lqc2 $vf29, 0x20(%1)\n"
+            "lqc2 $vf30, 0x30(%1)\n"
+            "vmulax.xyz $ACC, $vf27, $vf31x\n"
+            "vmadday.xyz $ACC, $vf28, $vf31y\n"
+            "vmaddaz.xyz $ACC, $vf29, $vf31z\n"
+            "vmaddw.xyz $vf31, $vf30, $vf0w\n"
+            "sqc2 $vf31, 0x0(%0)\n"
+            ".set reorder"
+            : : "r"(pDst), "r"(pMat), "r"(pSrc) : "memory");
+}
+
+/* pDst = pMat2 * pMat1 * pSrc. */
+void _ApplyMatrix2Mat(void *pDst, void *pMat1, void *pMat2, void *pSrc)
+{
+    PS2_ASM(".set noreorder\n"
+            "lqc2 $vf31, 0x0(%3)\n"
+            "lqc2 $vf27, 0x0(%1)\n"
+            "lqc2 $vf28, 0x10(%1)\n"
+            "lqc2 $vf29, 0x20(%1)\n"
+            "lqc2 $vf30, 0x30(%1)\n"
+            "vmulax.xyz $ACC, $vf27, $vf31x\n"
+            "vmadday.xyz $ACC, $vf28, $vf31y\n"
+            "vmaddaz.xyz $ACC, $vf29, $vf31z\n"
+            "vmaddw.xyz $vf31, $vf30, $vf0w\n"
+            "lqc2 $vf27, 0x0(%2)\n"
+            "lqc2 $vf28, 0x10(%2)\n"
+            "lqc2 $vf29, 0x20(%2)\n"
+            "lqc2 $vf30, 0x30(%2)\n"
+            "vmulax.xyz $ACC, $vf27, $vf31x\n"
+            "vmadday.xyz $ACC, $vf28, $vf31y\n"
+            "vmaddaz.xyz $ACC, $vf29, $vf31z\n"
+            "vmaddw.xyz $vf31, $vf30, $vf0w\n"
+            "sqc2 $vf31, 0x0(%0)\n"
+            ".set reorder"
+            : : "r"(pDst), "r"(pMat1), "r"(pMat2), "r"(pSrc) : "memory");
+}
