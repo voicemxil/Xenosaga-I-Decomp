@@ -89,6 +89,21 @@ register.** One shared variable gets one register; C89 block-scoped
 declarations in each arm reproduce `$a2` on one arm and `$t0` on the
 other.
 
+**`LAUNDER` the pointer, not the value,** to hold a run of stores through
+it in source order — it also stops gcc duplicating one store into a
+branch delay slot.
+
+**A `PIN` can be actively HARMFUL.** Pinning the *last* long-lived value
+removes the temp retail loads through. Pin the first N and let the next
+register fall out.
+
+**Delete steering before adding any.** One function matched tonight
+purely by removing two stale `LAUNDER`s — the scheduler then emitted the
+retail order by itself.
+
+**Raise register pressure early.** Reading a global into a local before
+address arithmetic moved a pointer off `$a0`.
+
 **The constant-range lever.** Hoist a literal into a long-lived temp to
 demote its register-allocation priority.
 
@@ -165,6 +180,17 @@ trip count get fully unrolled at -O2.
 
 **Single exit.** Early returns duplicate the return-value move and block
 cross-jumping. Assign on every path and fall out of one `return`.
+
+**A redundant `else` arm changes block layout.** `if (!p) { q = 0; } else
+{ X }` with `q` already 0 moves X after the join and reaches it with
+`bnez`+`b`. Worth ten words in one case.
+
+**`goto` the default arm** for a shared return value.
+
+**Retail entry blocks hoist member ADDRESSES above a state dispatch.**
+When a `switch (w->nState)` prologue contains `addiu sN,work,K`, the
+source had a member pointer local declared before the switch. One edit
+took a function 61 diffs -> 11.
 
 **Shared epilogue.** "The original has one `return 0` and we have two" is
 fixed by making the second path fall through to the first, or `goto` a
@@ -266,6 +292,27 @@ its exact decimal expansion.
 **A float constant in the data is usually a literal in the source.** gcc
 never sinks an `li.s` into a delay slot, so `return 65535.0f;` and
 `return D_004D7F4C;` give different schedules.
+
+**`extern T sym[];` vs `extern T sym[4];`.** An INCOMPLETE extern array
+cannot go in small data, so its address costs `lui`+`addiu` instead of
+`addiu reg,gp,off`. Scalars get small-data for free; only arrays bite.
+
+**Naming a global symbol twice in one address expression costs an
+instruction.** `*((char *)&G + G.field)` makes gcc rebuild `%hi/%lo` for
+the second reference; a block-local pointer to the symbol gives the
+retail `addiu reg,base,%lo` + `addu` pair. Diagnoses as LENGTH, reads as
+register allocation.
+
+**Alias choice decides displacement.** Two symbols naming the same
+address generate different code — pick the one that keeps the offset in
+the load displacement, since that preserves the shared hoisted `lui`.
+
+**A separate local for `&ARRAY[-K]` folds the constant into `%lo` and
+LOSES a word.** A negative constant offset must stay inside the
+subscript.
+
+**Struct stride as its two halves.** `(i << 10) + i*80`, not one 1104
+multiply — true even outside a loop, so it is a source spelling.
 
 **Large constant + pointer vs + symbol.** `ptr_var + 369760` needs
 `lui/ori/addu`; the same constant on an array SYMBOL folds into
@@ -403,6 +450,24 @@ shows any of these, check the source first:
 | `sltu` vs `slt` | Bound is unsigned |
 | Two live pointers where you have one | A dropped return value |
 | A whole extra argument at a call site | The original really does pass it |
+
+---
+
+## Process traps
+
+**A stale "near-miss" comment on a function that actually MATCHES is a
+real hazard.** One cost an agent 30 minutes and briefly broke a
+registered match, because the comment invited experimentation on
+working code. `checkfile.py` is the authority, not the file comments.
+
+**Never leave an entry registered-and-failing.** A registered entry
+claims a byte-exact match; if it does not match, the ledger is lying and
+the whole verification is worth less. Either match it or remove the
+entry and document it as a near-miss.
+
+**The source order that EQUALS the retail store order is not
+necessarily the one that compiles to it** — in one case it was the worst
+of all 120 permutations. Search, do not assume.
 
 ---
 
