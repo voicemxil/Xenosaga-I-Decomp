@@ -35,7 +35,8 @@ typedef struct {
                                          * database menu owns the cursor */
     char pad12[0x46 - 0x12];
     signed char nDataBaseSel;           /* 0x46 */
-    char pad47[0x50 - 0x47];
+    signed char nMailMenuSel;           /* 0x47 */
+    char pad48[0x50 - 0x48];
     union {
         int nSimulationScript;          /* 0x50 */
         struct {
@@ -60,7 +61,9 @@ typedef struct {
         struct {
             signed char nNum;           /* 0x54: mail rows on screen */
             char pad55[1];
-            signed char aId[6];         /* 0x56: their header ids */
+            signed char aId[4];         /* 0x56: their header ids */
+            signed char bReplyOpen;     /* 0x5A */
+            signed char bReplyReady;    /* 0x5B */
         } mail;
     } u54;
     signed char nMailSel;               /* 0x5C: mail hint-slot cursor */
@@ -1252,7 +1255,8 @@ typedef struct {
     char pad00[2];
     short nColumns;                     /* 0x02 */
     int nSel;                           /* 0x04 */
-    char pad08[0x10 - 0x08];
+    char *pChoices;                     /* 0x08 */
+    char *pPrompt;                      /* 0x0C */
     SPROW *pRows;                       /* 0x10 */
 } SELPARAM;
 
@@ -1669,4 +1673,201 @@ void tskUmnMailHensin(TSK_TASK *pTask, UMN_HENSIN *w)
         w->cur.nColor = w->win.nColor + 2;
         eCursolMain(&w->cur);
     }
+}
+
+/* --- Mail screen: the "Menu" and "Select" windows --- */
+
+typedef struct {
+    unsigned char nState;               /* 0x000 */
+    unsigned char bReady;               /* 0x001 */
+    char pad002[2];
+    short nW;                           /* 0x004 */
+    short nH;                           /* 0x006 */
+    int nColor;                         /* 0x008 */
+    int bVisible;                       /* 0x00C */
+    SELWIN win;                         /* 0x010: the yes/no confirmation */
+    SELPARAM sel;                       /* 0x1A4 */
+    char pad1B8[0x79C - 0x1B8];
+    int bVisible2;                      /* 0x79C */
+    SELWIN win2;                        /* 0x7A0: the four-row menu */
+    SELPARAM sel2;                      /* 0x934 */
+    char pad948[0xF2C - 0x948];
+    SPROW row[4];                       /* 0xF2C */
+} UMN_MAILMENU;
+
+/* TODO: PARKED at 30 diffs of 268 words.  The length is right and EVERY
+ * branch lands on the same offset as the original, so the control flow
+ * and the state split are confirmed.  Three clusters remain:
+ *
+ *  - the nine header stores between the two WindowDXSet calls schedule
+ *    in a different order (the original emits pTitle, nH, pChoices,
+ *    pMsg, pPrompt, nColumns, nColor, nW, pFunc; we swap nH/pChoices and
+ *    nColor/nW), which drags the 86/169/3 constants into different
+ *    registers.  Three source orders swept, all >= this one.
+ *  - the row[2] grey test: the original duplicates `li $v0,1' into both
+ *    `beqz' delay slots and shares a single `sb', we keep one `li' in a
+ *    joined block and take a likely-branch instead.  Swept: nested
+ *    if/else-if in both operand orders, `||', and `&&' with the arms
+ *    swapped (272 words).
+ *  - the page-49 arm materialises the constant 1 twice ($a2 and $a3)
+ *    where the original uses one $a2 for both win2.nState and bVisible2.
+ *    All 16 orderings of the two arms' three stores were swept; the one
+ *    kept (bVisible before nState in the page-83 arm only) is worth 133
+ *    diffs on its own.
+ *
+ * The state-10 dispatch is a `switch (UmnWork.nPage)', NOT an if/else-if
+ * chain: a switch puts both case bodies out of line behind the compare
+ * chain, an if/else-if inlines the first body and costs four words.
+ *
+ * Mail screen: two select windows sharing one task.
+ *
+ * The four-row menu (Read / History / Download / Cancel) slides in from
+ * the left when the screen reaches page 49; the yes/no confirmation
+ * slides in from the right on page 83.  Rows 1 and 2 grey out when the
+ * mail cursor is off a real slot and when a reply is not available. */
+void tskUmnMailMenu(TSK_TASK *pTask, UMN_MAILMENU *w)
+{
+    static char *msg00[] = { "Is this okay?", "Yes\nNo" };
+    static char *menu00[] = { "Read", "History", "Download", "Cancel" };
+    short nTarget;
+    short nTargetOut;
+    short nTarget2;
+    short nTargetOut2;
+    int i;
+
+    if (UmnWork.nScene != 1) {
+        pTask->nState = -1;
+        return;
+    }
+    switch (pTask->nState) {
+    case 0:
+        w->nW = 528;
+        w->nH = 48;
+        w->nColor = 0x00FFFFF0;
+        w->bVisible = 0;
+        WindowDXSet((WINDOWDX *)&w->win);
+        w->win.pTitle = "Select";
+        w->win.nH = 86;
+        w->sel.pChoices = msg00[1];
+        w->win.pMsg = &w->sel;
+        w->sel.nColumns = 3;
+        w->sel.pPrompt = msg00[0];
+        w->win.nColor = w->nColor;
+        w->win.nW = 169;
+        w->win.pFunc = MenuSelectWindow;
+        w->bVisible2 = 0;
+        WindowDXSet((WINDOWDX *)&w->win2);
+        w->win2.nColor = w->nColor;
+        w->win2.nW = 125;
+        w->win2.nH = 102;
+        w->sel2.nColumns = 2;
+        w->win2.pTitle = "Menu";
+        w->win2.pFunc = MenuSelectWindow;
+        w->win2.pMsg = &w->sel2;
+        w->nState = 0;
+        w->bReady = 0;
+        break;
+    case 2:
+        switch (w->nState) {
+        case 0:
+            w->bReady = 1;
+            w->nState = 10;
+            /* fallthrough: the page test runs on the same frame */
+        case 10:
+            switch (UmnWork.nPage) {
+            case 49:
+                for (i = 0; i < 4; i++) {
+                    w->row[i].pText = menu00[i];
+                    w->row[i].bGray = 0;
+                }
+                if (UmnWork.nMailSel != 0) {
+                    w->row[1].bGray = 1;
+                }
+                if (UmnWork.u54.mail.bReplyReady == 0) {
+                    w->row[2].bGray = 1;
+                } else if (UmnWork.u54.mail.bReplyOpen == 0) {
+                    w->row[2].bGray = 1;
+                } else {
+                    w->row[2].bGray = 0;
+                }
+                w->win2.nX = -125;
+                w->win2.nY = 176;
+                w->sel2.pRows = w->row;
+                w->win2.nState = 1;
+                w->bVisible2 = 1;
+                w->sel2.nSel = 0;
+                WindowDXMain((WINDOWDX *)&w->win2);
+                w->win2.nState = 3;
+                w->nState = 20;
+                break;
+            case 83:
+                w->win.nX = 528;
+                w->win.nY = 40;
+                w->bVisible = 1;
+                w->win.nState = 1;
+                w->sel.nSel = 0;
+                WindowDXMain((WINDOWDX *)&w->win);
+                w->win.nState = 3;
+                w->nState = 50;
+                break;
+            }
+            break;
+        case 20:
+            nTarget = 16;
+            MoveSlide(&w->win2.nX, &nTarget, 3.0f);
+            if (w->win2.nX == nTarget) {
+                w->nState = 30;
+            }
+            break;
+        case 30:
+            w->sel2.nSel = UmnWork.nDataBaseSel;
+            if (UmnWork.nPage != 49) {
+                w->nState = 40;
+            } else {
+                UmnWork.nUiLock = 0;
+            }
+            break;
+        case 40:
+            nTargetOut = -125;
+            MoveSlide(&w->win2.nX, &nTargetOut, 3.0f);
+            if (w->win2.nX == nTargetOut) {
+                w->nState = 0;
+                w->bVisible2 = 0;
+            }
+            break;
+        case 50:
+            nTarget2 = 496 - w->win.nW;
+            MoveSlide(&w->win.nX, &nTarget2, 3.0f);
+            if (w->win.nX == nTarget2) {
+                w->nState = 60;
+            }
+            break;
+        case 60:
+            w->sel.nSel = UmnWork.nMailMenuSel;
+            if (UmnWork.nPage != 83) {
+                w->nState = 70;
+            } else {
+                UmnWork.nUiLock = 0;
+            }
+            break;
+        case 70:
+            nTargetOut2 = 528;
+            MoveSlide(&w->win.nX, &nTargetOut2, 3.0f);
+            if (w->win.nX == nTargetOut2) {
+                w->nState = 0;
+                w->bVisible = 0;
+            }
+            break;
+        }
+        break;
+    }
+    if (w->bReady) {
+        if (w->bVisible) {
+            WindowDXMain((WINDOWDX *)&w->win);
+        }
+        if (w->bVisible2) {
+            WindowDXMain((WINDOWDX *)&w->win2);
+        }
+    }
+    xglFontDebugPrintf(0, 40, "yn : %2d", w->nState);
 }
