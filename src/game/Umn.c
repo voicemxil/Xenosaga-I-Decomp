@@ -205,31 +205,52 @@ void UmnEventTextGyouJump(char **ppText)
    opcode choice; explicit `(unsigned char)nMax` casts on both upper-bound
    tests regressed further (29 diffs, LENGTH). Leave at 25. */
 /* Parse a run of digits (decimal when nMode == 1, otherwise octal) starting
-   at *ppText, advancing *ppText past the digits consumed */
+   at *ppText, advancing *ppText past the digits consumed.
+
+   Three source facts carry most of this: nMax is unsigned (the original
+   compares the digit with sltu, not slt); the function has a SINGLE exit
+   returning nVal, which is what lets the "no digits" path share the
+   epilogue instead of const-folding to `move v0,zero`; and the running
+   value is truncated TWICE per digit -- once after the multiply and once
+   after the add -- so the accumulator is an unsigned char written by two
+   separate assignments, not one cast expression.
+
+   The product needs its own variable: with `nVal *= nBase` gcc gives the
+   multiply the same register as nVal, and then it cannot be hoisted into
+   the guard branch's delay slot (nVal is the return value on the taken
+   path), which costs both that slot and the loop-head alignment. */
 int UmnEventTextNumberGet(char **ppText, int nMode)
 {
-    PIN(char **p, "$8") = ppText;
-    int nBase, nMax;
-    unsigned char c;
-    int nVal = 0;
+    /* $8/$5/$3: allocator tie-breaks. p is a plain copy of the argument
+       and gcc otherwise leaves it in $a0; nProd and the digit both land
+       one register off, and every dependent name follows them. */
+    PIN(char **p, "$8");
+    PIN(int nProd, "$5");
+    PIN(unsigned char c, "$3");
+    int nBase;
+    unsigned int nMax;
+    unsigned char nVal;
 
+    p = ppText;
+    nVal = 0;
     if (nMode == 1) {
-        nBase = 10;
         nMax = '9';
+        nBase = 10;
     } else {
-        nBase = 8;
         nMax = '7';
+        nBase = 8;
     }
 
     c = **p;
-    if (c < '0' || c > nMax) {
-        return nVal;
+    if (c >= '0' && c <= nMax) {
+        do {
+            nProd = nVal * nBase;
+            nVal = nProd;
+            nVal += **p - '0';
+            (*p)++;
+            c = **p;
+        } while (c >= '0' && c <= nMax);
     }
-    do {
-        nVal = (unsigned char)(nVal * nBase + c - '0');
-        (*p)++;
-        c = **p;
-    } while (c >= '0' && c <= nMax);
     return nVal;
 }
 
