@@ -578,8 +578,9 @@ void TMENU_drawDefault(TMENU *t)
         p->h0E = t->h0E;
         p->h00 |= 0x4000;
         if (t->b141 != 0) {
-            n = t->b141;
-            nOff = n * 24 + 12;
+            /* No named local for t->b141: a separate `n` gets coalesced
+             * into nOff's register, where retail keeps the two apart. */
+            nOff = t->b141 * 24 + 12;
         } else {
             nOff = 0;
         }
@@ -618,7 +619,11 @@ void TMENU_drawDefault(TMENU *t)
         }
         p = t->pComp[7];
         p->n08 = 0xFFFFFF;
-        /* h06 first here only -- the other pComp blocks want h04 first. */
+        /* h06 BEFORE h04 here, and only here.  This late block is what
+         * pins the whole x/y -> $s3/$s2 assignment: writing h04 first
+         * inverts the channel again across the entire function (+6 here
+         * but +12 everywhere else).  The six words this costs in this
+         * block are the price of the other twenty. */
         p->h06 = t->h0E + y - 16;
         p->h04 = t->h0C + x - 16;
         EW_sprtSetCursorUV(p, 2, t->nTexF8);
@@ -632,8 +637,9 @@ void TMENU_drawDefault(TMENU *t)
             nCur = (t->b54 - t->h58) * 24 + 12;
         }
         if (t->b141 != 0) {
-            n = t->b141;
-            nOff = n * 24 + 12;
+            /* No named local for t->b141: a separate `n` gets coalesced
+             * into nOff's register, where retail keeps the two apart. */
+            nOff = t->b141 * 24 + 12;
         } else {
             nOff = 0;
         }
@@ -662,6 +668,27 @@ extern int MSG_queuePop(MSGQUEUE *q, unsigned char *pDst, int nArg);
 extern void MSG_queueReset(MSGQUEUE *q, int nArg);
 extern void TW_setPos(TMENU *t);
 
+/* TMENU_drawDefault: NEAR-MISS, 23 diffs of 223 words, length correct
+ * (was 43).  Everything about the nField20/nField24 channel is now
+ * exact -- both lwc1s, both trunc.w.s, both `addiu sN,..,16` and every
+ * x/y store.  The five residual clusters:
+ *
+ *   pComp[3]:  3 words, the n24 store is emitted after h04/h06 instead
+ *              of before.  Swept: n24 first (current), last (58), and
+ *              between h06 and n08 (29).
+ *   pComp[2]:  6 words, $a0/$v0 naming plus the h00 store landing
+ *              before the n24 store.  Swept: h00 |= last (30), h00
+ *              directly after u14.w.h2 (23, identical), n24 first (27).
+ *   pComp[7]:  6 words, h04/h06 emitted in the other order -- this is
+ *              deliberate, see the comment in the block.
+ *   nCur:      3 words, retail keeps it in $s2 (reusing the dead y
+ *              register), this build uses a caller-saved temp.
+ *   pComp[8]:  4 words, same thing for the final h04/h06 pair.
+ *
+ * The last two clusters are allocator knock-on from the first three,
+ * not independent problems -- retail reuses $s2/$s3 for scratch once
+ * x and y die, and this build has not freed them at the same point.
+ */
 /* NEAR-MISS, 26 diffs of 461 words, LENGTH CORRECT (was 443 on the first
  * draft).  Nothing structural is left -- all three jump tables, both
  * dispatches, the pad block, the fade and the queue drain are
