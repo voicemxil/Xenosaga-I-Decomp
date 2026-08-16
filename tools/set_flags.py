@@ -92,6 +92,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cflags", nargs=2, metavar=("FILE.c", "FLAGS"))
     ap.add_argument("--fix", nargs=2, metavar=("FILE.c", "FLAGS"))
+    ap.add_argument("--replace", action="store_true",
+                    help="allow --fix to DROP flags the entry already has")
     ap.add_argument("--unset-cflags", metavar="FILE.c")
     ap.add_argument("--unset-fix", metavar="FILE.c")
     ap.add_argument("--show", metavar="FILE.c",
@@ -121,6 +123,23 @@ def main():
             ops.append(("fix", args.unset_fix, None))
         if not ops:
             ap.error("nothing to do -- pass --cflags/--fix/--unset-*/--show")
+
+        # --fix REPLACES, so passing a partial string silently drops the
+        # flags already there -- and a dropped flag does not fail, it just
+        # un-matches functions nobody is looking at. Refuse to lose one
+        # unless the caller says so.
+        for kind, key, value in ops:
+            if kind == "fix" and value:
+                cur = literals(text, DICTS["fix"]).get(key, "")
+                lost = [t for t in cur.split() if t.startswith("--")
+                        and t not in value.split()]
+                if lost and not args.replace:
+                    sys.exit(
+                        "REFUSED: --fix %s would drop %d flag(s) already "
+                        "set: %s\n  current: %s\n  yours  : %s\n"
+                        "Pass the full string (read it with --show), or "
+                        "--replace if dropping them is intended."
+                        % (key, len(lost), " ".join(lost), cur, value))
 
         for kind, key, value in ops:
             if value is not None and not value.strip():

@@ -117,10 +117,16 @@ def main():
             if fn not in syms or not loc:
                 continue
             audited += 1
-            off, _ = syms[fn]
+            off, bsize = syms[fn]
             vaddr, size = loc
             orig = repo.orig.words_at_vaddr(vaddr, size)
-            built = elf.words_at_offset(off, size)
+            # Each function read at ITS OWN extent. Using the original's
+            # size for both truncates a longer un-flagged build and drops
+            # its epilogue out of the window, which then shows up as
+            # "orig has jr/addiu, built has nops" -- a fake multiset
+            # difference. cos and sin were reported SUSPECT purely
+            # because of this.
+            built = elf.words_at_offset(off, bsize or size)
             om, bm, diffs = masked_compare(orig, built, elf.relocs(), off)
             # Compare multisets on instruction IDENTITY, not raw words:
             # masked_compare blanks relocated immediates BY POSITION, so a
@@ -128,11 +134,26 @@ def main():
             # reorder would look like a changed multiset. Zero the immediate
             # of I-type ops (they are what carry %hi/%lo relocs) and the
             # target of J-type; R-type words are kept whole.
-            same = (collections.Counter(map(_identity, orig)) ==
-                    collections.Counter(map(_identity, built)))
+            co = collections.Counter(map(_identity, orig))
+            cb = collections.Counter(map(_identity, built))
+            same = co == cb
+            # A delta of NOPS ONLY is still a pure reorder. Moving two
+            # instructions can let gas fill a delay slot it previously
+            # had to pad, so the un-flagged build carries extra nops and
+            # nothing else. A nop computes nothing, so this cannot hide a
+            # logic difference -- what matters is that every REAL
+            # instruction is accounted for.
+            delta = list((co - cb).elements()) + list((cb - co).elements())
+            nop_only = bool(delta) and all(w == 0 for w in delta)
+            if nop_only:
+                same = True
+            note = ""
+            if nop_only:
+                note = (f", differs by {len(delta)} nop(s) only "
+                        f"-- gas filled a slot it had padded")
             tag = "OK  " if same else "BAD "
             print(f"  {tag}{fn:38} {len(diffs):3} pre-fix diffs, "
-                  f"{len(used)} site(s), identical multiset={same}")
+                  f"{len(used)} site(s), identical multiset={same}{note}")
             if not same:
                 problems.append((base, fn,
                                  "reordering is masking a different "
