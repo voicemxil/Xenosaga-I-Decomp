@@ -1,3 +1,4 @@
+#include "matching.h"
 /* Undo-query parameter helpers. */
 
 typedef struct UNDU_PARAM UNDU_PARAM;
@@ -310,4 +311,133 @@ float UnduGet2(UNDU_PARAM *param, float x, float z)
         return UnduCheck(p, 0, param);
     }
     return param->field_14;
+}
+
+/* The collision-data file header: a magic byte, three table sizes and the
+   three table pointers, followed by the type-3 chain. */
+typedef struct {
+    unsigned char nMagic;      /* 0x00, always 0x82 */
+    unsigned char nCount0;     /* 0x01 */
+    unsigned char nCount1;     /* 0x02 */
+    unsigned char nCount2;     /* 0x03 */
+    void *pTable0;             /* 0x04 */
+    void *pTable1;             /* 0x08 */
+    char *pTable2;             /* 0x0C */
+    int nChain;                /* 0x10 */
+} UNDUHDR;
+
+/* One type-2 group: a first id, how many ids it covers, and the 16-byte
+   records they name. */
+typedef struct {
+    unsigned short nId;        /* 0x00 */
+    unsigned short nCount;     /* 0x02 */
+    char *pData;               /* 0x04 */
+} UNDUGROUP;
+
+/* One link of the type-3 chain: a signed id that goes negative at the end
+   of the chain, and the table it names. */
+typedef struct {
+    short nId;                 /* 0x00 */
+    short pad_02;
+    void *pData;               /* 0x04 */
+} UNDULINK;
+
+
+/* PARKED at 104 words vs 101. The whole shape is right -- the four-way
+   switch on the key's high byte comes out as retail's decision tree
+   (`beq 0x100`, `sltiu 257`, `beq 0x200`, `beq 0x300`), both type-0/1 arms
+   are real `j` tail calls, the type-2 direct-index and scan arms and the
+   type-3 chain walk all match instruction for instruction, including the
+   `lhu` + `sll`/`sra` pair retail uses to sign-extend the chain id for the
+   call (writing the field as `short` and reading it for both the `>= 0`
+   test and the argument is what produces the separate `lh`).
+
+   Solved: the key parameter must be UNSIGNED -- that is what makes the
+   switch's range test `sltiu 257` rather than `slti` -- and it has to live
+   outside $a0, which retail spells as a `move t0,a0` at entry. A plain
+   local copy is coalesced away, so it is pinned to $t0.
+
+   What is left is 3 words in the type-2 SCAN arm. Retail returns the hit
+   straight out of the compare's delay slot (`beq wid,id -> epilogue` with
+   `move v0,p` filled from the target) and pays 2 words for the miss
+   (`b epilogue; move v0,zero`); ee-gcc will not fill that slot from the
+   target. Swept: `return p` inside the loop (106 words -- gcc builds a
+   two-word join block for it), a `found` local with `break` (104, the
+   best, but it costs a `move found,zero` init), declaring the loop locals
+   in retail's order, and a function-wide `result` local initialised to 0
+   to recover retail's early `move v0,zero` (still 104). Delay-slot
+   territory, not a source shape.
+
+   Resolve one collision-data lookup key against the loaded header. The
+   key's high byte picks the table and its low byte indexes within it. */
+void *UnduDataGetHeader(unsigned int key, unsigned int id)
+{
+    UNDUHDR *hdr = (UNDUHDR *)CurrentColiHead;
+    PIN(unsigned int sel, "$8");
+
+    sel = key;
+
+    if (hdr == 0 || hdr->nMagic != 0x82) {
+        return 0;
+    }
+    switch (sel & 0xFF00) {
+    case 0x000:
+        return UnduDataGetHeaderSub(hdr->pTable0, hdr->nCount0, id);
+    case 0x100:
+        return UnduDataGetHeaderSub(hdr->pTable1, hdr->nCount1, id);
+    case 0x200: {
+        unsigned int index = sel & 0xFF;
+        UNDUGROUP *group;
+
+        if (index >= hdr->nCount2) {
+            return 0;
+        }
+        group = (UNDUGROUP *)(hdr->pTable2 + index * 8);
+        if (id & 0x8000) {
+            unsigned int slot = id & 0x7FFF;
+
+            if (slot < group->nCount) {
+                return group->pData + slot * 16;
+            }
+        } else {
+            int n = group->nCount;
+            int i = 0;
+            char *p = group->pData;
+            int wid = group->nId;
+
+            char *found = 0;
+
+            if (n != 0) {
+                do {
+                    if (wid == id) {
+                        found = p;
+                        break;
+                    }
+                    i++;
+                    p += 16;
+                    wid++;
+                } while (i < n);
+            }
+            return found;
+        }
+        return 0;
+    }
+    case 0x300: {
+        UNDULINK *link;
+
+        if (hdr->pTable0 == (void *)&hdr->nChain) {
+            return 0;
+        }
+        link = (UNDULINK *)hdr->nChain;
+        while (link->nId >= 0) {
+            if ((sel & 0xFF) == 0) {
+                return UnduDataGetHeaderSub(link->pData, link->nId, id);
+            }
+            sel--;
+            link++;
+        }
+        return 0;
+    }
+    }
+    return 0;
 }
