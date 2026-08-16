@@ -158,9 +158,20 @@ int eBattleWinMain2(void)
 
 /* BW4: same shape, but its message advances a page on the confirm button
  * and the state numbering starts at 1. */
+/* TODO: near-miss (2 words short of 48). Everything up to the switch and
+   every arm body matches. The original materialises the default arm's
+   `ret = 0` as its own block after the ret=1 block, so the ret=1 arm has
+   to branch over it; 2.96 instead annuls the move into the dispatch
+   test's delay slot (`beqzl`) and drops the block, which is the same
+   beqz/beqzl wall as scDispatchScript. Swept: hoisting `p = w` above the
+   switch (gcc sinks it back), `default: return 0`, initialising ret
+   before the switch with an empty default, and routing the early exit
+   through a shared `closed:` label on the default arm (24 diffs, worse).
+   The same shared-label trick is what closed eBattleWinMain2. */
 int eBattleWinMain4(void)
 {
     EBWIN *w = (EBWIN *)g_pEBattleUnk5;
+    EBWIN *p;
     int ret;
     if (w->nStatus == 0) {
         return 0;
@@ -168,14 +179,23 @@ int eBattleWinMain4(void)
     endPrintExtFunc(0xFFFFFF, 100, 0);
     WindowDXMain(((EBWIN *)g_pEBattleUnk5)->win);
     w = (EBWIN *)g_pEBattleUnk5;
+    /* The window pointer is re-read once after eMessageNextPage and that
+       single reload feeds both the page store and the eMessageMain
+       argument; the initial copy is made before the switch, which is what
+       fills the dispatch branch's delay slot. */
+    p = w;
     switch (w->nState) {
     case 3:
-        if (PadData.hHeld & 0x20) {
-            if (eMessageNextPage(w->msg, 0) == 0) {
-                ((EBWIN *)g_pEBattleUnk5)->nPage = 1;
+        {
+            if (PadData.hHeld & 0x20) {
+                int last = eMessageNextPage(w->msg, 0);
+                p = (EBWIN *)g_pEBattleUnk5;
+                if (last == 0) {
+                    p->nPage = 1;
+                }
             }
+            eMessageMain(p->msg);
         }
-        eMessageMain(((EBWIN *)g_pEBattleUnk5)->msg);
         ret = 2;
         break;
     case 1:
