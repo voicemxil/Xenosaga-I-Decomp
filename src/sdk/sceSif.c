@@ -1279,3 +1279,54 @@ int sceSifCallRpc(SifRpcClientData *cd, unsigned int fno, int mode,
     }
     return 0;
 }
+
+/* sceSifGetOtherData: SIF command 0x8000000c -- ask the IOP to DMA `size`
+ * bytes from its address `src` into EE memory at `dest`.  Same
+ * request-packet plumbing as sceSifBindRpc; bit 0 of `mode` selects the
+ * non-blocking form.  The request's three payload words share the packet
+ * slots the RPC path uses for the function number and buffer sizes, hence
+ * the casts. */
+int sceSifGetOtherData(SifRpcClientData *cd, void *src, void *dest,
+                       int size, int mode)
+{
+    SifRpcPacket *pkt;
+
+    pkt = _sceRpcGetPacket((SifRpcData *)_data_table_00993280);
+    if (pkt == 0)
+        return -1;
+
+    cd->hdr.pkt_addr = pkt;
+    cd->hdr.rpc_id = pkt->pid;
+    pkt->sid = (unsigned int)src;
+    pkt->ssize = (int)dest;
+    pkt->recv = (void *)size;
+    pkt->pkt_addr = pkt;
+    pkt->client = cd;
+
+    if ((mode & 1) == 0) {
+        struct SemaParam sema;
+
+        sema.maxCount = 1;
+        sema.initCount = 0;
+        cd->hdr.sema_id = CreateSema(&sema);
+        if (cd->hdr.sema_id < 0) {
+            _sceRpcFreePacket(pkt);
+            return -3;
+        }
+        if (sceSifSendCmd(0x8000000c, pkt, 64, 0, 0, 0) == 0) {
+            _sceRpcFreePacket(pkt);
+            DeleteSema(cd->hdr.sema_id);
+            return -2;
+        }
+        WaitSema(cd->hdr.sema_id);
+        DeleteSema(cd->hdr.sema_id);
+        return 0;
+    }
+
+    cd->hdr.sema_id = -1;
+    if (sceSifSendCmd(0x8000000c, pkt, 64, 0, 0, 0) == 0) {
+        _sceRpcFreePacket(pkt);
+        return -2;
+    }
+    return 0;
+}
