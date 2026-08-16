@@ -5557,8 +5557,10 @@ void MenuItemExMain(void)
     char *p;
     short nTarget;
     int nLevel;
+    int *pColor;
 
     w = MenuItemEx;
+    pColor = &w->msg.nColor;
     switch (w->nState) {
     case 0:
     {
@@ -5575,7 +5577,7 @@ void MenuItemExMain(void)
         eMessageSet(&w->msg, msg00[0]);
         w->msg.nX = nX;
         w->msg.nY = nY;
-        w->msg.nColor = w->nColor;
+        *pColor = w->nColor;
         w->msg.nFont = nFont;
         w->nState = 2;
     }
@@ -5586,10 +5588,10 @@ void MenuItemExMain(void)
             p = msg00[0] + 1;
             /* launder: without an asm in one arm gcc if-converts the pair
                into a movz; the retail build keeps the real branch. */
-            if (MenuWork.f50 >= 0) {
-                nLevel = -128;
-            } else {
+            if (MenuWork.f50 < 0) {
                 nLevel = 64;
+            } else {
+                nLevel = -128;
                 LAUNDER(nLevel);
             }
             p[0] = nLevel;
