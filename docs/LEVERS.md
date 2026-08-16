@@ -1134,6 +1134,31 @@ FORCE-swap.** Neither fixer alone reaches it.
 
 ---
 
+## Store runs and rotations
+
+**A run of byte stores emits as a LEFT-ROTATION of source order — and
+the rotation DISTANCE is per-block.** Measured at two in one block and
+three in another. Measure it rather than assuming; then write the source
+rotated the other way.
+
+**Colour bytes patched into a string want the stores DUPLICATED in both
+arms** of the `if`. Selecting into one local yields `movz`; duplicated,
+gcc cross-jumps the arms back into retail's single store run.
+
+**A local pointer array with an INITIALISER LIST is what produces
+retail's unaligned `ldl/ldr` block copy**; a static template plus an
+explicit `memcpy` gives aligned `ld/sd` instead.
+
+**Where a shared tail store goes — in each arm, or after the merge —
+decides the callee-saved assignment for the WHOLE function.** Worth 47
+words in one case.
+
+**A held pointer to an already-addressable member can COST words** —
+seven, measured across all 16 use combinations in one function. It is
+not a free lever; measure both ways.
+
+---
+
 ## Build hazards
 
 **A block-scope `extern` is a latent build bomb.** gcc 2.9x keeps such a
