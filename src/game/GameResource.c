@@ -15,6 +15,44 @@ extern GAME_RESOURCE GameResource[];
 extern int resource_get_free(void);
 extern int xglSRand(void);
 
+extern void resource_typeid_translate(int nIndex, int *pType, int *pId);
+
+/* Find the resource slot matching a (type, id) pair; either half may be
+   -1 to mean "don't care". Type 5 is never searchable.
+
+   The two field reads are written as GameResource[i].FIELD, NOT through a
+   walked `int *`: loop strength reduction then builds the giv itself, and
+   its initial value comes out as %hi/%lo(GameResource) plus a separate
+   `addiu +8`. A hand-walked pointer folds the +8 into the %lo, which is
+   one word shorter -- and that word is what makes the loop-top
+   `.p2align 3,,7` pad materialise. */
+int GameResourceSearch(int nType, int nId)
+{
+    int i;
+    int t;
+    int id;
+
+    if (nType == 5) {
+        return -1;
+    }
+    i = 0;
+    do {
+        t = nType;
+        id = nId;
+        resource_typeid_translate(i, &t, &id);
+        if (nType != -1 && GameResource[i].nUnk0C != t) {
+            goto next;
+        }
+        if (nId != -1 && GameResource[i].nUnk08 != id) {
+            goto next;
+        }
+        return i;
+next:
+        i++;
+    } while (i < 128);
+    return -1;
+}
+
 /* Carve a nSize-byte (64-byte aligned) block off the free resource entry
  * returned by resource_get_free(), splitting it into the allocated entry
  * and a shrunk successor entry. Returns the allocated entry's nId, or 0 if
