@@ -1081,3 +1081,77 @@ int sceMount(char *fsname, char *devname, int flag, char *arg, int arglen)
     DeleteSema(semid);
     return result;
 }
+
+/* The format request layout: sceMount's without the flag word. */
+typedef struct t_fs_send_format {
+    int   semid;
+    void *dst;
+    int   size;
+    char  path1[1024];          /* +12   device */
+    char  path2[1024];          /* +1036 block device */
+    char  data[1024];           /* +2060 driver argument */
+    int   arglen;               /* +3084 */
+} fs_send_format_t;             /* 3088 bytes */
+
+int sceFormat(char *dev, char *blockdev, char *arg, int arglen)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_format_t *sd;
+    int done;
+    int i;
+
+    sd = (fs_send_format_t *)&_send_data;
+    _sceFsWaitS(14);
+    if (_fs_init == 0)
+        sceFsInit();
+    for (i = 0; i < 1024; i++) {
+        sd->path1[i] = dev[i];
+        if (sd->path1[i] == 0)
+            break;
+    }
+    if (i == 1024)
+        sd->path1[1023] = 0;
+    if (blockdev == 0) {
+        sd->path2[0] = 0;
+    } else {
+        for (i = 0; i < 1024; i++) {
+            sd->path2[i] = blockdev[i];
+            if (sd->path2[i] == 0)
+                break;
+        }
+        if (i == 1024)
+            sd->path2[1023] = 0;
+    }
+    if (arglen > 1024) {
+        _sceFsSigSema();
+        return -7;
+    }
+    for (i = 0; i < arglen; i++)
+        sd->data[i] = arg[i];
+    sd->arglen = arglen;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->size = 4;
+    sd->dst = &result;
+    sd->semid = semid;
+    sceSifWriteBackDCache(&_send_data, 3088);
+    if (sceSifCallRpc(&_cd, 14, 0, &_send_data, 3088, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}
