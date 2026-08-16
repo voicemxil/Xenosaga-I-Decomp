@@ -20,3 +20,8 @@ __pycache__/
 build.ninja
 objdiff.json
 config/SLUS_204.69.ld
+
+# Third-party decompilation tooling (cloned, not vendored)
+tools/m2c/
+permuter/
+config/m2c_context.c
