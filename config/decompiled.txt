@@ -2752,3 +2752,5 @@ create_file = 0x00227E68, 0xBC; // xglHdd.c
 videoCallback = 0x00221D30, 0x11C; // xglMovie.c
 ACT_DrawShadow = 0x0031A098, 0xEC; // ACT.c
 audioCallback = 0x00221E50, 0x130; // xglMovie.c
+_ipuSetMPEG1 = 0x002124F8, 0x28; // mpeg.c
+_sliceB = 0x00213D98, 0x64; // mpeg.c
