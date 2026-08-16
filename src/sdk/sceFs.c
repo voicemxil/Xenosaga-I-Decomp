@@ -221,3 +221,97 @@ int sceDopen(void *name)
     SignalSema(_fs_iob_semid);
     return r;
 }
+
+/* ------------------------------------------------------------------
+ * The fs RPC template.
+ *
+ * Every descriptor-taking fs call is the same nine-argument
+ * sceSifCallRpc into the `_cd` client block, differing only in the
+ * function number and in which fields of the fixed 20-byte `_send_data`
+ * request block it fills.  The reply DMAs into a stack local whose
+ * address is handed over in `_send_data.dst`; a separate 4-byte
+ * `_rcv_data_rpc` carries the RPC's own completion word, and is read
+ * back through the uncached-accelerated alias (| 0x20000000) because
+ * the IOP writes it by DMA.
+ *
+ * The semaphore is created per call and the IOP signals it; the caller
+ * parks on it only when the completion word says the transfer really
+ * happened.  Reading that word BEFORE _sceFsSigSema() is what puts the
+ * load in the call's delay slot, and clearing `used` straight after the
+ * success branch is what makes the branch a `bgezl` with the store
+ * annulled into its slot.
+ * ------------------------------------------------------------------ */
+
+typedef struct t_fs_send {
+    int   semid;                /* +0  EE semaphore for the IOP to signal */
+    void *dst;                  /* +4  where the reply is DMAd */
+    int   size;                 /* +8  reply size */
+    int   fd;                   /* +12 IOP-side descriptor */
+    int   index;                /* +16 EE-side slot index */
+} fs_send_t;                    /* 20 bytes */
+
+extern fs_send_t _send_data;
+extern int _rcv_data_rpc;
+extern int _cd;                 /* sceSifClientData for the fs channel */
+extern iob_t *get_iob(int fd);
+extern int DeleteSema(int semid);
+extern int sceSifCallRpc(void *cd, unsigned int fno, int mode, void *send,
+                         int ssize, void *recv, int rsize, void *ef, void *ea);
+
+int sceDclose(int fd)
+{
+    ee_sema_t sema;
+    int result;
+    iob_t *p;
+    int semid;
+    fs_send_t *sd;
+    int done;
+    int r;
+    int lim;
+
+    sd = &_send_data;
+    p = get_iob(fd);
+    _sceFsWaitS(10);
+    if (_fs_init == 0) {
+        _sceFsSigSema();
+        return -1;
+    }
+    if (p == 0 || p->used == 0) {
+        _sceFsSigSema();
+        return -9;
+    }
+    sd->fd = p->fd;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    _send_data.semid = semid;
+    sd->dst = &result;
+    sd->size = 4;
+    if (sceSifCallRpc(&_cd, 10, 0, sd, 20, &_rcv_data_rpc, 4, 0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    p->used = 0;
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    r = result;
+    /* The result is normalised to 0 on success.  The original compares
+     * against -1 held in a REGISTER (`li v1,-1; slt v1,v1,v0`), which
+     * gcc will not emit for any spelling of the comparison -- `r >= 0`,
+     * `r > -1` and `-1 < r` all canonicalise to `slti v1,v0,0`.  The
+     * laundered constant is the only way to keep -1 in a register; it
+     * emits nothing. */
+    lim = -1;
+    LAUNDER(lim);
+    if (lim < r)
+        r = 0;
+    return r;
+}
