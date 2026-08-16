@@ -634,6 +634,7 @@ typedef struct {
     char pad0C[0xC];
     int fC;
     int f10;
+    int f14;                   /* 0x14: spare skill points */
 } PARAOBJ;
 extern int MenuParaPtNowGet(int nBase, int nType);
 extern int MenuParaUpMaxGet(int nType);
@@ -3885,19 +3886,26 @@ void MenuAgwsListMake_Pilot(void)
     WindowSPSetSelect(win, &D_0036C200[40]);
 }
 
-/* TODO: near-miss (LENGTH ~60) - the retail build runs the repurposed-ptr
-   pattern (&MenuWork phase 1 in $s0 via a kept $s6 lui half, list walker
-   phase 2, tail rematerialized from $s6); ours reproduces the s6 half but
-   the allocator hands ptr $s3 instead of $s0 and shifts every copy. */
+/* TODO: near-miss (32 diffs, was 60; 88 orig vs 89 built). Fixed since the
+   last pass: pinning the four long-lived values to the retail registers
+   (ptr $s0, n $s1, pSort $s2, w2 $s3, win $s4) and splitting the sort count
+   into a separate variable so the `> 0` test reads the raw return in $v0
+   and the loop counter is assigned inside the block, as the retail build
+   does. What is left: the AgwsList load lands straight in $s4 instead of a
+   temp; the mount-index byte uses $v1 with a flipped addu operand order;
+   and the five window-header stores come out in a scheduler-chosen order
+   (source order provably has no effect on that -- see the 120-permutation
+   note on MenuSkillListChange00). */
 /* Build the AGWS weapon list for the selected mount: enable by equip-pos check */
 void MenuAgwsListMake_Wpn(void)
 {
-    int *pSort;
-    void *ptr;
-    MENUTECWORK *w2;
-    SHOPWINSP *win;
-    int n;
+    PIN(int *pSort, "$18");
+    PIN(void *ptr, "$16");
+    PIN(MENUTECWORK *w2, "$19");
+    PIN(SHOPWINSP *win, "$20");
+    PIN(int n, "$17");
     int cnt;
+    int nCnt;
 
     ptr = &MenuWork;
     pSort = MenuSortAddrGet(0);
@@ -3906,10 +3914,11 @@ void MenuAgwsListMake_Wpn(void)
     MenuSortSet(0, 4,
         *((signed char *)ptr + ((MENUTECWORK *)ptr)->b56 + 0x10) | 0x2000);
     MenuListMake(0, 0);
-    cnt = MenuSortCheck(0);
-    if (cnt > 0) {
+    nCnt = MenuSortCheck(0);
+    if (nCnt > 0) {
         w2 = (MENUTECWORK *)ptr;
         ptr = (unsigned char *)n + 8;
+        cnt = nCnt;
         do {
             if (MenuWeaponEquipPosCheck(w2->h64, *(short *)pSort,
                     *((signed char *)w2 + w2->b56 + 0x10),
@@ -6435,4 +6444,169 @@ void MenuTecMenuMain(void)
     default:
         return;
     }
+}
+
+/* TODO: near-miss (12 instructions short, 132 orig vs 120 built) - every
+   store, the cursor-row arithmetic ((signed char)row / 2 * 24) and both
+   MoveSlide calls are recovered and in the retail order. The gap is the
+   base-pseudo wall this file hits in every screen whose init block is
+   straight-line rather than loop-driven (see MenuTecExMain, MenuItemExMain,
+   MenuTecMenuMain): the retail build parks w+4, w+12, w+16, w+20, w+32,
+   w+816 and w+3872 in registers and addresses the window fields off them,
+   while gcc folds every one into an immediate offset off the work pointer.
+   -fforce-addr recreates the bases (480 -> 516 bytes here) but overshoots
+   MenuTecExMain and MenuItemExMain, so it is not the retail flag. */
+/* Item screen sort-select window: a small list frame that slides in from
+   the left on the sort page, with a cursor sprite tracking the row */
+typedef struct {
+    unsigned char nState;      /* 0x000 */
+    char pad001;
+    signed char b02;           /* 0x002 */
+    char pad003;
+    int nColor;                /* 0x004 */
+    WINDOWDX win;              /* 0x008 */
+    char pad19C[0x330 - 0x19C];
+    MENUSELECTDX sel;          /* 0x330 */
+    char pad340[0xF20 - 0x340];
+    ESPRITE spr;               /* 0xF20 */
+} MENU_ITEM_SELECT_WORK;
+
+extern MENU_ITEM_SELECT_WORK *MenuItemSelect;
+
+void MenuItemSelectMain(void)
+{
+    static char *msg00[] = { "Categorical\nNumerical\nAlphabetical\nBack" };
+    static char *msg10[] = { "Sort" };
+    MENU_ITEM_SELECT_WORK *w;
+    short nTarget[3];
+    int nRow;
+
+    w = MenuItemSelect;
+    switch (w->nState) {
+    case 0:
+        w->nColor = 0x00FFFFF0;
+        WindowDXSet(&w->win);
+        w->win.pTitle = msg10[0];
+        w->win.pMsg = &w->sel;
+        w->win.nColor = w->nColor;
+        w->win.pFunc = MenuSelectWindow;
+        w->win.nW = 176;
+        w->sel.apText[0] = msg00[0];
+        w->win.nH = 102;
+        w->sel.nRow = 0;
+        w->sel.nSel = 0;
+        w->win.nX = -208;
+        w->win.nY = 160;
+        w->win.nState = 1;
+        WindowDXMain(&w->win);
+        w->win.nState = 3;
+        eSpriteSet(&w->spr, 1546);
+        w->b02 = 0;
+        w->nState = 2;
+        w->spr.nColor = w->nColor + 2;
+    case 2:
+        nTarget[0] = -208;
+        nTarget[1] = 160;
+        nTarget[2] = 0;
+        if (MenuWork.state == 128) {
+            nTarget[0] = 80;
+            nTarget[2] = 1;
+            w->sel.nSel = MenuWork.b72;
+        }
+        MoveSlide(&w->win.nX, &nTarget[0], 3.0f);
+        MoveSlide(&w->win.nY, &nTarget[1], 3.0f);
+        WindowDXMain(&w->win);
+        w->spr.nX = w->win.nX + 144;
+        nRow = (signed char)*((unsigned char *)&MenuWork.b31 + MenuWork.b30);
+        w->spr.nY = w->win.nY + nRow / 2 * 24 + 2;
+        eSpriteMain(&w->spr);
+        break;
+    default:
+        return;
+    }
+}
+
+extern char D_004C99D8[];
+extern int SkillGetPtGet(int nId);
+extern int SkillCharSkillLvGet(int nChr);
+extern void WindowSPSetSelect(void *pWin, void *pSel);
+extern void WindowSPSelect(void *pWin, int n);
+
+/* TODO: near-miss (66 diffs, 124 orig vs 123 built) - the loop body, all
+   three greying tests and the window refresh are recovered. Three walls:
+   the three loop registers come out rotated one down ($s7/$s6/$s8 where the
+   retail build has $s8/$s7/$s6, and pinning them costs 20 bytes); the
+   already-known-skill test compiles to `bnezl` with the store annulled
+   where the retail build uses `beqzl` with the join's load annulled (one
+   instruction); and the five window-header stores are emitted in a
+   scheduler-chosen order - ALL 120 source permutations of those five
+   assignments give the identical 66 diffs, so source order has no effect
+   there at all (same wall as MenuSkillListChange01's tail). */
+/* Rebuild the skill-extract list for the current character: every entry is
+   greyed (b8 = 1) when the character already has the skill, when its set
+   level is above the character's, or when it costs more than the spare
+   points, then the window is refreshed onto it */
+void MenuSkillListChange00(void)
+{
+    int *pSort;
+    int *q;
+    MENUTECLISTENT *p;
+    SHOPWINSP *win;
+    PARAOBJ *pPara;
+    MENUSKILLREC *rec;
+    int n;
+    int cnt;
+    int nId;
+    int nPt;
+    int nLv;
+    int nSet;
+    int one;
+
+    pSort = MenuSortAddrGet(0);
+    p = (MENUTECLISTENT *)MenuListGet(0);
+    win = (SHOPWINSP *)(MenuSkillList + 12);
+    pPara = func_A19210(MenuWork.bChr);
+    MenuSortSet(0, 16, MenuWork.b31 + 256);
+    MenuListMake(0, 0);
+    n = MenuSortCheck(0);
+    if (n > 0) {
+        q = pSort;
+        cnt = n;
+        one = 1;
+        do {
+            nId = *(short *)q;
+            q++;
+            rec = (MENUSKILLREC *)func_A1A548(nId);
+            nPt = SkillGetPtGet(nId);
+            nLv = SkillCharSkillLvGet(MenuWork.bChr);
+            p->f4 = nPt;
+            nSet = SkillSetLvGet(nId);
+            p->b8 = 0;
+            p->b9 = nSet;
+            if (rec->hSkill != 0) {
+                if (func_A19698(MenuWork.bChr, rec->hSkill) != 0) {
+                    p->b8 = one;
+                }
+            }
+            if (nLv < p->b9) {
+                p->b8 = one;
+            }
+            if (pPara->f14 < nPt) {
+                p->b8 = one;
+            }
+            cnt--;
+            p++;
+        } while (cnt != 0);
+    }
+    win->b15 = 8;
+    win->h0C = 276;
+    win->h0E = 198;
+    win->b01 = 7;
+    win->b14 = 1;
+    win->p10 = D_004C99D8;
+    win->p1C = MenuListGet(0);
+    WindowSPItemChange(win);
+    WindowSPSetSelect(win, &D_0036C200[MenuWork.b31 * 5]);
+    win->b26 = 4;
+    WindowSPSelect(win, 0);
 }
