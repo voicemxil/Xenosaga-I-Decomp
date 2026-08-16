@@ -1,18 +1,10 @@
 /* PS2 SDK sceMc (memory card) client side.
  *
  * ---------------------------------------------------------------------
- * FLAG REQUEST (verified, measured 2026-08-15).  Like scePad.c and
- * sceCd.c, this translation unit was built WITHOUT
- * `-fno-schedule-insns`.  Adding
- *
- *     FILE_CFLAGS_OVERRIDE["sceMc.c"] = "-O2 -G0"
- *
- * makes every function below match byte for byte; under the current
- * SDK_CFLAGS only sceMcMkdir and sceMcGetSlotMax do, so the other six
- * are present but deliberately NOT registered in config/decompiled.txt.
- * Measured at "-O2 -G0": 8 match, 0 not.  Ready-to-paste registrations
- * are in the commit message.
- * ---------------------------------------------------------------------
+ * BUILD FLAG.  Like scePad.c and sceCd.c, this translation unit was
+ * built WITHOUT `-fno-schedule-insns`; configure.py carries
+ * FILE_CFLAGS_OVERRIDE["sceMc.c"] = "-O2 -G0", under which every
+ * function below matches byte for byte.
  *
  * Every call here follows one template: grab the module semaphore
  * without blocking, refuse if the IOP-side module never bound, marshal

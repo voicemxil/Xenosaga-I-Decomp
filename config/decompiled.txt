@@ -2327,3 +2327,4 @@ Java_xeno_Chr_look_eye_set__FF = 0x00300CB8, 0xA0; // Java_Chr
 JNI_searchClasses = 0x002F0A90, 0xFC; // JNI
 JTHREAD_cntl = 0x003058C8, 0x8C; // JTHREAD
 sceGsSyncVCallback = 0x0020ABC8, 0xA0; // sceGs
+sceCdDelayThread = 0x0020C940, 0x68; // sceCd.c

@@ -54,8 +54,8 @@ void *sceSifSetSysCmdBuffer(void *buf, int size)
 {
     void *old = (void *)_data_table_009918D8[3];
 
-    _data_table_009918D8[4] = size;
     _data_table_009918D8[3] = (int)buf;
+    _data_table_009918D8[4] = size;
     return old;
 }
 
@@ -63,8 +63,8 @@ void *sceSifSetCmdBuffer(void *buf, int size)
 {
     void *old = (void *)_data_table_009918D8[5];
 
-    _data_table_009918D8[6] = size;
     _data_table_009918D8[5] = (int)buf;
+    _data_table_009918D8[6] = size;
     return old;
 }
 
@@ -215,8 +215,8 @@ void sceSifAddCmdHandler(int idx, void (*handler)(void), void *arg)
         base = _data_table_009918D8[5];
     off = off + base;
     slot = (int *)off;
-    slot[1] = (int)arg;
     slot[0] = (int)handler;
+    slot[1] = (int)arg;
 }
 
 /* sceSifSyncIop: reads sceSifGetReg(4) (an IOP sync/status register),

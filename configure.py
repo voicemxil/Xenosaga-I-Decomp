@@ -96,6 +96,9 @@ FILE_CFLAGS_OVERRIDE = {
     # multiplier units (mult1 + mult), which only the first scheduling
     # pass emits. Verified per-file -- adding it to SDK_CFLAGS globally
     # breaks sceMpeg.c (1 -> 7) and sceVif1Pk.c (6 -> 15).
+    "scePad.c": "-O2 -G0",
+    "sceCd.c": "-O2 -G0",
+    "sceSif.c": "-O2 -G0",
     "sceMc.c": "-O2 -G0",
     "sceDeci2.c": "-O2 -G0",
     "libm.c": "-O2 -G0",

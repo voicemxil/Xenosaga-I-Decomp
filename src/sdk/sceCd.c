@@ -1,24 +1,17 @@
 /* PS2 SDK sceCd (CD/DVD filesystem) thin wrappers.
  *
  * ---------------------------------------------------------------------
- * FLAG REQUEST (verified, measured 2026-08-15).  Like scePad.c, this
- * translation unit was built WITHOUT `-fno-schedule-insns`.  Adding
- *
- *     FILE_CFLAGS_OVERRIDE["sceCd.c"] = "-O2 -G0"
- *
- * makes ALL NINE functions here match as plain C, and it lets the four
- * `LAUNDER_V(mode)` steering constructs in sceCdStInit/StSeek/StSeekF/
- * StStop be deleted: they exist only to fake, under the wrong flag, a
- * schedule the real flag produces for free.  Measured at "-O2 -G0" with
- * those four LAUNDER_V lines removed: 9 match, 0 not.  Under the current
- * flags two functions (sceCdStStart, sceCdInitEeCB) cannot be written as
- * C at all and stay parked as asm below.
- *
- * The flag must be per file: sceSif.c regresses at "-O2 -G0"
- * (sceSifAddCmdHandler goes 0 -> 2 scheduling diffs), and sceMpeg.c /
- * mpeg.c / sceVif1Pk.c are unaffected either way.  Do not change
- * SDK_CFLAGS itself.
- * --------------------------------------------------------------------- */
+ * BUILD FLAG.  Like scePad.c, this translation unit was built WITHOUT
+ * `-fno-schedule-insns`; configure.py carries
+ * FILE_CFLAGS_OVERRIDE["sceCd.c"] = "-O2 -G0".  All eleven functions
+ * here are plain C under it, including sceCdStStart and sceCdInitEeCB,
+ * which could not be written as C at all under the old flags.  The four
+ * `LAUNDER_V(mode)` steering constructs that used to sit in
+ * sceCdStInit/StSeek/StSeekF/StStop are gone with it: they existed only
+ * to fake, under the wrong flag, the schedule the right flag produces
+ * for free.
+ * ---------------------------------------------------------------------
+ */
 
 #include "matching.h"
 
@@ -72,7 +65,6 @@ int sceCdStInit(int a0, int a1, int a2)
 
     stm_status = 0;
     mode = (int)&dum_mode;
-    LAUNDER_V(mode);
     return sceCdStream(a0, a1, a2, 5, mode);
 }
 
@@ -80,7 +72,6 @@ int sceCdStSeek(int a0)
 {
     int mode = (int)&dum_mode;
 
-    LAUNDER_V(mode);
     return sceCdStream(a0, 0, 0, 4, mode);
 }
 
@@ -88,49 +79,16 @@ int sceCdStSeekF(int a0)
 {
     int mode = (int)&dum_mode;
 
-    LAUNDER_V(mode);
     return sceCdStream(a0, 0, 0, 9, mode);
 }
 
-/* ASM-TRANSCRIBED: needs FILE_CFLAGS_OVERRIDE["sceCd.c"] = "-O2 -G0"
- * (see the FLAG REQUEST at the top of this file).  Byte-exact as
- *
- *     int sceCdStStart(int a0, int a1)
- *     {
- *         stm_status = 1;
- *         return sceCdStream(a0, 0, 0, 1, a1);
- *     }
- *
- * -- the same dispatcher shape as sceCdStInit/StSeek/StSeekF/StStop
- * above.  Under -fno-schedule-insns the `sw` of stm_status lands one
- * slot earlier than the original (3 words differ); with the scheduler
- * enabled it matches with no steering constructs at all. */
-
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl sceCdStStart\n"
-    ".ent sceCdStStart\n"
-    "sceCdStStart:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "addiu $sp,$sp,-16\n"
-    "lui $3,0x4b\n"
-    "li $2,1\n"
-    "daddu $8,$5,$0\n"
-    "sd $31,0($sp)\n"
-    "daddu $5,$0,$0\n"
-    "sw $2,-11152($3)\n"
-    "daddu $6,$0,$0\n"
-    "jal sceCdStream\n"
-    "li $7,1\n"
-    "ld $31,0($sp)\n"
-    "jr $31\n"
-    "addiu $sp,$sp,16\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end sceCdStStart\n"
-);
+/* Was hand-transcribed asm while this TU was built with
+ * -fno-schedule-insns; with -O2 -G0 the plain C matches. */
+int sceCdStStart(int a0, int a1)
+{
+    stm_status = 1;
+    return sceCdStream(a0, 0, 0, 1, a1);
+}
 
 int sceCdStStop(void)
 {
@@ -138,7 +96,6 @@ int sceCdStStop(void)
 
     stm_status = 0;
     mode = (int)&dum_mode;
-    LAUNDER_V(mode);
     return sceCdStream(0, 0, 0, 3, mode);
 }
 
@@ -175,142 +132,52 @@ void *sceCdCallback(void *func)
     return old;
 }
 
-/* ASM-TRANSCRIBED: needs FILE_CFLAGS_OVERRIDE["sceCd.c"] = "-O2 -G0"
- * (see the FLAG REQUEST at the top of this file).  Byte-exact as
- *
- *     typedef struct sceThreadParam {
- *         int   status;
- *         void *entry;
- *         void *stack;
- *         int   stackSize;
- *         void *gpReg;
- *         int   initPriority;
- *         int   currentPriority;
- *         int   attr;
- *         int   option;
- *     } sceThreadParam;
- *
- *     extern int cb_thid;             // 0x004ABA14
- *     extern int my_thid;             // 0x00996C90
- *     extern int my_th_info;          // 0x00996C98
- *     extern sceThreadParam cb_tp;    // 0x00996CC8
- *     extern void _Cdvd_cbLoop(void); // 0x0020CAA0
- *     extern int _gp;                 // 0x004DFB70, from the link script
- *
- *     int sceCdInitEeCB(int prio, void *stack, int stackSize)
- *     {
- *         int r = 1;
- *
- *         if (cb_thid == 0) {
- *             my_thid = GetThreadId();
- *             ReferThreadStatus(my_thid, &my_th_info);
- *             cb_tp.stackSize = stackSize;
- *             cb_tp.gpReg = &_gp;
- *             cb_tp.entry = (void *)_Cdvd_cbLoop;
- *             cb_tp.stack = stack;
- *             cb_tp.initPriority = prio;
- *             cb_thid = CreateThread(&cb_tp);
- *             StartThread(cb_thid, 0);
- *         } else {
- *             ChangeThreadPriority(cb_thid, prio);
- *             r = 0;
- *         }
- *         return r;
- *     }
- *
- * Lazily spins up the EE-side CD event thread the first time it is
- * called (`cb_thid` doubles as the "already running" guard); later
- * calls only re-prioritise the existing thread.  Note the `+16` field
- * really is the callee's $gp: 0x004DFB70 is exactly the link script's
- * `_gp = cod_LIT4_START + 0x7FF0`, which is what identified the struct
- * as a stock sceThreadParam.
- *
- * Two things are load-bearing and were found by measurement:
- *
- *   - `int r = 1;` with `r = 0;` in the else arm.  Written as
- *     `return 1;` / `return 0;` gcc materialises the constants at the
- *     returns and drops a callee-saved register: 48 words vs 53.
- *   - the store ORDER above (stackSize, gpReg, entry, stack,
- *     initPriority), which is not the struct's field order.  It decides
- *     which argument is born first and so which callee-saved register
- *     each one gets; the natural field order is 11 registers out, and
- *     stack-before-stackSize is 11 out as well.
- *
- * With FILE_CFLAGS_OVERRIDE["sceCd.c"] = "-O2 -G0" and exactly the C
- * above, this is a verified byte-for-byte match at 53 words -- checked
- * 2026-08-15, whole file 10 match / 0 not with both asm bodies deleted
- * and the four LAUNDER_V(mode) lines removed.  Under
- * -fno-schedule-insns it is 52 words vs 53: the scheduler is what
- * groups the three lui/addiu pairs for cb_tp/_gp/_Cdvd_cbLoop and keeps
- * the cb_tp base in v1 with a separate `move a0,v1` for the call. */
+/* Was hand-transcribed asm while this TU was built with
+ * -fno-schedule-insns; with -O2 -G0 the plain C matches. */
+typedef struct sceThreadParam {
+    int   status;
+    void *entry;
+    void *stack;
+    int   stackSize;
+    void *gpReg;
+    int   initPriority;
+    int   currentPriority;
+    int   attr;
+    int   option;
+} sceThreadParam;
 
-__asm__(
-    ".text\n"
-    ".p2align 3\n"
-    ".globl sceCdInitEeCB\n"
-    ".ent sceCdInitEeCB\n"
-    "sceCdInitEeCB:\n"
-    ".set noreorder\n"
-    ".set nomacro\n"
-    "addiu $sp,$sp,-96\n"
-    "sd $20,64($sp)\n"
-    "sd $17,16($sp)\n"
-    "lui $20,0x4b\n"
-    "daddu $17,$4,$0\n"
-    "sd $19,48($sp)\n"
-    "sd $18,32($sp)\n"
-    "li $19,1\n"
-    "sd $16,0($sp)\n"
-    "daddu $18,$5,$0\n"
-    "lw $4,-17900($20)\n"
-    "daddu $16,$6,$0\n"
-    "bnez $4,1f\n"
-    "sd $31,80($sp)\n"
-    "jal GetThreadId\n"
-    "nop\n"
-    "lui $3,0x99\n"
-    "lui $5,0x99\n"
-    "sw $2,27792($3)\n"
-    "daddu $4,$2,$0\n"
-    "jal ReferThreadStatus\n"
-    "addiu $5,$5,27800\n"
-    "lui $3,0x99\n"
-    "lui $2,0x4e\n"
-    "lui $5,0x21\n"
-    "addiu $3,$3,27848\n"
-    "addiu $2,$2,-1168\n"
-    "addiu $5,$5,-13664\n"
-    "sw $16,12($3)\n"
-    "daddu $4,$3,$0\n"
-    "sw $2,16($3)\n"
-    "sw $5,4($3)\n"
-    "sw $18,8($3)\n"
-    "jal CreateThread\n"
-    "sw $17,20($3)\n"
-    "daddu $5,$0,$0\n"
-    "sw $2,-17900($20)\n"
-    "jal StartThread\n"
-    "daddu $4,$2,$0\n"
-    "b 2f\n"
-    "daddu $2,$19,$0\n"
-    "1:\n"
-    "daddu $5,$17,$0\n"
-    "jal ChangeThreadPriority\n"
-    "daddu $19,$0,$0\n"
-    "daddu $2,$19,$0\n"
-    "2:\n"
-    "ld $31,80($sp)\n"
-    "ld $20,64($sp)\n"
-    "ld $19,48($sp)\n"
-    "ld $18,32($sp)\n"
-    "ld $17,16($sp)\n"
-    "ld $16,0($sp)\n"
-    "jr $31\n"
-    "addiu $sp,$sp,96\n"
-    ".set macro\n"
-    ".set reorder\n"
-    ".end sceCdInitEeCB\n"
-);
+extern int cb_thid;                 /* 0x004ABA14, doubles as the "running" guard */
+extern int my_thid;                 /* 0x00996C90 */
+extern int my_th_info;              /* 0x00996C98 */
+extern sceThreadParam cb_tp;        /* 0x00996CC8 */
+extern void _Cdvd_cbLoop(void);     /* 0x0020CAA0 */
+extern int _gp;                     /* 0x004DFB70, from the link script */
+extern int GetThreadId(void);
+extern int ReferThreadStatus(int thid, void *info);
+extern int CreateThread(sceThreadParam *param);
+extern int StartThread(int thid, void *arg);
+extern int ChangeThreadPriority(int thid, int prio);
+
+int sceCdInitEeCB(int prio, void *stack, int stackSize)
+{
+    int r = 1;
+
+    if (cb_thid == 0) {
+        my_thid = GetThreadId();
+        ReferThreadStatus(my_thid, &my_th_info);
+        cb_tp.stackSize = stackSize;
+        cb_tp.gpReg = &_gp;
+        cb_tp.entry = (void *)_Cdvd_cbLoop;
+        cb_tp.stack = stack;
+        cb_tp.initPriority = prio;
+        cb_thid = CreateThread(&cb_tp);
+        StartThread(cb_thid, 0);
+    } else {
+        ChangeThreadPriority(cb_thid, prio);
+        r = 0;
+    }
+    return r;
+}
 
 /* ------------------------------------------------------------------
  * Synchronous command waiting.
