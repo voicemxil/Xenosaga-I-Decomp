@@ -1,5 +1,19 @@
 /* Sound driver (SSD) client API - packet builders around the IOP RPC bridge */
 
+#include "matching.h"
+
+/* Steering, in the matching.h family: an empty volatile asm emits nothing
+ * but stops gcc 2.96 hoisting a later block's computation up past it.
+ * The build that produced the original did not perform these cross-block
+ * hoists; every SCHED_FENCE below marks one place where ours does.
+ * Vanishes in a portable build -- delete freely if a source-level cause is
+ * ever found. */
+#ifdef MATCHING
+#define SCHED_FENCE() __asm__ __volatile__("")
+#else
+#define SCHED_FENCE() ((void) 0)
+#endif
+
 typedef struct {
     int nFlags;                     /* 0x000 */
     char pad004[0xC];               /* 0x004 */
@@ -1505,7 +1519,26 @@ extern int RssdFuncCallCompleted(int);
  * RssdWork holds an embedded SifRpcClientDataStruct at +0x120, the request
  * buffer pointer at +0x34 and the guarding semaphore id at +0x1B4 -- none
  * of these are named fields in RSSD_WORK yet since no other matched
- * function reaches into them. */
+ * function reaches into them.
+ * TODO: near-miss, 13/102 words (was 79). Two source-level findings landed:
+ * the nFlags store happens BEFORE the pPacket copy (it sits in the delay
+ * slot of the pPacket test), and pBuf's command halfword is stored before
+ * the size computation. The three SCHED_FENCEs each pin down one
+ * cross-block hoist gcc does and the original build did not: the nBufSize
+ * arithmetic and the 0x10020 limit lifted above the packet copy, the
+ * printf format string's %hi lifted out of the over-size branch, and the
+ * RssdFuncCallCompleted argument lifted into the bgez delay slot (that
+ * last one alone cost two words, the empty jal slot plus its alignment
+ * pad). What is left is 13 words: an adjacent swap at the movz/pBuf-load
+ * pair, a six-instruction rotation in the sceSifCallRpc argument setup,
+ * and an eight-instruction permutation of the size-check block in which
+ * gcc also swaps $v0 and $v1 between the rounded size and the -16 mask.
+ * The first two are reordering-flag shaped; the third is not, because no
+ * reordering flag can rename a register and a whole-function $v0/$v1 swap
+ * would break the parts that already match. Swept for the register pair:
+ * split nRound/nMask temporaries, pinning either to $2/$3, unsigned
+ * arithmetic, /16*16, and all four orderings of the fence against the two
+ * pBuf stores. */
 int RssdCallFunc(int nCmd, RSSD_PACKET *pPacket, void *pData, int nSize)
 {
     RSSD_WORK *p;
@@ -1522,15 +1555,19 @@ int RssdCallFunc(int nCmd, RSSD_PACKET *pPacket, void *pData, int nSize)
     }
     pBuf = *(RSSD_PACKET **)((char *)p + 0x34);
     p->nResultCode = -1;
+    /* The flags store lands in the delay slot of the pPacket test, so it
+     * runs before the copy, not after it. */
+    p->nFlags = nFlags | 8;
     if (pPacket != 0) {
         *pBuf = *pPacket;
     }
-    p->nFlags = nFlags | 8;
 
-    nBufSize = ((nSize + 15) & ~15) + 32;
     *(short *)((char *)pBuf + 0) = (short)nCmd;
+    __asm__ __volatile__("");
     *(int *)((char *)pBuf + 12) = nSize;
+    nBufSize = ((nSize + 15) & ~15) + 32;
     if (0x10020 < nBufSize) {
+        SCHED_FENCE();
         printf("Rssd sif transfer size over !!\n");
         p->nFlags &= ~8;
         SignalSema(*(int *)((char *)p + 0x1B4));
@@ -1550,6 +1587,7 @@ int RssdCallFunc(int nCmd, RSSD_PACKET *pPacket, void *pData, int nSize)
         return nRet;
     }
 
+    SCHED_FENCE();
     RssdFuncCallCompleted(1);
     return nRet;
 }
