@@ -197,6 +197,7 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
+    "xglHdd.c": "--swap-regs xglHddMcCheckCore:10-11:50 --swap-regs xglHddMcCheckCore:3-10:52-55 --swap-regs xglHddMcCheckCore:11-3:52",
     "Hit.c": "--rotate HitCheckCorner:17:5",
     "sceSif.c": "--swap-regs sceSifInitIopHeap:2-3:25,27 --swap-adjacent sceSifInitIopHeap:26!",
     "sceMpegDec.c": "--swap-regs _isOutSizeOK:2-3:17-22",

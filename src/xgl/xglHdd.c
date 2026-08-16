@@ -272,7 +272,18 @@ int xglHddMcCheckYourSaves(void *pBuf);
  * per-term temporaries (26: they also reorder the divisions),
  * `nNeed = B; nNeed += A; ...` (24), an extra paren group around
  * (B + A) (17), and hoisting only the 964 term into a temp (9).
- * The two 5-diff shapes differ only in WHICH rotation you get. */
+ * Wave-5 additions, none better than 5: `7 + A + B + C` (6),
+ * `(A + B) + (C + 7)` (6), `A + B + 7 + C` (6), `A + (B + C) + 7` (17),
+ * `A + (B + C + 7)` (19), a PIN of nNeed to $t2 with and without
+ * LAUNDER/LAUNDER_V (15, 15, +4 bytes), and all six orderings of the
+ * two sceDevctl calls and the pInfo load (only the written order has
+ * the right length at all).
+ * CLOSED with three ranged --swap-regs sites: the accumulator naming
+ * is a local_alloc tie-break confined to five instructions, which is
+ * exactly what the ranged form exists for.  $t2/$t3 exchange at the
+ * first addu, then $v1/$t2 over the rest of the chain with an extra
+ * $t3/$v1 exchange on the second addu alone (the permutation is a
+ * 3-cycle, so it takes two swaps in that one window). */
 /* Check that the mounted card image has room for another save: pFree[0]
  * is the scratch buffer, pFree[1] the region descriptor and pFree[2] the
  * save size.  Returns 0 when it fits, 1/-4 for the "card too small"
