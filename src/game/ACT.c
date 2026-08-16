@@ -1198,3 +1198,45 @@ void ACT_DrawShadow(ACTOR *a)
         Footstep(a);
     }
 }
+
+/* Non-gp_rel: an incomplete array keeps a <=8-byte extern out of sdata. */
+extern int D_00338698[];
+extern int RES_loadFile(int, int, int, int);
+
+/* Bind the actor's motion resource, falling back to the shared default. */
+void ACT_loadMotion(ACTOR *a, int nId, int nType)
+{
+    int nRes;
+    int nKind;
+    /* A SECOND local for the post-load re-read: one variable reuses the
+       first read's register, the original uses a fresh one. */
+    int nKind2;
+
+    if (nId & 0xFF0000) {
+        return;
+    }
+    nKind = a->nAlive & 0xF000;
+    nId &= 0xFFFFFF;
+    if (nKind == 0x5000 || nKind == 0x6000) {
+        a->pPack[0] = 0;
+        ACT_setMotion(a, 0x8000);
+        return;
+    }
+    nRes = 0;
+    /* The type fixup is hoisted OUT of the resource-limit test: inside it,
+       gcc rotates every register in the call setup (23 diffs). */
+    if (nType == 2) {
+        nType = 1;
+    }
+    if (D_00338698[0] <= 0x0FFFFFFF) {
+        nRes = RES_loadFile(-1, 2, (nType << 24) + nId, 0);
+        if (nRes == 0) {
+            nRes = RES_loadFile(-1, 2, 0x01000001, 0);
+        }
+    }
+    a->pPack[0] = nRes;
+    nKind2 = (unsigned short)a->nAlive & 0xF000;
+    if (nKind2 != 0x5000 && nKind2 != 0x6000) {
+        ACT_setMotion(a, 0x8000);
+    }
+}
