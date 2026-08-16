@@ -2879,3 +2879,4 @@ parent_buf_search = 0x00230F28, 0x74; // nmlModel.c
 sceSifBindRpc = 0x002034E0, 0x140; // sceSif.c
 sefLerpVector = 0x002E17F8, 0x110; // sef.c
 AlphaGroupSortEntry = 0x00230B98, 0x68; // nmlModel.c
+sefLerpIVector = 0x002E1970, 0x10C; // sef.c

@@ -438,7 +438,6 @@ void sefGetVecMatrix(void *pObj, SEF_VEC4 *pA, SEF_VEC4 *pB)
 }
 
 extern void sefLerpVectorSC(void *a, void *b);
-extern void sefLerpIVector(void *a, void *b);
 extern void sefProgressInt(void *a, void *b);
 /* c is dead: only b's null-ness is examined. The call is unconditional --
  * the null test only picks the table, it does not skip the lookup -- which
@@ -2186,4 +2185,125 @@ void SGsAddGifUV(SGS_PKT *p, int nU, int nV)
     ((SGS_QWH *)(p->pBase + p->nQw * 16))->u = nU;
     ((SGS_QWH *)(p->pBase + p->nQw * 16))->v = nV;
     p->nQw = p->nQw + 1;
+}
+
+/* --- sefLerpVector / sefLerpIVector: advance a keyframe cursor one
+ * frame and interpolate between the two straddling records.  The table
+ * is packed short[5] records -- a 16-bit time followed by a short[3]
+ * value and a pad -- and 1024 in a time field marks the end. --- */
+
+typedef struct
+{
+    short t;                /* 0x00 */
+    short x, y, z;          /* 0x02 */
+    short w;                /* 0x08 */
+} SEF_KEY;                  /* 10 bytes */
+
+typedef struct
+{
+    int   nIdx;             /* 0x00  cursor into the key table */
+    int   nTime;            /* 0x04  current time */
+    char  pad0008[8];
+    float aVec[4];          /* 0x10  interpolation result */
+} SEF_LERP;
+
+extern SEF_KEY *sefProgressKey5(SEF_KEY *pTbl, SEF_LERP *pKey);
+extern void sefLerpIVectorA(void *pSrc, void *pDst);
+
+int sefLerpVector(SEF_KEY *pTbl, SEF_LERP *pKey)
+{
+    SEF_KEY *p;
+    float *pDst = pKey->aVec;
+    int t0;
+    int t1;
+    float fScale;
+
+    p = &pTbl[pKey->nIdx];
+    if (p[1].t == 1024) {
+        return 0;
+    }
+    p = sefProgressKey5(pTbl, pKey);
+    t0 = p->t;
+    t1 = p[1].t;
+    if (t0 != t1) {
+        fScale = (float)(pKey->nTime - t0) / (float)(t1 - t0);
+    /* Same unaligned ldl/ldr + pcgth/pextlh sign-extend as
+     * sefLerpVectorB, but over two pointers the caller already holds;
+     * dsrl drops each record's leading time field. VU0 hardware. */
+    __asm__ __volatile__(".set noreorder\n"
+        "mfc1 $9, %3\n"
+        "qmtc2 $9, $vf3\n"
+        "ldl $8, 0x7(%0)\n"
+        "ldr $8, 0x0(%0)\n"
+        "ldl $9, 0x7(%1)\n"
+        "ldr $9, 0x0(%1)\n"
+        "dsrl $8, $8, 0x10\n"
+        "dsrl $9, $9, 0x10\n"
+        "pcgth $10, $0, $8\n"
+        "pcgth $11, $0, $9\n"
+        "pextlh $10, $10, $8\n"
+        "pextlh $11, $11, $9\n"
+        "qmtc2 $10, $vf1\n"
+        "qmtc2 $11, $vf2\n"
+        "vitof0.xyzw $vf1, $vf1\n"
+        "vitof0.xyzw $vf2, $vf2\n"
+        "vsub.xyz $vf2, $vf2, $vf1\n"
+        "vmulx.xyz $vf2, $vf2, $vf3x\n"
+        "vadd.xyz $vf2, $vf2, $vf1\n"
+        "sqc2 $vf2, 0x0(%2)\n"
+        ".set reorder" : : "r"(p), "r"(p + 1), "r"(pDst), "f"(fScale)
+            : "$8", "$9", "$10", "$11", "memory");
+        pDst[3] = 1.0f;
+    } else {
+        sefLerpVectorA(p, pDst);
+    }
+    return 1;
+}
+
+void sefLerpIVector(SEF_KEY *pTbl, SEF_LERP *pKey)
+{
+    SEF_KEY *p;
+    int *pDst = (int *)pKey->aVec;
+    int t0;
+    int t1;
+    float fScale;
+
+    p = &pTbl[pKey->nIdx];
+    if (p[1].t == 1024) {
+        return;
+    }
+    p = sefProgressKey5(pTbl, pKey);
+    t0 = p->t;
+    t1 = p[1].t;
+    if (t0 != t1) {
+        fScale = (float)(pKey->nTime - t0) / (float)(t1 - t0);
+    /* Integer-result twin: the records here are addressed past their
+     * time field, so no dsrl, and a vftoi0 on the way out. */
+    __asm__ __volatile__(".set noreorder\n"
+        "ldl $8, 0x7(%0)\n"
+        "ldr $8, 0x0(%0)\n"
+        "ldl $9, 0x7(%1)\n"
+        "ldr $9, 0x0(%1)\n"
+        "mfc1 $10, %3\n"
+        "qmtc2 $10, $vf3\n"
+        "pcgth $10, $0, $8\n"
+        "pcgth $11, $0, $9\n"
+        "pextlh $10, $10, $8\n"
+        "pextlh $11, $11, $9\n"
+        "qmtc2 $10, $vf1\n"
+        "qmtc2 $11, $vf2\n"
+        "vitof0.xyzw $vf1, $vf1\n"
+        "vitof0.xyzw $vf2, $vf2\n"
+        "vsub.xyz $vf2, $vf2, $vf1\n"
+        "vmulx.xyz $vf2, $vf2, $vf3x\n"
+        "vadd.xyz $vf2, $vf2, $vf1\n"
+        "vftoi0.xyzw $vf2, $vf2\n"
+        "sqc2 $vf2, 0x0(%2)\n"
+        ".set reorder" : : "r"(&p->x), "r"(&p[1].x), "r"(pDst), "f"(fScale)
+            : "$8", "$9", "$10", "$11", "memory");
+        return;
+    }
+    /* Outside the else, as the function's last statement: gcc only turns
+     * this into retail's `j sefLerpIVectorA` sibling jump there. */
+    sefLerpIVectorA(&p->x, pDst);
 }
