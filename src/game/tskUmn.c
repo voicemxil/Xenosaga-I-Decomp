@@ -2090,37 +2090,41 @@ typedef struct {
 extern void tyaUmlDispParamReset(void *pUml, int nMode);
 extern signed char tyaUmlDatabaseMain(void *pUml);
 
-/* TODO: PARKED at 216 built words against 210 original (185 differing
- * words by tools/scratch_diff.py; checkfile.py still prints 191,
- * because for a length-mismatched function its count is dominated by
- * the tail shift rather than by the real divergences).
- * Behaviour, every constant, every struct offset and both dispatch
- * shapes are recovered; the six extra words are all register
- * allocation:
+/* TODO: PARKED at 31 differing words of 210 -- and now the RIGHT
+ * length, which it was not before (216 built words against 210).
+ * Everything except two stores is in retail's exact order.
  *
- *  - the init arm computes the two record pointers into $t4/$t5 and
- *    then `move's them into $a2/$a3 for eRibbonSet, where retail builds
- *    them in $a2/$a3 once and stores from there (2 words).
- *  - the trailer materialised the constants 48 and 3 twice each and
- *    loaded tag.nY/tag.nColor once per use.  Naming each of them once
- *    (n48, n3, nNumY, nNumColor) is worth six differing words and is
- *    kept below; it did not shorten the function, so the extra length
- *    is entirely in the init arm.
+ * What closed the six extra words: every value this function both
+ * STORES and PASSES is one register in retail -- the two record
+ * pointers for eRibbonSet, the 48 for eRibbonMain, the 3 for
+ * eNumberMain, and tag.nY / tag.nColor.  Naming each of them once is
+ * necessary but not sufficient: gcc allocates the pseudo to a $t
+ * register and copies it into the argument register at the call, which
+ * is one word per value.  Each PIN below removes exactly that copy.
+ * They are not semantics -- in a portable build PIN degrades to a plain
+ * declaration and the code means the same thing.  (`nA1' deliberately
+ * serves two roles, the ribbon y and the tag y, because retail keeps
+ * $a1 for both and their live ranges do not overlap.)
  *
- * Measured this run: for THIS block the emitted store order is a
- * left-rotation of the source order by SIX groups, and it is stable --
- * writing the eleven header stores in retail's own emission order
- * produced exactly that order rotated by six.  The two pointer stores
- * are the one exception: whatever the rotation, gcc pushes them three
- * to four slots later than the pure rotation predicts, which is the
- * same fact as the two `move's.  So the next thing to try is not
- * another statement order -- it is whatever makes the pointer that is
- * ALSO a call argument keep one register for both roles.
+ * `nNumY' has to be `int', not `unsigned short': as a short it needs an
+ * `andi 0xffff' to promote for the argument, which is a word retail
+ * does not have.  (The opposite of tskUmnDataBaseExWin, where the cast
+ * is what the original does -- read the original before choosing.)
  *
- * Swept: source order = retail emission order, = that rotated by one,
- * and the original order; the pointers as `void *' locals, as casts,
- * and read back out of the struct; eRibbonSet prototyped and
- * unprototyped. */
+ * What is left: the two `sw' stores of pUmlName/pUmlText.  Retail emits
+ * them FIRST of the eleven header stores; gcc emits them seventh, and
+ * that position is INVARIANT -- measured with the pair at source index
+ * 0, 3, 5 and 9, and with the assignments split from the stores.  All
+ * nine other stores are in retail's order, so this is the whole
+ * remaining diff plus its knock-on register naming.  Also measured:
+ * for this block the emitted order of the other nine is a left-rotation
+ * of the source order by three groups, and that rotation is stable, so
+ * the source order below is chosen to land them on retail's.
+ *
+ * Swept: five source orders of the eleven stores; the pointers as
+ * locals, as casts, and read back out of the struct; eRibbonSet
+ * prototyped and unprototyped; the trailer locals assigned at the top
+ * of the block and immediately before each store. */
 void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
 {
     if (UmnWork.nScene != 2) {
@@ -2130,21 +2134,27 @@ void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
     switch (pTask->nState) {
     case 0: {
         static char msg00[16] = "\036\000Index Search:";
+        /* Both buffers are stored into the uml block AND passed to
+           eRibbonSet; gcc allocates them to $t-registers and copies. */
+        PIN(void *pNm, "$6");
+        PIN(void *pTx, "$7");
 
         w->nColor = 0x00F00000;
         tyaUmlDispParamReset(w->aUml, 0);
-        w->nUmlH2 = 314;
-        w->nUmlX = -272;
         w->nUmlY = 48;
         w->pUmlList = w->aList;
         w->pUmlRec = w->aRec;
-        w->pUmlName = w->aName;
-        w->pUmlText = w->aText;
+        pNm = w->aName;
+        pTx = w->aText;
+        w->pUmlName = pNm;
+        w->pUmlText = pTx;
         w->nUmlW = 1808;
         w->nUmlH = 480;
         w->nUmlW2 = 1920;
         w->nUmlColor = (unsigned int)w->nColor;
-        eRibbonSet(&w->rib, 3, w->aName, w->aText);
+        w->nUmlH2 = 314;
+        w->nUmlX = -272;
+        eRibbonSet(&w->rib, 3, pNm, pTx);
         w->rib.nW = 256;
         w->rib.nH = 24;
         eTagFontSet(&w->tag, "\001Num");
@@ -2208,10 +2218,9 @@ void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
                tag fields are stored into `num' AND passed.  Written as
                repeated literals/field reads gcc materialises each of
                them a second time for the argument. */
-            int n48;
-            int n3;
-            unsigned short nNumY;
-            int nNumColor;
+            PIN(int n3, "$7");
+            PIN(int nA1, "$5");
+            PIN(int nNumColor, "$6");
 
             nTarget = -272;
             if ((UmnWork.nPage >> 4) == 5) {
@@ -2221,27 +2230,27 @@ void tskUmnDataBaseKeyWord(TSK_TASK *pTask, UMN_KEYWORD *w)
             if (w->nUmlX == -272) {
                 w->bSlide = 0;
             }
-            n48 = 48;
-            w->nUmlY = n48;
+            nA1 = 48;
+            w->nUmlY = nA1;
+            w->rib.nY = nA1;
             w->rib.nColor = w->nColor;
-            w->rib.nY = n48;
             w->rib.nX = w->nUmlX;
-            eRibbonMain(&w->rib, n48);
+            eRibbonMain(&w->rib, nA1);
             w->tag.nX = w->nUmlX + 166;
             nTagY = w->nUmlY + 4;
             w->tag.nY = nTagY;
             w->tag.nColor = w->rib.nColor + 1;
             eTagFontMain(&w->tag, nTagY);
-            nNumY = w->tag.nY;
+            nA1 = w->tag.nY;
             nNumColor = w->tag.nColor;
             n3 = 3;
             w->num.nX = w->tag.nX + 41;
-            w->num.nY = nNumY;
+            w->num.nY = nA1;
             w->num.nColor = nNumColor;
             w->num.nValue = (w->nUmlTotalI << 16) + (unsigned short)w->nUmlSelI;
-            w->num.nDigits = n3;
             w->num.nAlign = n3;
-            eNumberMain(&w->num, nNumY, nNumColor, n3);
+            w->num.nDigits = n3;
+            eNumberMain(&w->num, nA1, nNumColor, n3);
         }
         break;
     }
