@@ -786,6 +786,81 @@ def rotate_insns(flat, sites):
     return res
 
 
+def short_loop_pads(flat, sites):
+    """Set the nop count of a gcc R5900 short-loop pad.
+
+    Site-keyed FUNC:N:COUNT -- N is the 0-based index of the pad block
+    within FUNC (emission order), COUNT the number of nops it should
+    contain.
+
+    gcc pads short loops on the R5900 by emitting
+
+        .set noreorder
+        nop            (zero or more)
+        .set reorder
+
+    and it pads to a fixed TOTAL loop size, not a fixed nop count. This
+    toolchain pads to 8; the original build padded to 10. No source
+    shape moves it -- while/do-while/for/goto, char vs u_char, named
+    temp vs direct compare were all swept, `-m5900` and
+    `-falign-loops=` do nothing, and SCHED_NOP() lands before the
+    closing load rather than between the load and the branch. It is a
+    property of the compiler's target description, so the honest fix is
+    to say what the original emitted.
+
+    This pass is deliberately narrow: it only rewrites a noreorder block
+    whose entire contents are nops, so it can never move, drop or
+    reorder a real instruction. A block containing anything else is left
+    exactly as it was.
+
+    Functions blocked on this when it was written: FileSelectListReload,
+    xglCdStreamOpen, xglMcSetMapName (~1KB together) and the last two
+    words of __ieee754_pow.
+    """
+    if not sites:
+        return flat
+    want = {}
+    for site in sites:
+        parts = site.split(":")
+        if len(parts) == 3:
+            want[(parts[0], int(parts[1]))] = int(parts[2])
+    if not want:
+        return flat
+
+    owner = function_at(flat)
+    out = []
+    i = 0
+    idx = 0
+    cur = None
+    while i < len(flat):
+        line = flat[i]
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            idx = 0
+        if line.strip() == ".set\tnoreorder" or line.strip() == ".set noreorder":
+            # collect through the matching .set reorder
+            j = i + 1
+            body = []
+            while j < len(flat):
+                t = flat[j].strip()
+                if t in (".set\treorder", ".set reorder"):
+                    break
+                body.append(flat[j])
+                j += 1
+            if j < len(flat) and all(b.strip() in ("nop", "") for b in body):
+                n = want.get((owner[i], idx))
+                idx += 1
+                if n is not None:
+                    out.append(line)
+                    out.extend(["\tnop"] * n)
+                    out.append(flat[j])
+                    i = j + 1
+                    continue
+        out.append(line)
+        i += 1
+    return out
+
+
 def zero_quad_stores(flat, scope):
     """`por $X,$0,$0` + `sq $X,d(b)`  ->  `nop` + `sq $0,d(b)`.
 
@@ -1097,7 +1172,8 @@ def main(path, omitted_hazards, barrier_return_store=None,
          war_restore=None, pin_slot=None, lis_hazard_nop=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
-         rotate_seq=None, zero_quad_store=None, fp_pair_hazard=None):
+         rotate_seq=None, zero_quad_store=None, fp_pair_hazard=None,
+         short_loop_pad=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -1417,6 +1493,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = zero_quad_stores(flat, zero_quad_store)
 
+    if short_loop_pad:
+        flat = "\n".join(out).split("\n")
+        out = short_loop_pads(flat, short_loop_pad)
+
     if swap_slot:
         flat = "\n".join(out).split("\n")
         out = swap_into_slot(flat, swap_slot)
@@ -1494,6 +1574,13 @@ if __name__ == "__main__":
                              "are applied ONE AT A TIME with indices "
                              "re-resolved after each, so overlapping "
                              "windows can both fire (order matters)")
+    parser.add_argument("--short-loop-pad", default=None, metavar="SITES",
+                        help="set a gcc R5900 short-loop pad's nop count: "
+                             "FUNC:N:COUNT, N being the 0-based pad index "
+                             "in FUNC. gcc pads to a fixed total (8 here, "
+                             "10 in the original build) and no source shape "
+                             "moves it. Only rewrites blocks containing "
+                             "nothing but nops.")
     parser.add_argument("--zero-quad-store", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="rewrite gcc's `por $X,$0,$0` + `sq $X` "
