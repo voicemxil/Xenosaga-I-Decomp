@@ -2476,3 +2476,6 @@ ACT_createChr = 0x0030B548, 0xBC; // ACT.c
 sceMpegReset = 0x00216FF8, 0x50; // sceMpeg.c
 SeisanTest = 0x0026FDE8, 0x8C; // Seisan.c
 SeisanDisp = 0x002A18F0, 0xEC; // Seisan.c
+TopMenuWinMain = 0x002779B0, 0x1A4; // Top.c
+TopInfoMain = 0x00277838, 0x174; // Top.c
+AgwsFaceMain = 0x0029D390, 0x1A0; // Agws.c
