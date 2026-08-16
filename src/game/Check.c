@@ -24,7 +24,9 @@ typedef struct {
     signed char nAttr;          /* 0x48 */
     char pad49[0x21];
     unsigned char nFlags6A;     /* 0x6A */
-    char pad6B[0x3845];
+    char pad6B[0x3775];
+    int nUnk37E0;               /* 0x37E0 */
+    char pad37E4[0xCC];
 } ENEPC;
 
 typedef struct {
@@ -281,25 +283,14 @@ void CheckDoorPos(DOORACTOR *a, VECTOR8 *pOut)
     }
 }
 
-/* True when any live, non-frozen enemy is electrified */
-/* TODO: near-miss (34 orig vs 35 built, 27 diffs). Reading the two enepc
-   fields through plain enepc[i] indexing (as the matching Check_EnemyBurn
-   does for its single field) leaves gcc with TWO separate address induction
-   variables, one per field, where the original has one. An explicit byte
-   offset accumulator -- `p = (ENEPC *)(off + (char *)enepc)` with
-   `off += sizeof(ENEPC)` -- reproduces the original's single combined base
-   and its `addu a0,off,base` exactly (26 diffs), but gcc then hoists the
-   whole lui+addiu of the enepc address out of the loop where the original
-   hoists only the lui and recomputes `addiu v0,t1,%lo` every iteration.
-   That one extra setup instruction pushes the loop head off an 8-byte
-   boundary, so we also gain an alignment nop the original does not have,
-   and the two differences together are the whole remaining delta.
-   Swept: pointer-vs-index for each field independently, nested-if vs ||,
-   continue-form vs nested-if, i*sizeof inside the loop, unsigned and
-   char-pointer/int cast spellings of the base, and two separate pointer temps.
-   Whoever picks this up: the question is only how to keep the %lo addiu
-   inside the loop. Left in the plain-indexing form because it is the
-   honest C; the offset-accumulator form is one diff better and no closer. */
+/* True when any live, non-frozen enemy is electrified.
+
+   This was a long-standing near-miss at 27 diffs, blamed on induction
+   variables. The real cause was the ENEPC layout: the struct was all char
+   padding, so it had alignment 1, and gcc then refuses to fold the array
+   index into a scaled address. Giving the struct a genuine int member (the
+   0x37E0 flag word Check_EnemyFound reads) raises its alignment to 4 and
+   the plain enepc[i] indexing falls out matching. */
 int Check_EnemyElec(void)
 {
     short i;
@@ -337,6 +328,24 @@ int Check_Angle(float angle, float lo, float hi)
     }
     if (lo <= angle || angle <= hi) {
         return 1;
+    }
+    return 0;
+}
+
+/* True when any live, non-frozen enemy carries a "found" attribute */
+int Check_EnemyFound(void)
+{
+    short i;
+
+    for (i = 0; i < 16; i++) {
+        if (actor[i].nUnk86 > 0 && actor[i].nUnk82 != 1) {
+            if ((enepc[i].nUnk37E0 & 1) != 0) {
+                if (enepc[i].nAttr == 6 || enepc[i].nAttr == 10 ||
+                    enepc[i].nAttr == 5) {
+                    return 1;
+                }
+            }
+        }
     }
     return 0;
 }
