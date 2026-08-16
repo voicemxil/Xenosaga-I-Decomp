@@ -109,6 +109,36 @@ def main():
                     help="print both entries for FILE.c and exit")
     args = ap.parse_args()
 
+    # These dicts are keyed by BASENAME. Passing a path wrote a key
+    # nothing ever reads and silently did nothing -- it cost an agent
+    # three "the flag has no effect" cycles. Normalise, loudly, rather
+    # than accept a dead key. Applies to --show too, which otherwise
+    # reports a misleading <unset> for a perfectly good entry.
+    def _key(k):
+        if k and ("/" in k or os.sep in k):
+            b = os.path.basename(k)
+            print("NOTE: %r is a path; these dicts are keyed by basename "
+                  "-- using %r." % (k, b))
+            return b
+        return k
+
+    if args.show:
+        args.show = _key(args.show)
+    if args.cflags:
+        args.cflags[0] = _key(args.cflags[0])
+    if args.fix:
+        args.fix[0] = _key(args.fix[0])
+    if args.unset_cflags:
+        args.unset_cflags = _key(args.unset_cflags)
+    if args.unset_fix:
+        args.unset_fix = _key(args.unset_fix)
+    for _a in ("asflags", "unset_asflags"):
+        v = getattr(args, _a, None)
+        if isinstance(v, list) and v:
+            v[0] = _key(v[0])
+        elif isinstance(v, str) and v:
+            setattr(args, _a, _key(v))
+
     path = os.path.normpath(CONFIGURE)
     with open(path, "r+") as fh:
         fcntl.flock(fh, fcntl.LOCK_EX)
