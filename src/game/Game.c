@@ -73,7 +73,8 @@ typedef struct {
     u8 nType;               /* 0x00 */
     u8 nUnk01;              /* 0x01 */
     u8 nId;                 /* 0x02 */
-    u8 pad03[0x41];
+    u8 pad03;               /* 0x03 */
+    int aParam[16];         /* 0x04 */
 } GAME_DEFOCUS;
 
 typedef struct {
@@ -1082,4 +1083,103 @@ int GameModePause(void)
         }
     }
     return 0;
+}
+
+extern void xglFontDebugPrintf(int x, int y, const char *pFmt, ...);
+extern char D_004C01B0[];
+
+/* TODO: near-miss, 14 diffs of the right 58 words. The pointer form of
+ * the backward scan (a `q = &GameResource[127]` local, walked with `p--`)
+ * is what gets the length right -- the array-index forms are 34-40. What
+ * is left: the original materialises the scan base as %hi/%lo(GameResource)
+ * plus a SEPARATE `addiu +2032` (an LSR giv initial value) where gcc folds
+ * 2032 into the addiu, and its bottom test is `bnezl` where gcc emits a
+ * plain `bnez` with the same (unannulled) delay slot. Swept: GameResource
+ * + 127, a (char *) byte offset, a variable index, and re-using p before
+ * the loop (49). LAUNDER(q) gets to 13 and is not worth the steering. */
+/* Debug overlay: list sixteen resource-table entries ending at the last
+ * used one. */
+void GameResourceDump(int nEnable)
+{
+    GAME_RESOURCE *p;
+    int i;
+    int j;
+    int nY;
+
+    if (nEnable != 0) {
+        GAME_RESOURCE *q = &GameResource[127];
+
+        i = 127;
+        if (q->nId == 0) {
+            p = q;
+            do {
+                p--;
+                i--;
+                if (p->nId != 0) {
+                    break;
+                }
+            } while (i != 0);
+        }
+        i -= 14;
+        if (i < 0) {
+            i = 0;
+        }
+        nY = 64;
+        j = 15;
+        p = &GameResource[i];
+        do {
+            xglFontDebugPrintf(64, nY, D_004C01B0, i, p->nId, p->nUnk04,
+                               p->nUnk0C, p->nUnk08);
+            p++;
+            j--;
+            i++;
+            nY += 8;
+        } while (j >= 0);
+    }
+}
+
+extern int printf(const char *pFmt, ...);
+extern char D_004C0200[];
+
+/* Arm defocus slot nId with a type and sixteen parameter words; a negative
+ * slot tears every slot down instead. */
+void GameDefocusSet(int nId, int nType, int *pParam)
+{
+    int i;
+
+    if (nId >= 16) {
+        printf(D_004C0200, nId);
+        return;
+    }
+    if (nId < 0) {
+        for (i = 0; i < 16; i++) {
+            GameDefocusFinalize(i);
+        }
+    } else {
+        GAME_DEFOCUS *p = &GameDefocusParam[nId];
+
+        GameDefocusFinalize(nId);
+        p->nType = nType;
+        if (nType > 0) {
+            int *pDst = p->aParam;
+            int nOfs = 0;
+            int j = 15;
+
+            do {
+                if (pParam == 0) {
+                    *pDst = 0;
+                } else {
+                    /* offset first, and through an integer cast: the
+                       commutative addu's operand order follows the
+                       source, and `(char *)pParam + nOfs` gives the
+                       mirror image */
+                    *pDst = *(int *)(nOfs + (int)pParam);
+                }
+                j--;
+                pDst++;
+                nOfs += 4;
+            } while (j >= 0);
+        }
+    }
+    GameDefocusCheck();
 }
