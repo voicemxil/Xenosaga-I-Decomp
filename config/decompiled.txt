@@ -2902,3 +2902,4 @@ xglCameraSetWindow = 0x0022C168, 0xE4; // xglCamera.c
 fillBuff = 0x00221C80, 0xB0; // xglMovie.c
 xglHddMcCheckCore = 0x00227BA0, 0x134; // xglHdd.c
 xglRenderInit = 0x0022D7F8, 0xD0; // xglRender.c
+xglCdLoadOverlay = 0x0021F5A0, 0xF8; // xglCd.c

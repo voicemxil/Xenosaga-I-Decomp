@@ -355,7 +355,7 @@ int xglCdSync(void)
 }
 
 extern unsigned char loaded_overlay;
-extern char arcfileaddr[];
+extern char arcfileaddr[8];
 extern char D_00491708[];
 int sceSifLoadElf(char *pName, void *pData);
 int FlushCache(int nMode);
@@ -368,44 +368,35 @@ int FlushCache(int nMode);
  * No FILE_FIX_FLAGS entry exists for xglCd.c to scope a slot-nop fix. */
 /* Load the numbered engine overlay ELF ("OV%02d" + arcfileaddr suffix
  * appended to the cdrom0 prefix) unless it is already resident */
+/* Three things carry this one: `arcfileaddr` is a small-data object, so
+   it must be declared with a size (a bare `extern char x[]` is an
+   unknown-size symbol and gcc emits an absolute lui/addiu instead of
+   `addiu $a1,$gp,-14416`); the copies are plain `(*pDst = *pSrc)`
+   strcpy loops, which keep the `sll 24` char test and gcc's own
+   load-hazard nops -- an `(c << 24) == 0` test on a value staged
+   through a PASSTHRU'd int folds to `beqz` AND makes gcc comment its
+   `#nop` out, which is where the missing words were; and the two name
+   bytes are written pDst[0] then pDst[1] even though retail stores
+   them in the other order. */
 void xglCdLoadOverlay(int nNo)
 {
     char aData[16];
     char aBuf[256];
-    PIN(u_char *pSrc, "$5");
+    u_char *pSrc;
     char *pDst;
-    PIN(int c, "$2");
 
     if (nNo != loaded_overlay) {
         loaded_overlay = nNo;
-        pSrc = (u_char *)D_00491708;
-        c = *pSrc;
         pDst = aBuf;
-        PASSTHRU(c, c);
-        for (;;) {
-            *pDst = c;
-            if ((c << 24) == 0) {
-                break;
-            }
-            pSrc++;
+        for (pSrc = (u_char *)D_00491708; (*pDst = *pSrc) != '\0'; pSrc++) {
             pDst++;
-            c = *pSrc;
-            PASSTHRU(c, c);
         }
-        pDst[1] = 'V';
         pDst[0] = 'O';
+        pDst[1] = 'V';
         pDst[2] = nNo / 10 + 48;
         pDst[3] = nNo % 10 + 48;
         pDst += 4;
-        pSrc = (u_char *)arcfileaddr;
-        for (;;) {
-            c = *pSrc;
-            PASSTHRU(c, c);
-            *pDst = c;
-            if ((c << 24) == 0) {
-                break;
-            }
-            pSrc++;
+        for (pSrc = (u_char *)arcfileaddr; (*pDst = *pSrc) != '\0'; pSrc++) {
             pDst++;
         }
         FlushCache(0);
