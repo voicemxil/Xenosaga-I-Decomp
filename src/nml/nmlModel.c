@@ -2857,8 +2857,20 @@ void xglMatrixStackScale(void *pVec);
 void xglMatrixStackSave(void *pMtx);
 void xglMatrixStackInverse(void);
 
+#define VEC_ZERO4(d)                                            \
+    PS2_ASM("sq $0, 0x0(%0)\n"                                  \
+            "sq $0, 0x10(%0)\n"                                 \
+            "sq $0, 0x20(%0)\n"                                 \
+            "sq $0, 0x30(%0)" : : "r"(d) : "memory")
+
+#define VEC_COPY(d, s)                                          \
+    PS2_ASM("lq $2, 0x0(%1)\n"                                  \
+            "sq $2, 0x0(%0)" : : "r"(d), "r"(s) : "$2", "memory")
+
 #define VEC_ZERO(d)                                             \
-    PS2_ASM("sq $0, 0x0(%0)" : : "r"(d) : "memory")
+    PS2_ASM(".set noreorder\n"                                  \
+            "sq $0, 0x0(%0)\n"                                  \
+            ".set reorder" : : "r"(d) : "memory")
 
 #define APPLY_MATRIX33(d, m, s)                                 \
     PS2_ASM(".set noreorder\n"                                  \
@@ -2975,7 +2987,7 @@ void setup_occlusion(CULLCELL *pCell, void *pCam)
 
 /* One entry of the parent-buffer list at s_aParentBuf. */
 typedef struct {
-    int nUnk00;
+    void *pOwner;
     int nUnk04;
     int nUnk08;
     int nUnk0C;
@@ -3058,10 +3070,117 @@ PARENT_BUF *parent_buf_entry(void)
 
     if (s_nParentBuf < 512) {
         p = &s_aParentBuf[s_nParentBuf];
-        p->nUnk00 = 0;
+        p->pOwner = 0;
         s_aParentBuf[s_nParentBuf].nUnk08 = 0;
         s_aParentBuf[s_nParentBuf].nUnk0C = 0;
         s_nParentBuf++;
     }
     return p;
+}
+
+int s_nCount;
+int s_nModel;
+int s_nBlocks;
+int s_nDirect;
+int s_nBlocksAlpha;
+int s_nBlocksAlphaLast;
+int s_nAnotherStudio;
+int s_nUseStealth;
+int s_nUseGnosys;
+int s_nUseZwrite;
+int s_nMapAlphaEntry;
+int s_nMainCameraWarp;
+int s_nRenderCancel;
+VEC4 s_inGblPointC[4];
+VEC4 s_inMainCameraPos;
+VEC4 s_inMainCameraAng;
+
+void *xglStudioSelectGetActiveCamera(int nWindow);
+
+/* Find the parent-buffer entry whose owner points at pParent. */
+PARENT_BUF *parent_buf_search(void *pParent)
+{
+    PARENT_BUF *pRet = 0;
+    int i;
+
+    for (i = s_nParentBuf - 1; i >= 0; i--) {
+        PARENT_BUF *p = &s_aParentBuf[i];
+        if (p->pOwner != 0
+            && *(void **)((char *)p->pOwner + 0x254) == pParent
+            && pParent != 0) {
+            pRet = p;
+            break;
+        }
+    }
+    return pRet;
+}
+
+/* One-time construction of the model system's global state.
+ *
+ * TODO: near-miss, 5 diffs, NOT registered. Everything matches except
+ * where the two middle g_aSubWindow stores land: retail emits [0] and [3]
+ * up front and [1]/[2] after the whole gp-relative block, and no source
+ * order reproduces that -- with [1] then [2] the scheduler hoists one of
+ * them into the gp block (6 diffs), with [2] then [1] it hoists the other
+ * (5). Swept both orders, splitting the array into two statements groups,
+ * and moving the pair above/below each gp store group. */
+void CONSTRUCT_MODELSYSTEM(void)
+{
+    g_aSubWindow[0] = 2;
+    g_aSubWindow[3] = 0;
+    s_nEffectWrite = 1;
+    s_nModel = 0;
+    s_nBlocks = 1;
+    s_nDirect = 0;
+    s_nBlocksAlpha = 0;
+    s_nBlocksAlphaLast = 0;
+    s_nAnotherStudio = 0;
+    s_nUseStealth = 0;
+    s_nUseGnosys = 0;
+    s_nUseZwrite = 0;
+    s_nMapAlphaEntry = 0;
+    s_nMapLast = 0;
+    s_nMainCameraWarp = 0;
+    s_nRenderCancel = 0;
+    s_nRenderCancelOld = 0;
+    s_nFrameLockOff = 0;
+    s_nPause = 0;
+    s_nMenu = 0;
+    g_aSubWindow[2] = 0;
+    g_aSubWindow[1] = 0;
+    VEC_ZERO4(s_inGblPointC);
+    VEC_ZERO(&s_inGblFogCol);
+    VEC_ZERO(s_inGblFogPara);
+}
+
+/* Per-frame reset of the model system.
+ *
+ * TODO: near-miss, 3 diffs, NOT registered. The only difference is that
+ * retail issues the final `s_nMainCameraWarp = 0` store BEFORE the
+ * epilogue's `ld ra`, where gcc schedules the restore first. Swept:
+ * statement order, `if (pCam)` vs `if (pCam != 0)`, struct-assignment vs
+ * VEC_COPY for the two camera copies, and a held source pointer. */
+void FLUSH_MODELSYSTEM(void)
+{
+    void *pCam;
+
+    s_nPacketSignal++;
+    s_nModel = 0;
+    s_nBlocks = 1;
+    s_nDirect = 0;
+    s_nBlocksAlpha = 0;
+    s_nBlocksAlphaLast = 0;
+    s_nAnotherStudio = 0;
+    s_nUseStealth = 0;
+    s_nUseGnosys = 0;
+    s_nUseZwrite = 0;
+    s_nUseBackBuffer = 0;
+    s_nMapAlphaEntry = 0;
+    s_nFrameLockOff = 0;
+    pCam = xglStudioSelectGetActiveCamera(0);
+    if (pCam != 0) {
+        VEC_COPY(&s_inMainCameraPos, (char *)pCam + 0xD0);
+        VEC_COPY(&s_inMainCameraAng, (char *)pCam + 0xA0);
+    }
+    s_nMainCameraWarp = 0;
 }

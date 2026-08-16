@@ -1462,3 +1462,72 @@ function's 14 $v0/$v1 uses are swapped", the flag makes it worse, not
 better. In `fileRead` that exact residue fell instead to declaring the
 preceding call `void` rather than `int` (the return-type lever) -- check
 that first, always.
+
+---
+
+## Added by the game/SEQ sweep
+
+**Write a shared trailing store into BOTH arms, not once after the
+if/else.** When the `else` arm holds exactly one store and the tail
+holds another, gcc sinks the else-arm store into an annulling `beqzl`
+delay slot and the function comes out two words short per site.
+Duplicating the tail statement into each arm makes gcc cross-jump the
+tail instead and fill the delay slot with the shared computation --
+retail's `beqz` / `ori` / `nop` / `sw` shape. Worth 6 words in
+`SEQ_scale`, and it is the same trick that closed `RSRC_dispose`
+(`pItem->nState = 0;` inside both arms).
+
+**Hoist a reciprocal that has to survive a call into its own
+statement.** `nearDir(a, b) * (1.0f / (float)n)` lets gcc sink the
+int-to-float conversion past the call, which forces `n` into a
+callee-saved integer register, spends an extra `$s` register and shifts
+every other assignment (132 diffs at the right length in `SEQ_rotate`).
+`float k = 1.0f / (float)n;` written before the call puts the
+reciprocal in `$f20` across it and matches.
+
+**Multiply through named scalars, not through the vector elements you
+just stored.** In the bone-constraint transforms retail loads the three
+components in 16/20/24 order; writing `v[0]*m[0] + ...` lets the
+scheduler hoist the 24 load first. `x = c->fOffset[0]; ... o[0] = x*m[0]
++ ...` pins the order. (SEQ_transCNSUnitChr.)
+
+**A member reached through a POINTER LOCAL and the same member reached
+through the parent are not CSEd.** `pPos[1]` (where `pPos = u->fPos`)
+and `u->fPos[1]` stay two separate address computations in gcc 2.96.
+This is normally a hazard; in `SEQ_rotateUnit` it is the only way to
+reproduce retail's degenerate self-aiming `xglAtan2` calls, which read
+the unit's own position through the member while the subtrahend comes
+through the pointer local.
+
+**Read a nested member as the FULL chain when retail folds the offsets.**
+`p->mov.cns.nBone` gives `lw v1,120(p)` (56 + 64 folded, scheduled
+early); the same field through a channel pointer gives `lw a1,64(c)` and
+sinks past the loads that depend on it. 30 diffs -> 3 in
+`SEQ_transCNSUnitChr`.
+
+**A block-scoped held-address pointer, but ONLY block-scoped.**
+`ANM *w = &a->anim; w->nFlags |= 8;` recovers retail's `addiu s3,s0,1776`
++ `0(s3)` form where `a->anim.nFlags` gives the `1776(s0)` offset form
+and comes out short. Declared at function scope instead of inside the
+guarded block, the same pointer becomes a multi-block pseudo and the
+function goes from matching to 44 diffs. (SEQ_moveSPL.)
+
+**Drop your own zero-trip guard around a loop.** An explicit
+`if (n != 0) { for (...) }` duplicates the guard gcc emits anyway, as a
+second `beqzl` with a stolen delay slot. (RSRC_dispose.)
+
+**A SEPARATE loop variable seeded from a clamped index.** `nIndex` for
+the clamping and `for (i = nIndex; ...)` for the walk costs exactly the
+two `move` words retail spends; one variable for both comes out two
+words short. (RSRC_info.)
+
+**Every non-zero return must funnel through ONE variable.** Separate
+`return x;` statements where the compiler can prove `x == 0` get folded
+to `move v0,zero` individually, and retail's callee-saved result
+register disappears. Restructuring `RES_loadFile` to a single result
+local took it 90 diffs -> 16.
+
+**Reminder on the %hi/%lo pair.** `lui a1,0x37` + `addiu a1,a1,-19896`
+is address 0x36B248, not 0x37B248 -- the `addiu` immediate is signed and
+the `lui` carries the compensation. Chasing the un-compensated address
+finds no symbol. (RSRC_info.)
