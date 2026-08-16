@@ -1448,3 +1448,68 @@ int sceRead(int fd, void *buf, int len)
     DeleteSema(semid);
     return result;
 }
+
+/* The chstat request layout.  The 64-byte stat block is copied by
+ * struct assignment; at align 4 gcc 2.9 does that as eight ldl/ldr +
+ * sdl/sdr pairs, which is exactly what the original has. */
+typedef struct t_fs_stat {
+    int w[16];
+} fs_stat_t;                    /* 64 bytes, align 4 */
+
+typedef struct t_fs_send_chstat {
+    int   semid;
+    void *dst;
+    int   size;
+    int   cmask;                /* +12 */
+    fs_stat_t stat;             /* +16 */
+    char  path[1024];           /* +80 */
+} fs_send_chstat_t;             /* 1104 bytes */
+
+int sceChstat(char *name, void *stat, int cmask)
+{
+    ee_sema_t sema;
+    int result;
+    int semid;
+    fs_send_chstat_t *sd;
+    int done;
+    int i;
+
+    sd = (fs_send_chstat_t *)&_send_data;
+    _sceFsWaitS(13);
+    if (_fs_init == 0)
+        sceFsInit();
+    for (i = 0; i < 1024; i++) {
+        sd->path[i] = name[i];
+        if ((unsigned char)sd->path[i] == 0)
+            break;
+    }
+    if (i == 1024) {
+        sd->path[1023] = 0;
+        i = 1023;
+    }
+    sd->stat = *(fs_stat_t *)stat;
+    sd->cmask = cmask;
+    sema.max_count = 1;
+    sema.init_count = 0;
+    sema.option = 0;
+    semid = CreateSema(&sema);
+    sd->size = 4;
+    sd->dst = &result;
+    sd->semid = semid;
+    sceSifWriteBackDCache(&_send_data, 1104);
+    if (sceSifCallRpc(&_cd, 13, 0, &_send_data, i + 81, &_rcv_data_rpc, 4,
+                      0, 0) < 0) {
+        DeleteSema(semid);
+        _sceFsSigSema();
+        return -11;
+    }
+    done = *(volatile int *)((int)&_rcv_data_rpc | 0x20000000);
+    _sceFsSigSema();
+    if (done == 0) {
+        DeleteSema(semid);
+        return -11;
+    }
+    WaitSema(semid);
+    DeleteSema(semid);
+    return result;
+}

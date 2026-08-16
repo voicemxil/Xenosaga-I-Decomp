@@ -2738,3 +2738,4 @@ sefGetSpherePos = 0x002E2318, 0xAC; // sef.c
 make_fullpath = 0x00227478, 0x88; // xglHdd.c
 sefGetCubePosBtm = 0x002E23C8, 0xF8; // sef.c
 CheckNearPoint = 0x002C29D8, 0xDC; // Check.c
+sceChstat = 0x002063D8, 0x23C; // sceFs.c
