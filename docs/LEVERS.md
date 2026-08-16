@@ -105,6 +105,34 @@ tie-break confined to one window needs when the same registers are
 ordinary ABI arguments everywhere else in the function, which is where
 the old whole-function form was useless.
 
+**"Registers AND order in the same two words" = rename then FORCE-swap.**
+Neither fixer alone reaches it. Use the ranged `--swap-regs` to fix the
+registers, then `--swap-adjacent FUNC:N!` to fix the order -- the `!` is
+required because after the rename the pair usually looks dependent to
+`swap_ok`. Check that the FINAL code is correct (it is, when the
+original's bytes are what comes out) and let `tools/audit_swaps.py`
+confirm the reorder. `sceSifInitIopHeap` fell to exactly this: gcc's
+`lui $3,%hi` / `move $2,$0` / `sw $0,%lo($3)` versus the original's
+`lui $2` / `sw ...($2)` / `move $2,$0`.
+
+**Fixer SITE INDICES are not diff indices.** `--swap-adjacent`,
+`--rotate` and friends count instructions in the POST-PROCESSED ASM,
+which is before gas steals an instruction into a delay slot;
+`--swap-regs` counts in gcc's OWN asm, before every fix_cc_asm pass.
+Both can be several lower than the position you read off the
+disassembly, and a sweep centred on the diff index simply finds nothing.
+`sceMcRename` sat parked for a whole session because sites 54..58 were
+swept from the diff and the answer was 53. Dump the real numbering:
+
+```python
+import sys; sys.path.insert(0, "tools"); import fix_cc_asm as F
+lines = open("out.s").read().split("\n")
+own = F.function_at(lines); idx = 0; prev = None
+for i, l in enumerate(lines):
+    if own[i] != prev: idx = 0; prev = own[i]
+    if F.RE_INSN.match(l): print(own[i], idx, l.strip()); idx += 1
+```
+
 **One local, two roles.** A C local is one pseudo, so reusing it for two
 sequential purposes pins the second value into the first's register.
 This cuts BOTH ways and the direction is worth testing: reusing the
