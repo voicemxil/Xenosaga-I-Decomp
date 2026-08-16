@@ -164,8 +164,31 @@ def fp_hazard_dest(line):
     return None
 
 
-def reads_fp_reg(insn, reg):
-    """True if `insn` reads `reg` as a source operand."""
+def fp_reg_num(tok):
+    """$fN -> N with the low bit masked off (its even-aligned pair), else None."""
+    m = re.match(r'^\$f(\d+)$', tok)
+    return (int(m.group(1)) & ~1) if m else None
+
+
+def reads_fp_reg(insn, reg, pair=False):
+    """True if `insn` reads `reg` as a source operand.
+
+    With `pair`, an operand also matches when it merely shares an
+    even-aligned register PAIR with `reg` -- (operand & ~1) == (reg & ~1).
+    That is what the original ee-as did: classic gas's insn_uses_reg()
+    masks the low bit off both sides for the FP register class, because
+    with 32-bit FPRs $fN and $f(N^1) are the two halves of one double and
+    gas never distinguished which half a delay applied to (its own source
+    comment: "this is not optimal, because it will introduce an
+    unnecessary NOP between lwc1 $f0 and swc1 $f1").  Modern gas does not
+    pad the R5900 this way at all, so the pad has to be replayed here.
+
+    Opt-in per file/function via --fp-pair-hazard: it is the ORIGINAL
+    assembler's rule, but files whose near-misses were already papered
+    over with site-keyed nop flags would double up.  On libm.c it turns
+    floorf, __kernel_sinf, __kernel_cosf, __kernel_rem_pio2f and
+    __ieee754_atan2f's whole nop skeleton from wrong to exact.
+    """
     m = re.match(r'^\t([a-z0-9.]+)\t(.*)$', insn)
     if not m:
         return False
@@ -173,7 +196,12 @@ def reads_fp_reg(insn, reg):
     ops = [o.strip() for o in m.group(2).split(',')]
     # every operand of a compare is a source; otherwise operand 0 is the dest
     sources = ops if mnem.startswith('c.') else ops[1:]
-    return reg in sources
+    if not pair:
+        return reg in sources
+    want = fp_reg_num(reg)
+    if want is None:
+        return reg in sources
+    return any(fp_reg_num(o) == want for o in sources)
 RE_FPCOMPUTE = re.compile(
     r'^\t(c\.[a-z]+\.s|mul\.s|div\.s|add\.s|sub\.s|mov\.s|abs\.s|neg\.s'
     r'|sqrt\.s|trunc\.w\.s|cvt\.[a-z.]+)[ \t]')
@@ -637,6 +665,14 @@ def swap_ok(a, b):
     return not (wa & (rb | wb)) and not (wb & ra)
 
 
+
+def _is_empty_asm_marker(line):
+    """True for the marker/blank lines of an inline-asm block that emits
+    nothing (`#APP`, `#NO_APP`, and the empty body between them)."""
+    t = line.strip()
+    return t in ("#APP", "#NO_APP", "")
+
+
 def rotate_insns(flat, sites):
     """Rotate a short window of instructions right by one.
 
@@ -686,17 +722,32 @@ def rotate_insns(flat, sites):
             idx = 0
         if RE_INSN.match(line):
             span = starts.get((cur, idx))
-            if span and abs(span) >= 2 and i + abs(span) <= len(flat):
-                window = flat[i:i + abs(span)]
-                if all(RE_INSN.match(w) for w in window):
+            if span and abs(span) >= 2:
+                window, skipped, j = [], [], i
+                while j < len(flat) and len(window) < abs(span):
+                    w = flat[j]
+                    if RE_INSN.match(w):
+                        window.append(w)
+                    elif _is_empty_asm_marker(w):
+                        # An empty #APP/#NO_APP block -- LAUNDER, LAUNDER_V,
+                        # SCHED_NOP's siblings -- emits no bytes, so it is a
+                        # textual boundary, not a real one. Carry it along
+                        # instead of refusing the site. A block containing
+                        # any instruction still stops the window.
+                        skipped.append(w)
+                    else:
+                        break
+                    j += 1
+                if len(window) == abs(span):
                     if span < 0:
                         res.extend(window[1:])
                         res.append(window[0])
                     else:
                         res.append(window[-1])
                         res.extend(window[:-1])
+                    res.extend(skipped)
                     idx += abs(span)
-                    i += abs(span)
+                    i = j
                     continue
             idx += 1
         res.append(line)
@@ -1015,7 +1066,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          war_restore=None, pin_slot=None, lis_hazard_nop=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
-         rotate_seq=None, zero_quad_store=None):
+         rotate_seq=None, zero_quad_store=None, fp_pair_hazard=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -1059,9 +1110,11 @@ def main(path, omitted_hazards, barrier_return_store=None,
         following = next_insn(lines, i)
         omitted = any(following.startswith("\t" + op) for op in omitted_hazards)
         hazard_dest = fp_hazard_dest(line)
+        pair_hazard = (fp_pair_hazard is not None
+                       and in_scope(owner[i], fp_pair_hazard))
         needs_hazard_nop = (hazard_dest is not None
                             and RE_FPCOMPUTE.match(following)
-                            and reads_fp_reg(following, hazard_dest)
+                            and reads_fp_reg(following, hazard_dest, pair_hazard)
                             and not omitted
                             and not RE_FP_BRANCH_LIKELY.match(previous_insn(lines, i)))
 
@@ -1405,6 +1458,13 @@ if __name__ == "__main__":
                         help="rewrite gcc's `por $X,$0,$0` + `sq $X` "
                              "quadword-zero idiom to `nop` + `sq $0`, the "
                              "form the original build emitted")
+    parser.add_argument("--fp-pair-hazard", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="an mtc1 destination hazards its whole "
+                             "even-aligned FP register PAIR, the way the "
+                             "original ee-as's insn_uses_reg() did "
+                             "((op & ~1) == (dest & ~1)); optionally a "
+                             "comma-separated function-name list")
     parser.add_argument("--lis-hazard-nop", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="add the ee-as hazard nop after a synthesized "
@@ -1532,4 +1592,4 @@ if __name__ == "__main__":
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
          [t for t in (args.rotate_seq or "").split(',') if t],
-         scope(args.zero_quad_store))
+         scope(args.zero_quad_store), scope(args.fp_pair_hazard))
