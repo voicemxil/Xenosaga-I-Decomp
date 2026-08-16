@@ -1749,3 +1749,64 @@ spellings do change things, but only by breaking the steering and
 losing the store: volatile on the *pointee* rather than the pointer
 object, and a volatile load with plain stores.)
 
+
+---
+
+## From the sound driver (sef/sdv/srsGet/ssd, wave 4)
+
+**A record whose fields are reloaded before every single field store is
+`volatile`, and nothing else reproduces it.** In the SGs* GIF packet
+builders every store reloads both the write cursor and the packet base.
+No aliasing story explains it -- a `sh` store forces the `int` cursor to
+be re-read too -- and no statement order gets there. Typing the record's
+fields volatile matched six functions at once. Look for this whenever a
+tiny accessor re-reads the same two fields three times.
+
+**A volatile store does NOT fold a byte offset into its store offset --
+but a volatile STRUCT MEMBER does.** `*(volatile int *)(base + 4) = v`
+costs an extra `addiu`; `((volatile QW *)base)->y = v` emits `sw v,4(r)`.
+Indexing (`((volatile int *)base)[1]`) does not help either. So lay a
+volatile struct over the target and name the member.
+
+**`va_list` must be `__builtin_va_list`.** A `char *` typedef with
+`__builtin_stdarg_start` compiles, but gcc spills the list pointer and
+the function comes out one store long.
+
+**A range test written `n >= 0 && n <= K` folds into one unsigned
+compare.** Retail's `bltz` + `slt` pair only survives as two nested
+`if`s. Worth checking on any post-call bounds check.
+
+**A void call becomes retail's `j` sibling jump only as the function's
+LAST statement, outside any else.** Inside `else { f(x); }` gcc emits
+`jal` plus a shared epilogue -- four words more. Invert to `if (...) {
+...; return; } f(x);`.
+
+**PASSTHRU breaks the CSE that decides which of two equal values a test
+reads.** After `nBest = n`, gcc knows they are equal and gives the
+following `nBest == nNeed` test n's register; retail tests nBest's.
+`PASSTHRU(nBest, n)` picks the other one and costs no instruction. This
+is the only lever found for "same value, wrong register" after a copy.
+
+**Type-based aliasing lets gcc hoist a `short` load above an `int`
+store, and only a memory clobber stops it.** In a component-wise
+fixed-point lerp gcc software-pipelines every component's `lh` above the
+previous `sw`. Six `asm("":::"memory")` barriers reproduce retail's
+order exactly -- recorded, not used, because that is more steering than
+280 bytes is worth. If you meet this and the function is large enough to
+justify it, the barriers do work.
+
+**One local for a field's two roles.** Reading a record's magic word and
+its size into the SAME local (retail keeps both in `$v1`) was worth 11
+of 19 diffs in `smAlloc`; a dead loop cursor reused as the pointer to a
+freshly split block was worth another 7.
+
+### Build hazard, not a lever
+
+**A block-scope `extern` declaration plus `-G8` is a time bomb.** gcc
+2.9x keeps such a declaration's name on the function obstack and frees
+it, then prints the dangling pointer in the `.extern` directive it emits
+at end of file. It stays harmless while the freed memory happens to hold
+a valid symbol name, and turns into `.extern ;, 4` -- which gas rejects,
+failing the WHOLE file -- as soon as anything else in the file changes.
+If a file suddenly stops assembling after an unrelated addition, look
+for `extern` inside a function body and hoist it to file scope.
