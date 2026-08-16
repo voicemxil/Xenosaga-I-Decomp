@@ -2734,3 +2734,4 @@ hex2val = 0x0021AD08, 0x58; // xglFont.c
 sefGetCirclePos = 0x002E2280, 0x94; // sef.c
 errorCallback = 0x00222158, 0x44; // xglMovie.c
 StreamReadRingCoreSub = 0x0021E610, 0x70; // xglCd.c
+sefGetSpherePos = 0x002E2318, 0xAC; // sef.c

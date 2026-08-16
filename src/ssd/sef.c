@@ -140,7 +140,7 @@ void sefSearchMapperIndex(void *p) {
     sefSearchMapperIndex2(p, a, b);
 }
 
-extern int sefRandSeed;
+extern unsigned int sefRandSeed;
 extern float D_004D82D8;
 /* Classic LCG: seed = seed*0x41C64E6D + 12345; keep bits 30..16 as a 0..0x7FFF
  * draw, scale by 1/32767. */
@@ -1554,4 +1554,50 @@ void sefGetCirclePos(SEF_VEC4 *pDst, float fRadius)
     pDst->y = 0.0f;
     pDst->w = 1.0f;
     pDst->z = fCos * fRadius;
+}
+
+/* --- sefGetSpherePos: a random point on a sphere of radius fRadius.
+ * Three LCG draws give a point in a 32768-cube, and VU0 macro mode
+ * recentres it, normalises it and scales it out to the radius. The
+ * normalise (vsqrt/vdiv through $Q) is genuine hardware. --- */
+extern unsigned int sefRandSeed;
+
+void sefGetSpherePos(SEF_VEC4 *pDst, float fRadius)
+{
+    int aRnd[4];
+    unsigned int nA;
+    unsigned int nB;
+    unsigned int nC;
+    float fHalf;
+
+    fHalf = 16384.0f;
+    nA = sefRandSeed * 1103515245 + 12345;
+    aRnd[0] = (nA >> 16) & 0x7FFF;
+    nB = nA * 1103515245 + 12345;
+    aRnd[1] = (nB >> 16) & 0x7FFF;
+    nC = nB * 1103515245 + 12345;
+    aRnd[2] = (nC >> 16) & 0x7FFF;
+    sefRandSeed = nC;
+    PS2_ASM(".set noreorder\n"
+        "lqc2 $vf1, %1\n"
+        "mfc1 $2, %2\n"
+        "vitof0.xyzw $vf1, $vf1\n"
+        "qmtc2 $2, $vf2\n"
+        "vsubx.xyz $vf1, $vf1, $vf2x\n"
+        "vmul.xyz $vf2, $vf1, $vf1\n"
+        "vaddy.x $vf2, $vf2, $vf2y\n"
+        "vaddz.x $vf2, $vf2, $vf2z\n"
+        "vsqrt $Q, $vf2x\n"
+        "vwaitq\n"
+        "vaddq.x $vf2, $vf0, $Q\n"
+        "vdiv $Q, $vf0w, $vf2x\n"
+        "vmove.w $vf2, $vf0\n"
+        "vwaitq\n"
+        "vmulq.xyz $vf2, $vf1, $Q\n"
+        "mfc1 $2, %3\n"
+        "qmtc2 $2, $vf1\n"
+        "vmulx.xyz $vf2, $vf2, $vf1x\n"
+        "sqc2 $vf2, 0(%0)\n"
+        ".set reorder"
+        : : "r"(pDst), "m"(aRnd[0]), "f"(fHalf), "f"(fRadius) : "$2", "memory");
 }
