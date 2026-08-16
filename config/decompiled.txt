@@ -2797,3 +2797,4 @@ _CurMatrixMul = 0x00236478, 0x64; // nmlModel.c
 _WeightToGlobalPlaceInit = 0x0023B168, 0x18; // nmlFilter.c
 _WeightToGlobalPlaceVec = 0x0023B180, 0x98; // nmlFilter.c
 GameDefocusSet = 0x0024FF40, 0xF4; // Game.c
+_nextBit = 0x00213BC8, 0x150; // sceMpegDec.c

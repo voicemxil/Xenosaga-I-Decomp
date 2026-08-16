@@ -109,7 +109,7 @@ extern u_int D_004AD680[];   /* per-command result register table */
 
 extern void _flushBuf(MPEGSTREAM *pStream, u_int nBits);
 extern u_int _peepBit(MPEGSTREAM *pStream, u_int nBits);
-extern void _ipuVdec(MPEGSTREAM *pStream, int nTbl);
+extern int _ipuVdec(MPEGSTREAM *pStream, int nTbl);
 extern void _dispatchMpegCbNodata(int *pCb);
 
 /* MPEG1 bit of IPU_CTRL (bit 23) */
@@ -693,4 +693,79 @@ long long _waitIpuIdle64(MPEGSTREAM *pStream)
         nRes = IPU_CMD64;
     }
     return nRes;
+}
+
+#define IPU_BP   (*(volatile u_int *)0x10002020)
+#define IPU_TOP64 (*(volatile long long *)0x10002030)
+
+/* Consume and return the next nBits, refilling the peek window first. */
+u_int _nextBit(MPEGSTREAM *pStream, u_int nBits)
+{
+    /* $a0 for the flush command word: gcc otherwise builds it in $v1 and
+     * sinks it below the window-size store. */
+    PIN(u_int nCmd, "$4");
+    u_int nRet;
+    int nTop;
+    int i;
+
+    i = 0;
+    while ((IPU_CTRL & 0x80004000) == 0x80000000) {
+        if (i++ > 5000) {
+            _dispatchMpegCbNodata(pStream->pUnk858);
+            i = 0;
+        }
+    }
+    if (pStream->nUnk818 != 0 || pStream->nUnk83C < (int)nBits) {
+        IPU_CMD = 0x40000000;
+        pStream->nUnk818 = D_004AD680[0x40000000 >> 28];
+        nTop = _waitIpuIdle64(pStream);
+        pStream->nUnk838 = nTop;
+    }
+    nCmd = nBits | 0x40000000;
+    pStream->nUnk83C = 32;
+    nRet = (u_int)pStream->nUnk838 >> (32 - nBits);
+    IPU_CMD = nCmd;
+    pStream->nUnk818 = D_004AD680[nCmd >> 28];
+    nTop = _waitIpuIdle64(pStream);
+    pStream->nUnk838 = nTop;
+    return nRet;
+}
+
+/* Run one IPU VDEC (variable-length decode) against table nTbl. */
+int _ipuVdec(MPEGSTREAM *pStream, int nTbl)
+{
+    long long nRes;
+    long long nTop;
+    int nCmd;
+    int i;
+    int j;
+
+    j = 0;
+    i = 0;
+    while ((IPU_CTRL & 0x80004000) == 0x80000000) {
+        if (i++ > 5000) {
+            _dispatchMpegCbNodata(pStream->pUnk858);
+            i = 0;
+        }
+    }
+    nCmd = (nTbl << 26) | 0x30000000;
+    IPU_CMD = nCmd;
+    nRes = IPU_CMD64;
+    pStream->nUnk818 = D_004AD680[nCmd >> 28];
+    while (nRes < 0) {
+        if (j++ > 5000) {
+            _dispatchMpegCbNodata(pStream->pUnk858);
+            j = 0;
+        }
+        nRes = IPU_CMD64;
+    }
+    nTop = IPU_TOP64;
+    pStream->nUnk838 = nTop;
+    if (nTop >= 0) {
+        pStream->nUnk83C = 32;
+    } else {
+        pStream->nUnk83C = (0 - (IPU_BP & 0x1F)) & 0x1F;
+    }
+    pStream->nUnk11C = (int)nRes == 0;
+    return (short)nRes;
 }
