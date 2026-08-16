@@ -245,9 +245,12 @@ void xglFontDebugMode(int nMode)
 {
     if (nMode >= 0) {
         FS.nDebugMode = nMode;
-        __asm__ __volatile__("" : : : "memory");
-        ModeEnv[4] = ((nMode & 0xFF) + 35) | 0x50000;
+        /* Source order really is [20] then [4]: gcc's scheduler swaps the
+         * two sd's back (distinct constant offsets off one base), but the
+         * order it materializes the two 0x50000 constants in follows the
+         * source, and that is what pins the register assignment. */
         ModeEnv[20] = FS.nDebugMode | 0x50000LL;
+        ModeEnv[4] = (FS.nDebugMode + 35) | 0x50000;
     }
 }
 
@@ -384,8 +387,10 @@ int xglFontAscii2Euc(char nChar, u_char **ppStr)
     int nHigh;
     int nCode;
     char nNext;
-    int nRet;
-    u_int nU;
+    /* nRet is unsigned so the /94 and %94 come out as divu, and it
+     * doubles as the scratch the original divided: the 0xFFFF mask, the
+     * remainder and the result all live in nRet's register ($a0). */
+    u_int nRet;
 
     nRet = 0xA1A1;
     if (!(nChar < 32)) {
@@ -400,13 +405,9 @@ int xglFontAscii2Euc(char nChar, u_char **ppStr)
                     nHigh = hex2val(nNext);
                     nCode = hex2val((char)pStr[2]);
                     pStr += 2;
-                    nHigh <<= 4;
-                    nHigh += nCode;
-                    nHigh += 32;
-                    nU = nHigh & 0xFFFF;
-                    nCode = nU % 94;
-                    nCode = (((nU / 94) & 0xFF) << 8) + nCode - 12127;
-                    nRet = nCode & 0xFFFF;
+                    nRet = (((nHigh << 4) + nCode) + 32) & 0xFFFF;
+                    nCode = nRet % 94;
+                    nRet = ((((nRet / 94) & 0xFF) << 8) + nCode - 12127) & 0xFFFF;
                 }
                 *ppStr = pStr;
                 return nRet;
