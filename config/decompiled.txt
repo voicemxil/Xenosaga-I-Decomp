@@ -2720,3 +2720,4 @@ nmlModelSetActiveFadeIn = 0x0022F078, 0x130; // nmlModel.c
 GameModeEvtTools = 0x00244D20, 0x108; // Game.c
 GameModeEvtDebug = 0x00244F60, 0x100; // Game.c
 sceFormat = 0x00205B00, 0x26C; // sceFs.c
+xglCdSifLoadModule = 0x0021F480, 0x120; // xglCd.c

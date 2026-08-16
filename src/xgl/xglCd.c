@@ -591,3 +591,50 @@ int xglCdStreamClose(XGLCDSTREAM *pStream)
     }
     return 0;
 }
+
+int sceSifLoadModule(char *pPath, int nArgLen, char *pArgs);
+
+/* Build "cdrom0:\IOP\<NAME>.IRX;1" (the module name upper-cased) and load
+ * it into the IOP */
+void xglCdSifLoadModule(char *pName, char *pArgs)
+{
+    static char head[] = "cdrom0:\\IOP\\";
+    static char tail[] = ".IRX;1";
+    char szPath[256];
+    char *p;
+    char *q;
+    char *a;
+    int nArgLen;
+
+    p = szPath;
+    q = head;
+    while ((*p = *q) != 0) {
+        q++;
+        p++;
+    }
+    q = pName;
+    while (*q != 0) {
+        if (*q < 'a') {
+            *p = *q;
+        } else {
+            *p = *q - 32;
+        }
+        q++;
+        p++;
+    }
+    q = tail;
+    while ((*p = *q) != 0) {
+        q++;
+        p++;
+    }
+    nArgLen = 0;
+    if (pArgs != 0) {
+        a = pArgs;
+        nArgLen = 1;
+        while (*a != 0 || a[1] != 0) {
+            a++;
+            nArgLen++;
+        }
+    }
+    sceSifLoadModule(szPath, nArgLen, pArgs);
+}
