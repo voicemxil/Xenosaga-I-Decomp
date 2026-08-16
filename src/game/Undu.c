@@ -79,3 +79,80 @@ void *UnduDataGetHeaderSub(void *data, unsigned int count, unsigned int id)
 notfound:
     return 0;
 }
+
+/* Wall-attribute test on a map unit.  The attribute slot at +0xA8 is read
+   as one 64-bit word but FILLED as two 32-bit words when it comes from the
+   table, so both spellings have to live in one type: a union of a long long
+   and a two-int struct keeps them in a single gcc alias set (two separate
+   struct types would let gcc hoist the ld above the sw pair -- wrong code,
+   not just a mismatch), and the inner struct's align-4 TYPE_ALIGN is what
+   picks lw/sw over ld/sd for the table copy. */
+typedef union {
+    long long v;
+    struct {
+        int lo;
+        int hi;
+    } w;
+} WALL_ATTR;
+
+typedef struct {
+    char pad_00[0x50];
+    struct WALL_SHAPE {
+        char pad_00[8];
+        unsigned short nType;
+    } *pShape;
+    char pad_54[0x10];
+    WALL_ATTR *pAttrTbl;
+    char pad_68[0x40];
+    WALL_ATTR attr;
+    long long attrMask;
+    long long attrWant;
+} WALL_UNIT;
+
+int CheckWallAttr(WALL_UNIT *unit, unsigned short *pId)
+{
+    WALL_ATTR *tbl;
+    WALL_ATTR *d;
+    long long attr;
+    long long bit;   /* 64-bit: the attr word is 64-bit */
+
+    tbl = unit->pAttrTbl;
+    if (tbl != 0) {
+        WALL_ATTR *s;
+
+        s = &tbl[*pId];
+        d = &unit->attr;
+        d->w.lo = s->w.lo;
+        d->w.hi = s->w.hi;
+    } else {
+        unit->attr.v = *pId;
+    }
+    attr = unit->attr.v;
+    if ((attr & unit->attrMask) != unit->attrWant) {
+        if (attr & 7) {
+            bit = 0;
+            switch (unit->pShape->nType & 0x300) {
+            case 0x100:
+                bit = 1;
+                break;
+            case 0x200:
+                bit = 2;
+                break;
+            case 0x300:
+                bit = 4;
+                break;
+            }
+            /* `bit & attr`, in this operand order, and the two early
+               `return 0`s sharing ONE exit block: the return value has to
+               stay a single-basic-block pseudo so local_alloc gives it $v0.
+               A `ret` variable spanning the dispatch becomes a global pseudo
+               and lands in $a3 (12 words off); a flat chain of early returns
+               lets gcc if-convert the last test into `sltu` (6 words short). */
+            if (bit & attr) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    return 1;
+}
