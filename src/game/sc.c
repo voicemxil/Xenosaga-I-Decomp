@@ -592,6 +592,17 @@ int scMISSILEScript(SCTASK *o)
     return 1;
 }
 
+/* TODO: near-miss (7/32 words, correct length). One register tie-break
+   cascades: the original keeps the resolved address in $a0 (the dying
+   incoming argument register) and loads the srsAnalyzeEftNo effect number
+   into $a0 only at the call; our build parks the address in $t0, which
+   leaves $a0 free and lets the scheduler hoist that `lh` above the store
+   block, permuting the five stores. Swept: all store orders around
+   field66/field68 (no effect -- the scheduler picks address order either
+   way), field70-first vs moveState-first (moveState-first is what fixes
+   the LENGTH, keep it), negating the delay in place (17 diffs), a 4-arg
+   srsAnalyzeEftNo (wrong -- scMISSILEScript matches with 3 and sets no
+   $a3). The tie-break itself is what needs a lever. */
 int scMISSILE3Script(SCTASK *o)
 {
     int work[4];
@@ -599,11 +610,11 @@ int scMISSILE3Script(SCTASK *o)
     int adr = (int)scGetAdrImmScript((SCOBJ *)o);
     if (adr != 0) {
         short lead = -delay * _nowEvent;
-        o->field70 = adr;
         o->moveState = 1;
+        o->field70 = adr;
         o->flags |= 0x20;
-        o->field68 = 0;
         o->field66 = lead;
+        o->field68 = 0;
         srsAnalyzeEftNo(o->eftNo, work, _scMslCate);
     }
     return 1;
