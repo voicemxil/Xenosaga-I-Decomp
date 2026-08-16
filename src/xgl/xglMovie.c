@@ -10,7 +10,8 @@ typedef struct {
     short nUnk46;        /* 0x46 */
     int pad48;           /* 0x48 */
     int nUnk4C;          /* 0x4C */
-    char pad50[0x49];
+    char pad50[0x48];
+    unsigned char nErrCount;/* 0x98 */
     unsigned char nUnk99;/* 0x99 */
     unsigned char nUnk9A;/* 0x9A */
     char pad9B[0x1D];
@@ -22,7 +23,30 @@ typedef struct {
     unsigned char nUnkCB;/* 0xCB */
 } XGLMOVIEINFO;
 
-void *xglMpeg2InfoInit2(void *, void *, int);
+void *xglMpeg2InfoInit2(void *pInfo, void *pData, int nSize);
+
+typedef struct {
+    char pad00[0x20];
+    int nBuf20;          /* 0x20 */
+    int nSize24;         /* 0x24 */
+    char pad28[0x50];
+    int nBase78;         /* 0x78 */
+    int nLen7C;          /* 0x7C */
+    int nBuf80;          /* 0x80 */
+    int nBuf84;          /* 0x84 */
+    int nBuf88;          /* 0x88 */
+    char pad8C[0x10];
+    int nBuf9C;          /* 0x9C */
+    int nLenA0;          /* 0xA0 */
+    int nLenA4;          /* 0xA4 */
+    int nPosA8;          /* 0xA8 */
+    int nLenAC;          /* 0xAC */
+    char padB0[0];
+    int nBufB0;          /* 0xB0 */
+    int nLenB4;          /* 0xB4 */
+    int nPosB8;          /* 0xB8 */
+    int nPosBC;          /* 0xBC */
+} XGLMPEG2INIT;
 void sceIpuInit(void);
 void xglCdStreamParamInit(void *);
 int xglCdStreamClose(void *);
@@ -158,4 +182,50 @@ int xglMpeg2Close(XGLMOVIEINFO *pInfo)
     }
     xglCdStreamClose(pInfo);
     return 0;
+}
+
+/* Carve the fixed MPEG/IPU work buffers out of one linear block, each
+ * rounded up to a 64-byte boundary, and hand back the end of the block. */
+void *xglMpeg2InfoInit2(void *pInfo, void *pData, int nSize)
+{
+    XGLMPEG2INIT *p = (XGLMPEG2INIT *)pInfo;
+    int nAddr = (int)pData;
+    int nPtr;
+
+    nPtr = (nAddr + 0xFD7A7) & ~0x3F;
+    p->nBuf80 = nPtr;
+    nPtr = (nPtr + 0xE003F) & ~0x3F;
+    p->nBuf84 = nPtr;
+    nPtr = (nPtr + 0x1507F) & ~0x3F;
+    p->nBuf88 = nPtr;
+    nPtr = (nPtr + 0x403F) & ~0x3F;
+    p->nBuf9C = nPtr;
+    nPtr = (nPtr + 0x8003F) & ~0x3F;
+    p->nLen7C = 0xFD768;
+    p->nLenA0 = 0x80000;
+    p->nLenAC = 0x10;
+    p->nLenB4 = 0x20000;
+    p->nBufB0 = nPtr;
+    nPtr = (nPtr + 0x2003F) & ~0x3F;
+    p->nBase78 = nAddr;
+    p->nLenA4 = 0x10;
+    p->nPosA8 = 0;
+    p->nPosB8 = 0;
+    p->nPosBC = 0;
+    xglCdStreamParamInit(p);
+    p->nBuf20 = nPtr;
+    p->nSize24 = nSize;
+    return (void *)((nPtr + nSize + 0x3F) & ~0x3F);
+}
+
+int printf(const char *pFmt, ...);
+
+/* sceMpeg error callback: print the message the library handed us, bump
+ * the error counter and clear the stall flag */
+int errorCallback(int nCode, char **ppMsg, XGLMOVIEINFO *pInfo)
+{
+    printf("%s\n", ppMsg[1]);
+    pInfo->nErrCount++;
+    pInfo->nUnk99 = 0;
+    return 1;
 }
