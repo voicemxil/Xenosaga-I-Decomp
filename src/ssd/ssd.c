@@ -1803,3 +1803,39 @@ void RssdSifRpcCallback(void)
     p->pFuncFunc = 0;
     __asm__ __volatile__("sync.l\n\tei\n");
 }
+
+/* --- SsdGetTimeCode: convert a tick count into h/m/s/frame, using the
+ * driver's current tick resolution. Four separate `li 60`s appear in
+ * the original because there are four division-by-60 sites in the
+ * source; gcc CSEs the divu instructions but not the constants.
+ * nUnits/60 has to be a NAMED local -- written inline twice, gcc folds
+ * (x/60)/60 into a single x/3600 and the second divu disappears -- and
+ * the pad byte is cleared AFTER the frame count, which is where the
+ * original's `sb zero,7` lands. --- */
+typedef struct {
+    short pad00;      /* 0x00 */
+    short nHour;      /* 0x02 */
+    char  nMinute;    /* 0x04 */
+    char  nSecond;    /* 0x05 */
+    char  nFrame;     /* 0x06 */
+    char  pad07;      /* 0x07 */
+    char  pad08[4];   /* 0x08 */
+    short nRemain;    /* 0x0C */
+} SSD_TIMECODE;
+
+void SsdGetTimeCode(unsigned int nTicks, SSD_TIMECODE *pCode)
+{
+    unsigned int nUnits;
+    unsigned int nRemain;
+    unsigned int nMinutes;
+
+    nUnits = nTicks / RssdWork.nResolution;
+    nRemain = nTicks % RssdWork.nResolution;
+    nMinutes = nUnits / 60;
+    pCode->nRemain = nRemain;
+    pCode->nHour = nMinutes / 60;
+    pCode->nSecond = nUnits % 60;
+    pCode->nMinute = nMinutes % 60;
+    pCode->nFrame = nRemain * 30 / RssdWork.nResolution;
+    pCode->pad07 = 0;
+}
