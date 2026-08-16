@@ -298,6 +298,10 @@ counter is dead into a down-counter, and the `li N-1` it creates
 schedules LATE. Writing the loop backwards materialises it early and
 never matches.
 
+**`for (i = 0, p = <invariant>; ...)`** puts the counter's zero AHEAD of
+the invariant pointer in the loop preamble; assigning `p` on its own
+line before the loop emits them the other way round.
+
 **Put the bound in the loop header, not a local above it** — that is
 what creates "load into one register, copy into another".
 
@@ -415,6 +419,22 @@ Plain `*(char *)0x70000021 = 1` gives the absolute `lui at` form; a
 field into a local BEFORE a volatile-store block if the original loads
 it early.
 
+**A block-scope array with an INITIALISER is a TEMP slot in gcc 2.9x.**
+It is freed at the end of its block and REUSED by the next same-sized
+array in a LATER block — which silently shrinks the frame and moves
+every `sd`/`ld` offset after it. Declaring the second array one entry
+larger makes it too big for the freed slot. Measured: **111 diffs -> 33
+in one edit.**
+
+**An array INITIALISER becomes a constant-pool copy; the same array
+filled by ASSIGNMENTS is inlined.** `int nAdd[2] = {1,-1}` gives
+retail's `ldl/ldr` + `sdl/sdr`; two `nAdd[k] = ...` statements give two
+`sw`.
+
+**A nested struct whose last field is 4 bytes but which contains an
+8-byte field is rounded up to a multiple of 8**, pushing everything
+after it. Spell the block out inline to land on retail's offsets.
+
 **Check the struct's own ALIGNMENT when a `char pad[]` stops working.**
 Giving one struct a leading `int *` rounded its size 0x12 -> 0x14 and
 shifted every later member, surfacing as IMMEDIATE diffs in three
@@ -445,6 +465,13 @@ buffer you then patch a word of.** With `u_int aTag[4]` plus
 `*(TI *)aTag = ...`, gcc 2.96 does not see the alias and hoists the
 `lw 4(sp)` ABOVE the `sq` that fills the buffer. That is a MISCOMPILE,
 not a mismatch -- the union both fixes it and removes 12 diffs.
+
+**Read a hardware halfword at EACH USE rather than caching it in an
+`int`** to get retail's `lhu` + `andi 0xffff` pair. CSE still folds the
+loads, but each equality test against an int constant needs the value
+widened and the widening gets its own register. Caching fuses the two
+into one `lhu` (-2 words); caching it after an intervening store is
+worse still.
 
 **Read a byte global into an `int` local before comparing** — compared
 directly, 2.96 knows the `lbu` result is 0..255 and narrows `slti` to
@@ -700,6 +727,13 @@ working code. `checkfile.py` is the authority, not the file comments.
 `src/ssd/sef.c` used to write a key nothing ever reads, silently doing
 nothing — three "the flag has no effect" cycles lost to it. The tool now
 normalises and says so, but the fact matters when reading configure.py.
+
+**A `static` duplicate is invisible to the linker but still wrong.** A
+second `static` copy of a function does not collide at link time, so it
+raises none of the usual duplicate symptoms — but callers in that TU
+reach a local copy at a different address than retail. Found for
+`DrawShadow` (static in tskMenuPause.c, global in Draw.c); replacing it
+with an `extern` declaration kept the caller matching.
 
 **GREP THE WHOLE TERRITORY for a function name before writing it**, not
 just the file you expect it in. A function defined in two TUs has caused
