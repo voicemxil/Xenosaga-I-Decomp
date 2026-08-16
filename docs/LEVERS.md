@@ -1092,6 +1092,48 @@ the unreachable second iteration.
 
 ---
 
+## Fixer site indices are NOT diff indices
+
+**This has caused at least one function to sit parked with the answer
+one index away.** The three families count different streams:
+
+| flag | counts |
+|---|---|
+| `--swap-adjacent`, `--rotate`, `--rotate-seq` | the POST-`fix_cc_asm` stream, before gas steals a delay slot |
+| `--swap-regs` | gcc's OWN assembly output |
+| `--short-loop-pad` | all-nop `.set noreorder` blocks in the post-fixer stream |
+
+None of them counts the word offsets you read off a `scratch_diff.py`
+diff. `sceMcRename` was parked because sites 54-58 were swept off the
+diff when the answer was 53. `python3 tools/slot_sites.py` prints all
+three countings with the word offset each lands at — but note it counts
+BRANCHES, so it does not list short-loop pads; walk the emitted stream
+for those.
+
+**Worth re-checking parked near-misses in other territories against the
+right numbering before concluding a flag "does nothing".**
+
+---
+
+## The pre-RA scheduler decides register numbering
+
+`-fschedule-insns` runs BEFORE register allocation. When two hard-register
+argument copies bracket a compare, whichever copy the pre-RA scheduler
+hoists takes its register first, and `local_alloc` then hands the
+combine-folded compare temp **the lowest still-free number**. If the
+original hoists the other copy, no source shape can reach it — proven by
+blocking the taken register with a PIN'd dummy, which moved the temp to
+the NEXT free number rather than the wanted one.
+
+That is a `--swap-regs` case, and often a RANGE-scoped one: the same
+registers elsewhere in the function are ordinary ABI arguments that must
+not move. `--swap-regs FUNC:A-B:LO-HI` exists for exactly this.
+
+**"Registers AND order wrong in the same two words" = rename then
+FORCE-swap.** Neither fixer alone reaches it.
+
+---
+
 ## Build hazards
 
 **A block-scope `extern` is a latent build bomb.** gcc 2.9x keeps such a
