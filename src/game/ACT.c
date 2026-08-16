@@ -936,3 +936,17 @@ void ACT_DrawShadowEnd(void)
 {
     nmlModelDirectSend(1, D_00478F80, 3);
 }
+
+extern long D_00478EE0[];
+extern unsigned short D_004A9100[];
+
+/* Begin the shadow render batch: patch the VU MSCAL row (+0x50) and the
+   frame-buffer row (+0x90) of the static GIF packet, then kick 10 qwords. */
+void ACT_DrawShadowBegin(void)
+{
+    unsigned int mscal = D_004A9100[0];
+
+    D_00478EE0[10] = mscal | 0xFFFFFF00080000L;
+    D_00478EE0[18] = mscal | 0x80000;
+    nmlModelDirectSend(1, D_00478EE0, 10);
+}
