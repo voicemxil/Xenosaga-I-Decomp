@@ -1021,10 +1021,9 @@ void MenuCfTaikiPush(void)
         cont = i < 8;
         LAUNDER(cont);
         *src = 0;
-        LAUNDER(v);
         *dst = v;
-        src++;
         dst++;
+        src++;
     } while (cont != 0);
 }
 
@@ -1297,15 +1296,12 @@ void MenuCfTaikiPop(void)
     i = 0;
     do {
         v = *src;
-        LAUNDER(v);
-        LAUNDER(v);
         src++;
         i++;
         cont = i < 8;
         LAUNDER(cont);
         *dst = v;
         dst++;
-        LAUNDER(dst);
     } while (cont != 0);
 }
 

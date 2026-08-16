@@ -2607,3 +2607,4 @@ scePadGetModVersion = 0x0020C848, 0x64; // scePad.c
 scePadSetWarningLevel = 0x0020C8B0, 0x68; // scePad.c
 sefLerpVectorSC = 0x002E1908, 0x44; // sef.c
 ACT_DrawShadowBegin = 0x0031A018, 0x58; // ACT.c
+MenuCfTaikiPop = 0x002752E0, 0x3C; // Menu.c
