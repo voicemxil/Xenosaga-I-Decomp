@@ -124,18 +124,13 @@ void sceVif1PkAddDataN(Vif1Packet *pkt, unsigned int *src, unsigned int count)
 /* Append a 128-bit UNPACK data value (written as four 32-bit words) */
 void sceVif1PkAddUpkData128(Vif1Packet *pkt, u128 value)
 {
-/* TODO: near-miss (REGISTER, 12 words, was 14).  The sq/ld spill, the ld
-       order (hi first), the extraction order and the store/pointer shapes all
-       match with the ordering below: hi and hi>>32 hoisted ahead of the lo
-       block, lo>>32 extracted inline after the first store.  What is left is
-       a pure 3-cycle in local-alloc: dest wants $v0 (we give $a2), lo wants
-       $v1 (we give $v0), (int)lo wants $a2 (we give $v1).  Permuter-exhausted:
-       all 5040 orderings of the head statements (with l0/h0/h1 as temps and
-       dest init as a movable statement) and all 720 orderings without the
-       temps compile to 12+ diffs; initialising dest late does flip dest into
-       $v0 but drags lo into $a1 (the spill slot of the 128-bit arg gives lo
-       an $a1 preference) for 14.  No source-level lever found for the last
-       rotation. */
+/* The ordering below is the original's: hi and hi>>32 hoisted ahead of the lo
+   block, lo>>32 extracted inline after the first store.  On top of that,
+   dest/lo/(int)lo are a 3-cycle in local-alloc (dest wants $v0, lo wants $v1,
+   (int)lo wants $a2) which only the pins settle -- permuter-exhausted, all
+   5040 orderings of the head statements and all 720 without the temps land at
+   12+ diffs without them.  The last two words are a sched2 transpose, see
+   FILE_FIX_FLAGS --swap-adjacent sceVif1PkAddUpkData128:10 and :15. */
     U128 u;
     PIN(unsigned int *dest, "$2");
     PIN(long lo, "$3");
@@ -228,17 +223,15 @@ void sceVif1PkCnt(Vif1Packet *pkt, unsigned int flags)
     /* Terminate packet to align and close any open code; remember segment start */
     start = sceVif1PkTerminate(pkt);
 
-    /* TODO: near-miss (SCHEDULING, 2 words) - gcc's post-reload scheduler sinks
-       the `sw` of the reserved field between the `lui` and the `or` that build
-       the control word; the original emits the `or` first.  EXHAUSTED: all
-       5040 orderings of the 7 statements below were compiled (tools/permute.py)
-       and none reaches 0 - best is this one at 2.  `0x10000000 | flags`,
-       `current[i]` instead of `*current`, hoisting the reserved store, a
-       fresh temp for the or'd value, a volatile-cast reserved store and an
-       early-hoisted constant temp all reproduce the same 2-word swap, so the
-       lever is neither statement order nor expression shape.  gcc's own .s
-       already has the swap (it is sched2, not gas), and no fix_cc_asm flag
-       covers a mid-block swap. */
+    /* gcc's post-reload scheduler sinks the `sw` of the reserved field between
+       the `lui` and the `or` that build the control word; the original emits
+       the `or` first.  EXHAUSTED at source level: all 5040 orderings of the
+       seven statements below were compiled (tools/permute.py) and none
+       reaches 0 -- `0x10000000 | flags`, `current[i]` instead of `*current`,
+       hoisting the reserved store, a fresh temp for the or'd value, a
+       volatile-cast reserved store and an early-hoisted constant temp all
+       reproduce the same 2-word swap.  It is FILE_FIX_FLAGS
+       --swap-adjacent sceVif1PkCnt:9. */
     current = pkt->current;
     flags |= 0x10000000;
     pkt->reserved = start;
@@ -258,9 +251,9 @@ void sceVif1PkEnd(Vif1Packet *pkt, unsigned int flags)
     /* Terminate packet to align and close any open code; remember segment start */
     start = sceVif1PkTerminate(pkt);
 
-    /* TODO: near-miss (SCHEDULING, 2 words) - see sceVif1PkCnt; identical shape
-       with the 0x70000000 end-of-packet code instead of 0x10000000, and the
-       same permuter-exhausted `sw`/`or` swap. */
+    /* Identical shape to sceVif1PkCnt with the 0x70000000 end-of-packet code;
+       the same permuter-exhausted `sw`/`or` swap, fixed by
+       --swap-adjacent sceVif1PkEnd:9. */
     current = pkt->current;
     flags |= 0x70000000;
     pkt->reserved = start;
@@ -596,28 +589,6 @@ extern const long D_004D53C0[2];
    single 128-bit value (the original does `lq $a1,0($sp)` at the call site). */
 void sceVif1PkOpenGifTag(Vif1Packet *pkt, u128 tag);
 
-/* Build a VIF1 packet that uploads an image to the GS: a DIRECTHL block sets up
-   BITBLTBUF/TRXPOS/TRXREG/TRXDIR, then the pixel data is chained in as REF
-   transfers of at most 32767 quadwords each. */
-/* TODO: near-miss (58 of 122 words).  Rewritten from the disassembly: length
-   parity, identical control flow and identical constants.  The whole middle of
-   the REF loop (the min(), the Cnt/Align/AddCode/Reserve sequence, the GIF-tag
-   movz and the qwc/addr updates) is word-exact.  What is left is a callee-saved
-   allocation permutation plus entry-block scheduling:
-     - two independent allocator cycles - {dpsm,rrw} want $s3/$s2 (we produce
-       $s2/$s3) and {addr,dsay,dsax} want $s4/$s5/$s6 (we produce $s6/$s4/$s5);
-     - gcc emits the BITBLTBUF shifts in the entry block instead of after the
-       OpenGifTag call, and orders the sd/move interleave in the prologue
-       differently.
-   Ruled out: all 6 orderings of the three mask statements, masking inline at
-   the AddGsAD call sites (114 words - much worse), separate locals for the
-   masks, struct-typed / whole-struct-copy / reversed-element forms of the
-   D_004D53C0 read, and swapped operand order in the TRXPOS/TRXREG expressions.
-   Two levers did help and are kept below: reading the rodata halves into
-   `g0`/`g1` first (aligns the lui/addiu pair, -2 words) and materialising the
-   EOP GIF tag constant before the non-EOP one (-2 words).  Introducing a fresh
-   `src` local for the walking address aligns the entire prologue (indices 0-28)
-   but pushes `pkt` into $s8 and spills, ending up worse (62). */
 /* Build a VIF1 packet that uploads an image to the GS: a DIRECTHL block sets up
    BITBLTBUF/TRXPOS/TRXREG/TRXDIR through a GIF A+D tag, then the pixel data is
    chained in as REF transfers of at most 32767 quadwords each. */

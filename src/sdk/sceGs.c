@@ -80,20 +80,12 @@ int sceGsSyncV(void)
 /* sceGsSyncVCallback: install (or with cb == 0, remove) the VSync INTC
  * handler, returning the previous one.
  *
- * NEAR-MISS, not registered: 2 words, an argument-setup order.  The
- * original emits `move a1,s1` before `li a0,2` for the AddIntcHandler
- * call; gcc emits them the other way round.  Identical instruction
- * multiset, adjacent positions, no logic difference.  Four phrasings
- * were tried (call result through a temp, handler through a temp,
- * re-reading g->vsyncCb as the argument, and the plain form) and all
- * four give the same order, so this is not reachable from the C.
- *
- * FIX-FLAG REQUEST (verified): FILE_FIX_FLAGS["sceGs.c"] =
- * "--swap-adjacent sceGsSyncVCallback:26" -- the swap site is the
- * 0-based instruction index of `li a0,2` in the emitted function.  This
- * is the same tool and the same kind of site as the existing
- * TMENU.c/xgl entries in configure.py.  Registering it needs that flag;
- * the C below is otherwise byte-exact at 40 words.
+ * The last two words are an argument-setup order gcc will not reproduce: the
+ * original emits `move a1,s1` before `li a0,2` for the AddIntcHandler call.
+ * Four phrasings were tried (call result through a temp, handler through a
+ * temp, re-reading g->vsyncCb as the argument, and the plain form) and all
+ * four give the same order, so it is FILE_FIX_FLAGS
+ * --swap-adjacent sceGsSyncVCallback:26.
  *
  * Note the structure: both arms fall through to a single `return old`.
  * Returning early from the removal arm makes gcc materialise the return
