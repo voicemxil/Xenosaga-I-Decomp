@@ -7078,6 +7078,16 @@ typedef struct {
 
 extern MENU_SKILL_MENU_WORK *MenuSkillMenu;
 
+/* TODO: near-miss (2 instructions short, 159 orig vs 157 built) - every
+   store, both select lists, the i==1 override block, the page tests and the
+   slide loop are recovered in the retail order, and the init loop is the
+   loop-driven form (unlike MenuTecMenuMain's straight-line one).  The gap is
+   the same base-pseudo wall the other screen inits hit: retail parks w+4,
+   w+16 and w+20 in stack slots and reaches win[i].pTitle / .pMsg and
+   sel[i].nSel through base+accumulator pairs, where gcc folds two of them
+   into immediate offsets.  Swept: &member through block-local pointers
+   (gcc CSEs them straight back out, 564 bytes), pointer-walk instead of
+   array indexing, and both if/else polarities of the i==1 arm. */
 void MenuSkillMenuMain(void)
 {
     static char *msg00[] = { "Extract\nSet\nCancel" };
