@@ -1741,9 +1741,11 @@ def swap_into_slot(flat, sites, allow_stack_mem=False):
 
     Both orders execute A and B before the callee runs; only their
     mutual order swaps, so A/B must pass swap_ok and neither may touch
-    $31. The original build filled the slot with the OTHER of the two
-    argument-setup copies (PauseMenu's move $5,$16 / move $6,$2 around
-    jal GameSnapShotSaveFile). Ineligible sites are left untouched."""
+    $31. The memory-enabled form also accepts two accesses whose constant
+    byte ranges are provably disjoint. The original build filled the slot
+    with the OTHER of the two argument-setup copies (PauseMenu's move $5,$16
+    / move $6,$2 around jal GameSnapShotSaveFile). Ineligible sites are left
+    untouched."""
     res = []
     cur = None
     idx = 0
@@ -1764,7 +1766,22 @@ def swap_into_slot(flat, sites, allow_stack_mem=False):
                     wb, rb = insn_regs(slot)
                     a_sp = "($sp)" in a
                     b_sp = "($sp)" in slot
-                    eligible = (a_sp != b_sp
+                    ma = re.match(r'^\t(\w+)\t[^,]+,(-?\d+)\((\$\w+)\)$', a)
+                    mb = re.match(r'^\t(\w+)\t[^,]+,(-?\d+)\((\$\w+)\)$', slot)
+                    widths = {'lb': 1, 'lbu': 1, 'sb': 1,
+                              'lh': 2, 'lhu': 2, 'sh': 2,
+                              'lw': 4, 'lwu': 4, 'lwc1': 4, 'sw': 4,
+                              'swc1': 4, 'ld': 8, 'sd': 8,
+                              'lq': 16, 'sq': 16}
+                    disjoint = False
+                    if (ma and mb and ma.group(3) == mb.group(3)
+                            and ma.group(1) in widths
+                            and mb.group(1) in widths):
+                        a0 = int(ma.group(2))
+                        b0 = int(mb.group(2))
+                        disjoint = (a0 + widths[ma.group(1)] <= b0
+                                    or b0 + widths[mb.group(1)] <= a0)
+                    eligible = ((a_sp != b_sp or disjoint)
                                 and not (wa & (rb | wb))
                                 and not (wb & ra))
                 if (sets == [".set noreorder", ".set nomacro"]
@@ -2883,7 +2900,8 @@ if __name__ == "__main__":
     parser.add_argument("--swap-mem-into-slot", default=None,
                         metavar="SITES",
                         help="like --swap-into-slot, but also accept an "
-                             "independent stack load/non-stack memory op pair")
+                             "independent stack/non-stack or proven-disjoint "
+                             "constant-offset memory op pair")
     parser.add_argument("--exchange-slot-prior", default=None,
                         metavar="SPECS",
                         help="exchange a gcc-filled delay slot with its "
