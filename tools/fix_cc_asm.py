@@ -1169,6 +1169,133 @@ def retime_resource_file_items(lines, specs):
     return out
 
 
+def retime_res_model_file_names(lines, funcs):
+    """Recover the retail byte-copy loop in ``RES_GetMdlFileName``.
+
+    The natural C writes the first byte before its empty-name test (the
+    retail branch delay slot proves that ordering) and otherwise has the
+    exact 46-word control flow.  This GCC nevertheless carries the shifted
+    byte around the loop and coalesces its raw/sign-extended forms; retail
+    recomputes the sign extension at the loop head.  Validate the complete
+    affected instruction stream, including all three branch targets, before
+    restoring that allocation and schedule.  The resulting loop performs
+    the same loads, stores, comparisons and pointer increments.
+    """
+    if funcs is None:
+        return lines
+    out = list(lines)
+    unsupported = set(funcs) - {'RES_GetMdlFileName'}
+    if unsupported:
+        raise SystemExit('--retime-res-model-file-name: unsupported '
+                         'function(s): ' + ','.join(sorted(unsupported)))
+
+    def canonical(line):
+        return re.sub(r'\s+', ' ', line.split('#', 1)[0]).strip()
+
+    for func in sorted(funcs):
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if len(pos) != 43:
+            raise SystemExit('--retime-res-model-file-name: %s expected 43 '
+                             'compiler instructions, got %d' %
+                             (func, len(pos)))
+
+        exit_match = re.match(r'^beq \$5,\$0,(\$L\d+)$',
+                              canonical(out[pos[16]]))
+        skip_match = re.match(r'^bne \$2,\$11,(\$L\d+)$',
+                              canonical(out[pos[23]]))
+        loop_match = re.match(r'^bne \$2,\$0,(\$L\d+)$',
+                              canonical(out[pos[37]]))
+        if not (exit_match and skip_match and loop_match):
+            raise SystemExit('--retime-res-model-file-name: %s branch '
+                             'shape changed' % func)
+        exit_label = exit_match.group(1)
+        skip_label = skip_match.group(1)
+        loop_label = loop_match.group(1)
+
+        expected = [
+            'daddu $8,$0,$0', 'sll $5,$3,24',
+            'beq $5,$0,%s' % exit_label, 'sb $3,0($4)',
+            'li $11,92', 'li $7,116', 'li $10,101', 'li $9,115',
+            'sra $2,$5,24', 'bne $2,$11,%s' % skip_label,
+            'addu $6,$6,1', 'bne $8,$0,%s' % skip_label,
+            'sb $3,5($4)', 'li $8,1', 'sb $7,1($4)',
+            'sb $10,2($4)', 'sb $9,3($4)', 'sb $7,4($4)',
+            'addu $4,$4,5', 'addu $4,$4,1', 'lbu $3,0($6)',
+            'sll $2,$3,24', 'sb $3,0($4)',
+            'bne $2,$0,%s' % loop_label, 'daddu $5,$2,$0',
+        ]
+        got = [canonical(out[pos[n]]) for n in range(14, 39)]
+        if got != expected:
+            for n, (want, actual) in enumerate(zip(expected, got), 14):
+                if want != actual:
+                    raise SystemExit(
+                        '--retime-res-model-file-name: %s instruction %d '
+                        'changed: want %r, got %r' %
+                        (func, n, want, actual))
+
+        loop_line = out.index(loop_label + ':', pos[21], pos[22] + 1)
+        skip_line = out.index(skip_label + ':', pos[32], pos[33] + 1)
+        if (out[loop_line - 1] != '\t.p2align 3,,7' or
+                skip_line <= loop_line):
+            raise SystemExit('--retime-res-model-file-name: %s label '
+                             'placement changed' % func)
+        if out[pos[38] + 1:pos[38] + 3] != [
+                '\t.set\tmacro', '\t.set\treorder']:
+            raise SystemExit('--retime-res-model-file-name: %s bottom '
+                             'branch directives changed' % func)
+
+        replacement = [
+            '\tdaddu\t$7,$0,$0',
+            '\tsll\t$2,$3,24',
+            '\t.set\tnoreorder',
+            '\t.set\tnomacro',
+            '\tbeq\t$2,$0,%s' % exit_label,
+            '\tsb\t$3,0($4)',
+            '\t.set\tmacro',
+            '\t.set\treorder',
+            '',
+            '\tdaddu\t$2,$3,$0',
+            '\tli\t$10,92\t\t\t# 0x5c',
+            '\tli\t$5,116\t\t\t# 0x74',
+            '\tli\t$9,101\t\t\t# 0x65',
+            '\tli\t$8,115\t\t\t# 0x73',
+            '\t.p2align 3,,7',
+            loop_label + ':',
+            '\tsll\t$2,$2,24',
+            '\tsra\t$2,$2,24',
+            '\t.set\tnoreorder',
+            '\t.set\tnomacro',
+            '\tbne\t$2,$10,%s' % skip_label,
+            '\taddu\t$6,$6,1',
+            '\t.set\tmacro',
+            '\t.set\treorder',
+            '',
+            '\tbne\t$7,$0,%s' % skip_label,
+            '\tsb\t$2,5($4)',
+            '\tli\t$7,1\t\t\t# 0x1',
+            '\tsb\t$5,1($4)',
+            '\tsb\t$9,2($4)',
+            '\tsb\t$8,3($4)',
+            '\tsb\t$5,4($4)',
+            '\taddu\t$4,$4,5',
+            skip_label + ':',
+            '\taddu\t$4,$4,1',
+            '\tlbu\t$2,0($6)',
+            '\t#nop',
+            '\tsll\t$3,$2,24',
+            '\t.set\tnoreorder',
+            '\t.set\tnomacro',
+            '\tbne\t$3,$0,%s' % loop_label,
+            '\tsb\t$2,0($4)',
+            '\t.set\tmacro',
+            '\t.set\treorder',
+        ]
+        out[pos[14]:pos[38] + 3] = replacement
+    return out
+
+
 def retime_ebattle_windows(lines, funcs):
     """Recover two retail battle-window allocator/scheduler decisions.
 
@@ -3489,6 +3616,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_root_matrix_setup=None,
          retime_rpc_call_setup=None,
          retime_resource_file_item=None,
+         retime_res_model_file_name=None,
          retime_ebattle_window=None,
          retime_gs_zbuffer_address=None,
          retime_gs_reset_graph=None,
@@ -4007,6 +4135,11 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = retime_ebattle_windows(flat, retime_ebattle_window)
 
+    if retime_res_model_file_name is not None:
+        flat = "\n".join(out).split("\n")
+        out = retime_res_model_file_names(
+            flat, retime_res_model_file_name)
+
     with open(path, 'w') as f:
         f.write('\n'.join(out))
 
@@ -4218,6 +4351,10 @@ if __name__ == "__main__":
                         metavar="SPECS",
                         help="comma-separated FUNC:N resource-file item "
                              "finalization schedules")
+    parser.add_argument("--retime-res-model-file-name", default=None,
+                        metavar="FUNCS",
+                        help="comma-separated RES model-name byte-copy "
+                             "functions with a validated allocator mismatch")
     parser.add_argument("--retime-ebattle-window", default=None,
                         metavar="FUNCS",
                         help="comma-separated eBattle window functions whose "
@@ -4331,6 +4468,7 @@ if __name__ == "__main__":
          [t for t in (args.retime_root_matrix_setup or "").split(',') if t],
          [t for t in (args.retime_rpc_call_setup or "").split(',') if t],
          [t for t in (args.retime_resource_file_item or "").split(',') if t],
+         scope(args.retime_res_model_file_name),
          scope(args.retime_ebattle_window),
          [t for t in (args.retime_gs_zbuffer_address or "").split(',') if t],
          [t for t in (args.retime_gs_reset_graph or "").split(',') if t],

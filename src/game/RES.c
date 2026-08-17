@@ -225,16 +225,6 @@ char *RES_getScenePath(char *pDst, int nScene)
 extern unsigned char ModelPath;
 extern void RES_GetMdlFileNameSub(char *pDst);
 
-/* TODO: near-miss, 26 diffs at the right 46 words. `int c` read through an
-   `unsigned char *`, with every use spelled `(char)c`, is what produces
-   the original's lbu + sll 24 (+ sra 24) shapes and the `move v0,v1` that
-   copies the entry byte into the loop variable -- `char c` gives lb and 41
-   words, `unsigned char c` with a cast only on the comparison gives 43.
-   Residue: gcc CSEs the two `(char)c` sign-extensions across the loop back
-   edge and carries the shifted value in a second register, where the
-   original recomputes the shift at the loop top and uses a throwaway temp
-   for the exit test. Swept: LAUNDER / LAUNDER_V on c in three positions,
-   and goto (35), for(;;)+break (26) and while (32) loop forms. */
 /* Build the model file name. With ModelPath set, the name is built into a
    scratch buffer and a "test\" directory is spliced in after the first
    backslash on the way out. */
@@ -255,10 +245,10 @@ void RES_GetMdlFileName(char *pDst)
     p = (unsigned char *)szName;
     nDone = 0;
     c = *p;
+    *q = c;
     if ((char)c == 0) {
         return;
     }
-    *q = c;
     do {
         /* the source pointer is unsigned char * and c is char: the lbu
            plus the sll/sra sign-extension pair, and the `move` that

@@ -222,7 +222,8 @@ FILE_FIX_FLAGS = {
               "--post-rotate-seq RES_loadFile:46:3,RES_loadFile:47:2 "
               "--retime-byte-copy-guard RES_loadFileSubMapSub:29 "
               "--split-loop-byte-load RES_loadFileSubMapSub:56:59 "
-              "--branch-likely RES_loadFileSubMapSub:4"),
+              "--branch-likely RES_loadFileSubMapSub:4 "
+              "--retime-res-model-file-name RES_GetMdlFileName"),
     "GameResource.c": (
         "--swap-reg-sources GameResourceAlloc:17:4-18,GameResourceAlloc:19:4-18 "
         "--rotate-seq GameResourceAlloc:13:3,GameResourceAlloc:14:2 "
