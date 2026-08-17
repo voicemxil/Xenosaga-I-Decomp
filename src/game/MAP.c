@@ -552,34 +552,7 @@ void MAP_initUnitSequance(void)
     }
 }
 
-/* TODO: near-match (LOGIC, 5 of 49 words, was 10). Fixed this session: the
- * original associates the byte offset as MapUnit + (nOffset + 0x10), not
- * (MapUnit + nOffset) + 0x10 -- gcc reassociates the written-out form and
- * makes "MapUnit + 0x10" the common subexpression instead. Forcing the
- * nOffset16 temp in its own block, unconditionally (NOT inside the else),
- * reproduces the original's two adds.
- * What is left (5 diffs) is purely which of the two adds the scheduler
- * emits first: the original emits the *unused-yet* addiu a1,v0,16 before
- * addu v0,v0,a2 whose result the very next lbu needs; ours emits them the
- * other way and the a1/v1/v0 roles follow. Tried: swapping the two source
- * statements (no change), LAUNDER on nOffset16 (no change), LAUNDER /
- * LAUNDER2 on pTargetPos and/or pTarget (all regress to 31-32 diffs and
- * lose a word), (char*)pTarget+0x10 (42 diffs, 47 words), and computing
- * pTargetPos inside the else (10 diffs). */
 /* Update an enemy marker from its linked map unit */
-/* TODO: near-miss (4 of 49 words). Everything matches except which of the
-   two address temporaries gets $v0: the original computes `nOffset + 0x10`
-   into $a1 and lets `MapUnit + nOffset` reuse $v0 (killing nOffset), we do
-   the reverse. Both instructions and both registers are the original's --
-   only the roles are crossed, which also flips their order because the two
-   are anti-dependent through $v0. Sinking pTargetPos into the else arm (as
-   here) got this from 5 to 4 and put the pTargetPos add in the bnez delay
-   slot as the original has. Swept: array-indexed MapUnit[nIndex] for either
-   or both accesses, nOffset16 at block vs function scope, pTarget derived
-   from pTargetPos, statement order both ways, and pinning nOffset/nOffset16/
-   pTarget to $2/$5 singly and in the successive-locals pair form (all 11-33
-   diffs, worse). The remaining question is how to make the allocator give
-   pTarget the register nOffset dies in. */
 void MAP_updateUnitEnemy(MAPUNIT *pUnit)
 {
     int nIndex;

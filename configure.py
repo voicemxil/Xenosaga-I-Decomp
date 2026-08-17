@@ -307,7 +307,9 @@ FILE_FIX_FLAGS = {
     # appends; fix_cc_asm.py rejects duplicates).
     "sceVif1Pk.c": ("--swap-adjacent sceVif1PkCnt:9,sceVif1PkEnd:9,sceVif1PkAddUpkData128:10,sceVif1PkAddUpkData128:15!,sceVif1PkAlign:6,sceVif1PkAlign:22,sceVif1PkOpenUpkCode:16 --rotate sceVif1PkOpenUpkCode:15:-3"),
     # an lwc1 in a jal delay slot followed by mov.s trips a bogus hazard nop
-    "MAP.c": "--omit-hazard mov.s",
+    "MAP.c": ("--omit-hazard mov.s "
+              "--exchange-derived-results MAP_updateUnitEnemy:14 "
+              "--swap-regs MAP_updateUnitEnemy:2-5:16,18"),
     # ACT_setArms: gcc annuls the arm-slot compare's branch because it
     # filled the delay slot with a copy of the merge point's instruction;
     # the original executes that copy unconditionally and re-does it at the

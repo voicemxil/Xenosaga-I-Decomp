@@ -567,6 +567,60 @@ def swap_register_sources(lines, specs):
     return out
 
 
+def exchange_derived_results(lines, sites):
+    """Exchange destinations of adjacent common-base addu/addiu results.
+
+    FUNC:N names an `addu D1,BASE,INDEX` followed immediately by
+    `addiu D2,BASE,IMM`, where D2 is BASE. Retail occasionally assigns the
+    two derived values to D1/D2 in the opposite order from this compiler.
+    The pass keeps both computations intact and emits
+    `addiu D1,BASE,IMM; addu D2,BASE,INDEX`; named later-use sites can then
+    receive the corresponding allocator rename via --swap-regs.
+    """
+    if not sites:
+        return lines
+    owner = function_at(lines)
+    out = list(lines)
+    idx = 0
+    prev_owner = None
+    applied = set()
+    add = re.compile(r'^\taddu\t(\$\d+),(\$\d+),(\$\d+)(.*)$')
+    addi = re.compile(
+        r'^\t(addiu|addu)\t(\$\d+),(\$\d+),(-?\d+)(.*)$')
+    for i, line in enumerate(lines):
+        if owner[i] != prev_owner:
+            idx = 0
+            prev_owner = owner[i]
+        if not RE_INSN.match(line):
+            continue
+        key = "%s:%d" % (owner[i], idx)
+        if key in sites:
+            if i + 1 >= len(lines) or not RE_INSN.match(lines[i + 1]):
+                raise SystemExit("--exchange-derived-results: %s is not an "
+                                 "adjacent instruction pair" % key)
+            m1 = add.match(line)
+            m2 = addi.match(lines[i + 1])
+            if (not m1 or not m2 or m1.group(2) != m2.group(3)
+                    or m2.group(2) != m2.group(3)
+                    or m1.group(1) == m2.group(2)):
+                raise SystemExit("--exchange-derived-results: %s does not "
+                                 "match the common-base addu/addiu shape" %
+                                 key)
+            d1, base, index, suffix1 = m1.groups()
+            imm_mnem, _d2, _base2, imm, suffix2 = m2.groups()
+            out[i] = "\t%s\t%s,%s,%s%s" % (
+                imm_mnem, d1, base, imm, suffix2)
+            out[i + 1] = "\taddu\t%s,%s,%s%s" % (
+                _d2, base, index, suffix1)
+            applied.add(key)
+        idx += 1
+    missing = set(sites) - applied
+    if missing:
+        raise SystemExit("--exchange-derived-results: site(s) not found: %s" %
+                         ",".join(sorted(missing)))
+    return out
+
+
 def swap_fp_commutative_operands(lines, sites):
     """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
 
@@ -1977,6 +2031,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          exchange_slot_prior=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
          swap_reg_sources=None,
+         exchange_derived=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
@@ -2023,6 +2078,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if swap_reg_sources:
         lines = swap_register_sources(lines, swap_reg_sources)
+
+    if exchange_derived:
+        lines = exchange_derived_results(lines, exchange_derived)
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
@@ -2597,6 +2655,10 @@ if __name__ == "__main__":
                         help="swap two GPRs only in the source operands of "
                              "named addu/daddu sites; comma-separated "
                              "FUNC:N:A-B specs")
+    parser.add_argument("--exchange-derived-results", default=None,
+                        metavar="SITES",
+                        help="exchange the destinations of an adjacent "
+                             "common-base addu/addiu derived-value pair")
     parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose three-FPR "
                              "add.s or mul.s has its two commutative source "
@@ -2672,6 +2734,7 @@ if __name__ == "__main__":
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
          [t for t in (args.swap_reg_sources or "").split(',') if t],
+         scope(args.exchange_derived_results),
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,
