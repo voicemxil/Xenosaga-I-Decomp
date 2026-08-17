@@ -265,7 +265,9 @@ FILE_FIX_FLAGS = {
     "Game.c": (
         "--rotate-seq GameModeDebugMenu:10:-2,GameModeDebugMenu:12:3,"
         "GameModeDebugMenu:12:2,GameResourceDump:26:5,"
-        "GameResourceDump:27:2,GameResourceDump:29:2 "
+        "GameResourceDump:27:2,GameResourceDump:29:2,"
+        "GameMovieInit:22:3,GameMovieInit:23:7,GameMovieInit:26:3,"
+        "GameMovieInit:27:2,GameMovieInit:28:3,GameMovieInit:31:2 "
         "--swap-regs GameResourceDump:3-16:15-23 "
         "--split-indexed-scan-base GameResourceDump:8:2032:16 "
         "--branch-likely GameResourceDump:3"),

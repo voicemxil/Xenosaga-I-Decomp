@@ -263,13 +263,6 @@ extern void xglMovieInfoInit(MOVIE_INFO *p);
 char GameMovieAlpha;
 char GameMovieTransparent;
 
-/* TODO: near-miss, 11 diffs at the right 38 words -- purely the order the
- * scheduler emits the six marked stores in. Retail emits
- * 154, 203, 148, 180, (gp alpha), 201, 202, (gp transparent); the source
- * order below produces 148, 180, 154, 202, 203, 201. The PERM markers are
- * in place; 720 orderings is too many for tools/permute.py against a file
- * this size, so this wants either a narrowed marker block or a run when
- * the build container is not loaded. */
 /* Reserve the movie work area and point the movie info block at its three
  * buffers */
 void GameMovieInit(int nNo)
