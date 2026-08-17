@@ -1337,31 +1337,14 @@ extern void WindowSPSet(SPWIN *pWin);
 extern void WindowSPMain(SPWIN *pWin);
 extern int WindowSPSelect(SPWIN *pWin, int nRepeat);
 
-/* TODO: near-miss (183 of 184 words; the one real divergence is a
- * register-allocation tie-break).  gcc parks the literal 20 of the
- * `w->nState != 20' test in a CALLEE-SAVED register ($s2) across the
- * MoveSlide call and reuses it for the second `w->nState == 20' test
- * below; the original rematerialises the constant with a second `li'
- * and never touches $s2 at all.  That one extra saved register costs
- * `sd $s2'/`ld $s2', saves one `li', and moves every jump-table target
- * by a word, which is where the missing `.p2align' nops go.  Its knock-on
- * is the only other diff: $v0/$v1 swap on the 528/0xFFFF00 constants in
- * the init block, which reschedules the three header stores.
+/* Simulation screen: the script list the player scrolls.
  *
- * Swept without moving it: all six source orders of the nX/nY/nColor
- * stores (the scheduler normalises them); the second test written as
- * `!= 20' with the arms swapped, as `nTarget == 32', as `w->nState - 20
- * == 0', and as an early-exit `if (w->nX != nTarget) break;'; nTarget
- * block-scoped, function-scoped and as a one-element array; the first
- * test as an if/else that assigns nTarget on both arms (182 words);
- * a local copy of the state byte for the second test; and LAUNDER on
- * both the state byte and on a `n20' temporary -- laundering the SECOND
- * use gets the length to 185 with 25 diffs but only turns the reuse into
- * `move $v0,$s2' instead of `li $v0,20', and laundering the FIRST drops
- * to 182.  A permuter run on the case-20/40 body is the next thing to
- * try.
- *
- * Simulation screen: the script list the player scrolls.
+ * The two natural state comparisons both use literal 20 around a call to
+ * MoveSlide.  This GCC build keeps that literal in callee-saved $s2; retail
+ * rematerializes it in $v0 after the call.  The strict
+ * --remat-call-constant correction validates the complete save/compare/call/
+ * compare/restore shape before reproducing retail's allocation, with no
+ * source-side asm or volatile barrier.
  *
  * pTask state 0 fills the row table from ListText[] -- greying every row
  * out unless the "environmental simulator unlocked" bit is set in

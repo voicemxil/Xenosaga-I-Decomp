@@ -550,6 +550,202 @@ def swap_fp_commutative_operands(lines, sites):
     return out
 
 
+def rematerialize_call_constants(lines, specs):
+    """Undo one over-aggressive constant live range across a call.
+
+    GCC can assign a literal used on both sides of a call to a callee-saved
+    register.  Retail occasionally rematerializes the literal after the call
+    instead, avoiding that register's save/restore pair.  Each strict spec is
+    FUNC:SAVED-CALLER-CARRY:VALUE.  The accepted shape has exactly one literal
+    definition, two comparison uses separated by a jal, and one stack
+    save/restore pair for SAVED.  CALLER's prior value at the first comparison
+    is moved to CARRY before the new literal takes CALLER; the second
+    comparison's other operand is moved to the first comparison's other
+    register before a new `li CALLER,VALUE` is inserted.
+
+    The pass also moves the return-address save/restore into the vacated stack
+    slot and updates .mask.  Any deviation from this shape is a hard error, so
+    a source edit cannot make the correction silently target unrelated code.
+    """
+    if not specs:
+        return lines
+    for spec in specs:
+        try:
+            func, regs, value_text = spec.split(':')
+            saved_text, caller_text, carry_text = regs.split('-')
+            saved = int(saved_text.lstrip('$'))
+            caller = int(caller_text.lstrip('$'))
+            carry = int(carry_text.lstrip('$'))
+            value = int(value_text, 0)
+        except (ValueError, TypeError):
+            raise SystemExit(
+                "--remat-call-constant: bad spec %r "
+                "(want FUNC:SAVED-CALLER-CARRY:VALUE)" % spec)
+        if not (16 <= saved <= 23 and 2 <= caller <= 15
+                and 2 <= carry <= 15 and caller != carry):
+            raise SystemExit(
+                "--remat-call-constant: %s must name a callee-saved GPR "
+                "and a caller-saved GPR" % spec)
+
+        start = next((i for i, line in enumerate(lines)
+                      if re.match(r'\s*\.ent\s+%s\s*$' % re.escape(func),
+                                  line)), None)
+        if start is None:
+            raise SystemExit("--remat-call-constant: function not found: %s" %
+                             func)
+        end = next((i for i in range(start + 1, len(lines))
+                    if re.match(r'\s*\.end\s+%s\s*$' % re.escape(func),
+                                lines[i])), None)
+        if end is None:
+            raise SystemExit("--remat-call-constant: missing .end for %s" %
+                             func)
+
+        rs = r'\$%d\b' % saved
+        rc = r'\$%d\b' % caller
+        save_re = re.compile(r'^\tsd\t\$%d,(-?\d+)\(\$sp\)$' % saved)
+        restore_re = re.compile(r'^\tld\t\$%d,(-?\d+)\(\$sp\)$' % saved)
+        li_re = re.compile(r'^\tli\t\$%d,%d(?:\s|$)' % (saved, value))
+        branch_re = re.compile(
+            r'^\t(beq|bne|beql|bnel)\t(\$\d+),(\$\d+),(.+)$')
+
+        save_sites = [(i, save_re.match(lines[i]))
+                      for i in range(start, end) if save_re.match(lines[i])]
+        restore_sites = [(i, restore_re.match(lines[i]))
+                         for i in range(start, end)
+                         if restore_re.match(lines[i])]
+        li_sites = [i for i in range(start, end) if li_re.match(lines[i])]
+        branch_sites = []
+        for i in range(start, end):
+            m = branch_re.match(lines[i])
+            if m and re.search(rs, lines[i]):
+                branch_sites.append((i, m))
+        if (len(save_sites), len(restore_sites), len(li_sites),
+                len(branch_sites)) != (1, 1, 1, 2):
+            raise SystemExit(
+                "--remat-call-constant: %s shape changed "
+                "(save=%d restore=%d li=%d branches=%d)" %
+                (func, len(save_sites), len(restore_sites), len(li_sites),
+                 len(branch_sites)))
+
+        save_i, save_m = save_sites[0]
+        restore_i, restore_m = restore_sites[0]
+        save_off = int(save_m.group(1))
+        if int(restore_m.group(1)) != save_off:
+            raise SystemExit("--remat-call-constant: %s save/restore offsets "
+                             "differ" % func)
+        first_i, first_m = branch_sites[0]
+        second_i, second_m = branch_sites[1]
+        calls = [i for i in range(first_i + 1, second_i)
+                 if re.match(r'^\tjal\t', lines[i])]
+        if len(calls) != 1:
+            raise SystemExit("--remat-call-constant: %s expected exactly one "
+                             "jal between comparisons" % func)
+
+        first_regs = (first_m.group(2), first_m.group(3))
+        saved_reg = "$%d" % saved
+        caller_reg = "$%d" % caller
+        carry_reg = "$%d" % carry
+        if first_regs.count(saved_reg) != 1:
+            raise SystemExit("--remat-call-constant: %s first comparison "
+                             "does not use saved register once" % func)
+        other_reg = first_regs[0] if first_regs[1] == saved_reg else first_regs[1]
+        second_regs = (second_m.group(2), second_m.group(3))
+        if (second_regs.count(saved_reg) != 1
+                or second_regs.count(caller_reg) != 1):
+            raise SystemExit("--remat-call-constant: %s second comparison "
+                             "must use saved and caller registers" % func)
+
+        defining = []
+        dest_re = re.compile(r'^\t([a-z0-9.]+)\t\$%d,' % caller)
+        for i in range(calls[0] + 1, second_i):
+            if dest_re.match(lines[i]):
+                defining.append(i)
+        if not defining:
+            raise SystemExit("--remat-call-constant: %s expected a post-call "
+                             "definition of caller register" % func)
+        # Earlier definitions may feed unrelated comparisons.  The final one
+        # before the constant comparison is the value live at that branch.
+        def_i = defining[-1]
+
+        # CALLER already carries the first comparison's independent value.
+        # Move its final pre-literal definition and the branch delay-slot use
+        # together to CARRY before assigning the rematerialized constant.
+        prior_defs = []
+        prior_dest_re = re.compile(r'^\t([a-z0-9.]+)\t\$%d,' % caller)
+        for i in range(start, li_sites[0]):
+            if prior_dest_re.match(lines[i]):
+                prior_defs.append(i)
+        if not prior_defs:
+            raise SystemExit("--remat-call-constant: %s expected a caller-"
+                             "register definition before the literal" % func)
+        prior_def_i = prior_defs[-1]
+        first_slot_i = next((i for i in range(first_i + 1, end)
+                             if RE_INSN.match(lines[i])), None)
+        if first_slot_i is None or not re.search(rc, lines[first_slot_i]):
+            raise SystemExit("--remat-call-constant: %s first comparison's "
+                             "delay slot does not use caller register" % func)
+
+        frame_m = next((re.match(r'^\t\.frame\t\$sp,(\d+),\$31', lines[i])
+                        for i in range(start, end)
+                        if re.match(r'^\t\.frame\t\$sp,(\d+),\$31', lines[i])),
+                       None)
+        mask_i = next((i for i in range(start, end)
+                       if re.match(r'^\t\.mask\t0x[0-9A-Fa-f]+,-?\d+$',
+                                   lines[i])), None)
+        if frame_m is None or mask_i is None:
+            raise SystemExit("--remat-call-constant: %s missing frame/mask" %
+                             func)
+        frame_size = int(frame_m.group(1))
+        mask_m = re.match(r'^(\t\.mask\t)0x([0-9A-Fa-f]+),-?\d+$',
+                          lines[mask_i])
+        mask = int(mask_m.group(2), 16)
+        if not (mask & (1 << saved)):
+            raise SystemExit("--remat-call-constant: %s .mask does not save "
+                             "$%d" % (func, saved))
+
+        ra_save = [i for i in range(start, end)
+                   if re.match(r'^\tsd\t\$31,-?\d+\(\$sp\)$', lines[i])]
+        ra_restore = [i for i in range(start, end)
+                      if re.match(r'^\tld\t\$31,-?\d+\(\$sp\)$', lines[i])]
+        if len(ra_save) != 1 or len(ra_restore) != 1:
+            raise SystemExit("--remat-call-constant: %s return-address stack "
+                             "shape changed" % func)
+
+        replacements = {}
+        replacements[prior_def_i] = re.sub(rc, carry_reg,
+                                            lines[prior_def_i], count=1)
+        replacements[first_slot_i] = re.sub(rc, carry_reg,
+                                             lines[first_slot_i])
+        replacements[li_sites[0]] = re.sub(rs, caller_reg,
+                                            lines[li_sites[0]])
+        replacements[first_i] = re.sub(rs, caller_reg, lines[first_i])
+        replacements[def_i] = re.sub(rc, other_reg, lines[def_i], count=1)
+        second = lines[second_i]
+        second = re.sub(rc, '\x01', second)
+        second = re.sub(rs, caller_reg, second)
+        second = second.replace('\x01', other_reg)
+        replacements[second_i] = second
+        replacements[ra_save[0]] = re.sub(r',-?\d+\(\$sp\)$',
+                                           ',%d($sp)' % save_off,
+                                           lines[ra_save[0]])
+        replacements[ra_restore[0]] = re.sub(r',-?\d+\(\$sp\)$',
+                                              ',%d($sp)' % save_off,
+                                              lines[ra_restore[0]])
+        mask &= ~(1 << saved)
+        replacements[mask_i] = "%s0x%08X,%d" % (
+            mask_m.group(1), mask, save_off - frame_size)
+
+        rebuilt = []
+        for i, line in enumerate(lines):
+            if i in (save_i, restore_i):
+                continue
+            if i == second_i:
+                rebuilt.append("\tli\t%s,%d" % (caller_reg, value))
+            rebuilt.append(replacements.get(i, line))
+        lines = rebuilt
+    return lines
+
+
 def unfill_gcc_slots(flat, scope, owner_of):
     """Rewrite gcc's own delay-slot fills back to hoisted-insn + nop.
 
@@ -1494,6 +1690,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
          swap_fp_operands=None,
+         remat_call_constants=None,
          rotate_seq=None, hoist_div_arg=None, retime_branch=None,
          zero_quad_store=None, fp_pair_hazard=None,
          short_loop_pad=None, byte_move=None, split_hi_lo_raw=None):
@@ -1535,6 +1732,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
+
+    if remat_call_constants is not None:
+        lines = rematerialize_call_constants(lines, remat_call_constants)
 
     owner = function_at(lines)
 
@@ -2065,6 +2265,12 @@ if __name__ == "__main__":
                              "add.s or mul.s has its two commutative source "
                              "operands exchanged; destination and opcode are "
                              "unchanged")
+    parser.add_argument("--remat-call-constant", action="append", default=None,
+                        metavar="FUNC:SAVED-CALLER-CARRY:VALUE",
+                        help="strictly replace one callee-saved integer "
+                             "literal live range spanning a call with caller-"
+                             "saved rematerialization; validates the complete "
+                             "save/compare/call/compare/restore shape")
     parser.add_argument("--expand-sym-loads", action="store_true",
                         help="also manually expand integer loads with "
                              "symbol(+off)(reg) addresses (see "
@@ -2122,6 +2328,7 @@ if __name__ == "__main__":
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
          scope(args.swap_fp_operands),
+         args.remat_call_constant,
          [t for t in (args.rotate_seq or "").split(',') if t],
          scope(args.hoist_div_arg),
          scope(args.retime_branch_slot),
