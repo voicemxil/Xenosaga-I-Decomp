@@ -259,6 +259,10 @@ FILE_FIX_FLAGS = {
     "sceFs.c": ("--swap-regs sceFsInit:2-3:31,32,37,48,74,76 "
                 "--swap-regs sceOpen:16-17:3-5,7-117 "
                 "--retime-sce-open sceOpen"),
+    "sceTty.c": ("--swap-regs sceTtyInit:3-4:16-25 "
+                 "--rotate-seq sceTtyInit:19:3,sceTtyInit:20:7,"
+                 "sceTtyInit:23:2,sceTtyInit:24:2,sceTtyInit:25:4,"
+                 "sceTtyInit:27:4,sceTtyInit:30:3"),
     "sceMpegDec.c": "--swap-regs _isOutSizeOK:2-3:17-22",
     "xglMc.c": "--byte-move-andi xglMcSetMapName:0,xglMcSetMapName:1",
     "sceMc.c": "--swap-adjacent sceMcRename:53",
@@ -305,7 +309,9 @@ FILE_FIX_FLAGS = {
     "Check.c": "--mtc1-nop CheckDoorDist:0",
     "Undu.c": ("--swap-adjacent UnduParamInit:5 "
                "--swap-regs UnduCheckSubHeightCheck:f2-f3:22-46 "
-               "--retarget-fp-hazard-nop UnduCheckSubHeightCheck"),
+               "--retarget-fp-hazard-nop UnduCheckSubHeightCheck "
+               "--retime-undu-check-sub UnduCheckSub "
+               "--mtc1-nop UnduCheckSub:0"),
     "SEQ.c": "--mtc1-nop SEQ_motion:3",
     "xglFont.c": "--swap-adjacent xglFontAscii2Euc:47",
     # JS_classLight_setDirection2: the li/lw pair is a scheduling

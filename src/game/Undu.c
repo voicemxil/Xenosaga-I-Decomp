@@ -540,29 +540,7 @@ int UnduCheckSubHeightCheck(float height, UNDU_CHECK *chk, char *entry)
     return result;
 }
 
-/* PARKED at 128 of 128 words. The whole cross-product block -- eighteen
-   multiplies, the CSE of the six shared products and the three summations
-   -- comes out instruction for instruction, and so do the plane solve, the
-   flag dispatch and both returns. Two things are left:
-
-     * a ONE-SLOT schedule shift: retail issues the first `c.le.s f1,f8`
-       after `sub.s f0,f0,f12`, ee-gcc issues it one instruction earlier.
-       Everything after that is misaligned by one, which is what inflates
-       the diff count -- the instructions themselves are the same.
-     * the min/max pair. Retail keeps the MIN in the register `a->y` was
-       loaded into ($f5) and makes the max the copy ($f1); ee-gcc does the
-       opposite. Swept: `lo = a->y; hi = lo;`, `hi = a->y; lo = hi;`, both
-       read separately, and swapping the declaration order -- all three
-       spellings coalesce the load with `hi`.
-
-   Solved and not to be re-swept: the three edge determinants must be
-   LOCALS computed before the test, not the arms of a short-circuit `&&`
-   chain -- retail evaluates all three up front and only then branches
-   three times, and an inline `&&` chain recomputes each one after its
-   predecessor's branch. Declaring the b vertex before the a vertex costs
-   21 words.
-
-   Drop the query position onto one triangle: reject it with -1000.0f
+/* Drop the query position onto one triangle: reject it with -1000.0f
    unless all three edge cross-products keep it inside, then solve the
    plane equation for the height. Flag 0x400 additionally clamps the
    result to the triangle's own Y span, widened or narrowed by fRange

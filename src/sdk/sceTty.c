@@ -36,23 +36,9 @@ void *QueueInit(int size)
  * the outgoing packet header is filled in through that same alias.
  * All three are named fixed addresses from config/symbol_addrs.txt.
  *
- * PARKED NEAR-MISS, 14 diffs of 47 words, RIGHT LENGTH, and the
- * differing words are the SAME instruction multiset in a different
- * order: the original interleaves the three zero-stores into `tinfo`
- * with the two `%hi/%lo | 0x20000000` address computations, where we
- * emit them in two groups.
- *
  * The `sock` field must be volatile -- the original stores the
  * sceDeci2Open result and then RELOADS it for the sign test, which no
- * non-volatile spelling reproduces (that alone was 47 vs 46 words).
- *
- * The interleaving is scheduler output, which is consistent with this
- * TU's `FILE_CFLAGS_OVERRIDE = "-O2 -G0"`: with the flag the residue is
- * 14 diffs, with -fno-schedule-insns nothing gets below 19.  Statement
- * orders swept at 14: the rbuf alias before and after the wbuf alias,
- * the three zero-stores before / between / after the alias
- * computations, and both orders of the final `w->pad` / `w->src`
- * stores.  Wants the scheduler pushed, not a different shape.
+ * non-volatile spelling reproduces.
  * ------------------------------------------------------------------ */
 
 typedef struct t_ttyinfo {

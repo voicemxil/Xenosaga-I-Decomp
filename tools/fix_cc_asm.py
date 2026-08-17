@@ -2149,6 +2149,137 @@ def retime_model_stealth_entries(lines, scope):
     return out
 
 
+def retime_undu_check_subs(lines, scope):
+    """Recover the retail allocator and range-check schedule for UnduCheckSub.
+
+    The rebuilt compiler emits the same operations and control flow, but ties
+    the A/B vertex pointers, query pointer/result, and min/max FP values to
+    different registers. Retail also rotates a range load through two branch
+    slots. Validate every affected live range and schedule instruction before
+    applying those semantics-preserving register renames and reorders.
+    """
+    if scope is None:
+        return lines
+    out = list(lines)
+    for func in sorted(scope):
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if len(pos) < 111:
+            raise SystemExit("--retime-undu-check-sub: site not found: %s" %
+                             func)
+
+        ab_expected = {
+            5: '\taddu\t$9,$4,$2',
+            7: '\taddu\t$8,$4,$3',
+            9: '\tl.s\t$f2,8($9)',
+            11: '\tl.s\t$f5,0($9)',
+            12: '\tl.s\t$f7,8($8)',
+            14: '\tl.s\t$f0,0($8)',
+            70: '\tl.s\t$f5,4($9)',
+            71: '\tl.s\t$f0,4($8)',
+        }
+        ab_actual = {n: out[pos[n]] for n in range(111)
+                     if re.search(r'\$(?:8|9)\b', out[pos[n]])}
+        if ab_actual != ab_expected:
+            raise SystemExit("--retime-undu-check-sub: %s A/B pointer live "
+                             "range changed: want %r, got %r" %
+                             (func, ab_expected, ab_actual))
+        q_expected = {
+            3: '\taddu\t$11,$6,128',
+            8: '\tl.s\t$f15,0($11)',
+            16: '\tl.s\t$f14,8($11)',
+            89: '\tl.s\t$f0,4($11)',
+        }
+        q_actual = {n: out[pos[n]] for n in range(111)
+                    if re.search(r'\$11\b', out[pos[n]])}
+        if q_actual != q_expected:
+            raise SystemExit("--retime-undu-check-sub: %s query pointer live "
+                             "range changed: want %r, got %r" %
+                             (func, q_expected, q_actual))
+        result_expected = {
+            69: '\tmove\t$10,$0',
+            96: '\tli\t$10,1\t\t\t# 0x1',
+            101: '\tli\t$10,1\t\t\t# 0x1',
+            104: '\tli\t$10,1\t\t\t# 0x1',
+            106: None,
+        }
+        if not re.match(r'^\tbeq\t\$10,\$0,\$L\d+$', out[pos[106]]):
+            raise SystemExit("--retime-undu-check-sub: %s result branch "
+                             "changed: %r" % (func, out[pos[106]]))
+        result_expected[106] = out[pos[106]]
+        result_actual = {n: out[pos[n]] for n in range(111)
+                         if re.search(r'\$10\b', out[pos[n]])}
+        if result_actual != result_expected:
+            raise SystemExit("--retime-undu-check-sub: %s result live range "
+                             "changed: want %r, got %r" %
+                             (func, result_expected, result_actual))
+
+        fp_expected = {
+            77: '\tc.lt.s\t$f3,$f1',
+            79: '\tmov.s\t$f1,$f3',
+            80: '\tc.lt.s\t$f5,$f0',
+            83: '\tmov.s\t$f5,$f0',
+            84: '\tc.lt.s\t$f5,$f3',
+            86: '\tmov.s\t$f5,$f3',
+            88: '\tsub.s\t$f5,$f5,$f4',
+            91: '\tadd.s\t$f1,$f1,$f4',
+            92: '\tc.lt.s\t$f5,$f0',
+            97: '\tc.lt.s\t$f0,$f1',
+            102: '\tc.lt.s\t$f5,$f0',
+        }
+        fp_actual = {n: out[pos[n]] for n in range(77, 105)
+                     if re.search(r'\$f(?:1|5)\b', out[pos[n]])}
+        if fp_actual != fp_expected:
+            raise SystemExit("--retime-undu-check-sub: %s min/max FPR live "
+                             "range changed: want %r, got %r" %
+                             (func, fp_expected, fp_actual))
+        schedule_expected = {
+            75: '\tmov.s\t$f1,$f0',
+            82: '\tl.s\t$f4,148($6)',
+            89: '\tl.s\t$f0,4($11)',
+            91: '\tadd.s\t$f1,$f1,$f4',
+        }
+        for n, want in schedule_expected.items():
+            if out[pos[n]] != want:
+                raise SystemExit(
+                    "--retime-undu-check-sub: %s schedule instruction %d "
+                    "changed: want %r, got %r" %
+                    (func, n, want, out[pos[n]]))
+        if (not re.match(r'^\tbc1f\t\$L\d+$', out[pos[81]]) or
+                not re.match(r'^\tbeq\t\$2,\$0,\$L\d+$', out[pos[90]])):
+            raise SystemExit("--retime-undu-check-sub: %s schedule branches "
+                             "changed: %r / %r" %
+                             (func, out[pos[81]], out[pos[90]]))
+
+        for n in range(111):
+            line = out[pos[n]]
+            line = re.sub(r'\$8\b', '\x01', line)
+            line = re.sub(r'\$9\b', '$8', line)
+            out[pos[n]] = line.replace('\x01', '$9')
+
+        for n in (3, 8, 16, 89):
+            out[pos[n]] = re.sub(r'\$11\b', '$10', out[pos[n]])
+        for n in (69, 96, 101, 104, 106):
+            out[pos[n]] = re.sub(r'\$10\b', '$3', out[pos[n]])
+
+        out[pos[75]] = '\tmov.s\t$f5,$f0'
+        for n in range(77, 105):
+            line = out[pos[n]]
+            line = re.sub(r'\$f1\b', '\x01', line)
+            line = re.sub(r'\$f5\b', '$f1', line)
+            out[pos[n]] = line.replace('\x01', '$f5')
+
+        marker = pos[80] + 1
+        if out[marker].strip() != '#nop':
+            raise SystemExit("--retime-undu-check-sub: hazard marker moved")
+        out[marker] = '\tl.s\t$f4,148($6)'
+        out[pos[82]] = '\tadd.s\t$f5,$f5,$f4'
+        out[pos[89]] = '\t# qy load moved to branch slot'
+        out[pos[91]] = '\tl.s\t$f0,4($10)'
+    return out
+
+
 def swap_fp_commutative_operands(lines, sites):
     """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
 
@@ -3753,6 +3884,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          fill_center_branch_target=None,
          retime_model_entry_clip=None,
          retime_model_stealth_entry=None,
+         retime_undu_check_sub=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
@@ -3846,6 +3978,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
     if retime_model_stealth_entry is not None:
         lines = retime_model_stealth_entries(
             lines, retime_model_stealth_entry)
+
+    if retime_undu_check_sub is not None:
+        lines = retime_undu_check_subs(lines, retime_undu_check_sub)
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
@@ -4527,6 +4662,10 @@ if __name__ == "__main__":
                         default=None, metavar="FUNCS",
                         help="retime the validated allocator and sort window "
                              "of named model stealth functions")
+    parser.add_argument("--retime-undu-check-sub", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="retime the validated UnduCheckSub allocator "
+                             "and range-check schedule")
     parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose three-FPR "
                              "add.s or mul.s has its two commutative source "
@@ -4621,6 +4760,7 @@ if __name__ == "__main__":
          [t for t in (args.fill_center_branch_from_target or "").split(',') if t],
          scope(args.retime_model_entry_clip),
          scope(args.retime_model_stealth_entry),
+         scope(args.retime_undu_check_sub),
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,

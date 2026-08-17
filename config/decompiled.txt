@@ -2971,3 +2971,5 @@ eBattleWinInit2 = 0x002828B0, 0x6C; // eBattle.c
 RES_GetMdlFileName = 0x0024CED8, 0xB8; // RES.c
 UnduCheckSubHeightCheck = 0x00322608, 0x1A4; // Undu.c
 sceOpen = 0x002046C8, 0x284; // sceFs.c
+UnduCheckSub = 0x00322408, 0x200; // Undu.c
+sceTtyInit = 0x00201CF0, 0xBC; // sceTty.c
