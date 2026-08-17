@@ -150,7 +150,12 @@ typedef struct AGWS_SWITCH {
 } AGWS_SWITCH;
 
 extern AGWS_SWITCH *AgwsSwitch;
-extern signed char D_004DAFE8[];
+
+typedef struct AGWS_STEP {
+    signed char value[2];
+} AGWS_STEP;
+
+extern AGWS_STEP D_004DAFE8[5];
 
 typedef struct AGWS_PADDATA {
     char           pad_00[0x2A];
@@ -160,19 +165,11 @@ typedef struct AGWS_PADDATA {
 
 extern AGWS_PADDATA PadData[2];
 
-/* TODO near-miss (11/126 words, all in the two-byte step copy).  The
- * original loads D_004DAFE8[0..1] with SIGN-extending `lb` before
- * storing them to the stack pair; MIPS gcc's LOAD_EXTEND_OP makes a
- * plain QImode move a zero-extending `lbu`, and no spelling swept
- * (int temporaries, explicit casts, pointer copies, a 2-iteration
- * loop, char vs signed char on either side) makes the sign extension
- * survive to the store.  Everything else, including the sp+16 stack
- * placement of the pair, matches. */
 void AgwsSwitchMain(void)
 {
     AGWS_SWITCH *p = AgwsSwitch;
     short aTarget[2];
-    signed char aStep[2];
+    AGWS_STEP step;
     int i;
 
     if (p->nState != 0) {
@@ -204,11 +201,10 @@ void AgwsSwitchMain(void)
             p->aSlide[1] = 6;
         }
     }
-    aStep[0] = D_004DAFE8[0];
-    aStep[1] = D_004DAFE8[1];
+    step = D_004DAFE8[0];
     for (i = 0; i < 2; i++) {
         if (p->aSlide[i] != 0) {
-            p->aSlide[i] += aStep[i];
+            p->aSlide[i] += step.value[i];
         }
     }
     for (i = 0; i < 2; i++) {

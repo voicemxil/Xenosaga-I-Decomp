@@ -2943,3 +2943,4 @@ sceMpegInit = 0x00216BE8, 0x9C; // sceMpeg.c
 sceIpuInit = 0x00210578, 0x238; // sceIpu.c
 scePadInit = 0x0020B698, 0x140; // scePad.c
 sceFsInit = 0x00204438, 0x1C8; // sceFs.c
+AgwsSwitchMain = 0x0029D530, 0x1F8; // Agws.c
