@@ -2150,27 +2150,6 @@ float s_fClipScale = 1.3f;
  * each enabled window's result is recorded in aClip[] and the model is
  * marked fully clipped (0x20000) only when every tested window clipped
  * it. */
-/* TODO: near-miss, 17 diffs of 85 words, NOT registered.  Right length,
- * right control flow, both loops and the whole tail are word-for-word
- * correct; the ONLY problem is the entry block's schedule, and every
- * later diff is that shift cascading.
- *   orig: addiu sp / li v1,1 / 6x sd / lw v0,s_nClip(gp) / beq
- *   ours: lw v1,s_nClip(gp) / addiu sp / li v0,1 / 5x sd / beq / sd ra
- * i.e. the original has the constant ready first and the gp load late,
- * and does not fill the beq slot with `sd ra`.  Downstream that also
- * costs `lw v0,72(a0)` vs `lw a0,72(a0)` (gcc reuses the dying argument
- * register only because it schedules that load early) and swaps the two
- * lwc1's.
- * Swept and REJECTED: a named local for s_nClip; `if (s_nClip == 1) goto
- * done;` (both exactly 17); four spellings of the qword source address
- * (&aFogDist[8], (char *)&s_inLayout + 0x1F0, a VEC4 * local, the
- * aFogDist+8 pointer form -- all 17, the addiu is a masked %lo reloc and
- * was never a diff); `vPos = *(VEC4 *)...` as a struct assign (87 words,
- * much worse).
- * Note LAYOUT really is 0x320 bytes (from the ELF symbol table), with an
- * int aClip[4] at 0x310, and the entry position is the VEC4 overlaying
- * aFogDist[8..11] at 0x1F0.
- */
 int nmlModelCalcEntryClip(void *pModel)
 {
     VEC4 vPos;

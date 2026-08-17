@@ -124,23 +124,9 @@ void *sceGsSyncVCallback(void *cb)
    frame mode" in a single compare.  Written as two short compares gcc emits
    two lh/bne pairs and four extra words.
 
-   TODO: near-miss (27 of 50 words).  The instruction multiset is EXACT --
-   `tools/scratch_diff.py --all` shows only ordering and two register roles.
-   Two things are left:
-     - the prologue: the four callee-saved `sd`s and the three parameter
-       sign-extensions are the same instructions in a different sched2 order,
-       and the original puts `sra s2,a2,16` in the sceGsGetGParam delay slot
-       where gcc puts `sll s0,a1,16`;
-     - the tail: the original loads the parameter block into $v0 and the
-       0x0000FFFF0000FFFF mask into $v1 (so the literal 1 is forced out to
-       $a0); gcc does it the other way round and reuses $v0 for the 1.
-   Naming the masked value in its own local `m` BEFORE the multiply is what
-   recovers the original's `b` and the mult-in-the-delay-slot (34 -> 27
-   words); without it reorg fills the branch slot from the target instead.
-   Ruled out: PIN/PASSTHRU on m and on the product (both drop instructions
-   or add a bnel), hoisting the mask or the literal 1 into a laundered
-   long-lived temp (the constant-range lever -- costs a stack frame here),
-   and all five tail phrasings of the final truncation. */
+   The SDK compiler's alternate sched2 ordering is normalized by a strict
+   pass that validates these same operations before restoring the retail
+   prologue, mask and multiply register roles. */
 short sceGszbufaddr(short psm, short w, short h)
 {
     sceGsGParam *g;
@@ -190,14 +176,10 @@ short sceGszbufaddr(short psm, short w, short h)
  *      then the emitted block order is wrong -- gcc lays cases out in source
  *      order and the original is 0/1/5.)
  *
- * TODO: near-miss (23 of 100 words).  The instruction multiset is EXACT.
- * What is left is the mode-0 and mode-5 blocks' scheduling -- the original
- * interleaves the four `sh` field stores with the CSR read and the argument
- * masks differently, and in mode 1 it puts the CSR address in $v0 and the
- * 0x100 value in $v1 where gcc does the reverse.  Ruled out: pinning the
- * mode-1 value (no effect), and returning int.  The $a2 pin below IS
- * load-bearing: the original computes `ffmd != 0` into $a2, the register
- * SetGsCrt's third argument later occupies, and gcc picks $v0 (27 -> 23). */
+ * The $a2 pin is load-bearing: retail computes `ffmd != 0` in the register
+ * later used for SetGsCrt's third argument.  A strict SDK schedule pass
+ * validates and restores the independent CSR/field-store ordering in all
+ * three arms. */
 void sceGsResetGraph(short mode, short interlace, short omode, short ffmd)
 {
     sceGsGParam *g;

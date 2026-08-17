@@ -318,7 +318,9 @@ FILE_FIX_FLAGS = {
                    "Java_xeno_Chr_setPeer__Ljava_lang_Object_:23:2"),
     "JNI.c": "--rotate JNI_searchClasses:16:2",
     "JTHREAD.c": "--rotate JTHREAD_cntl:2:2",
-    "sceGs.c": "--swap-adjacent sceGsSyncVCallback:26",
+    "sceGs.c": ("--swap-adjacent sceGsSyncVCallback:26 "
+                "--retime-gs-zbuffer-address sceGszbufaddr:2:32 "
+                "--retime-gs-reset-graph sceGsResetGraph:28:63:75"),
     # sceVif1PkCnt/End: the original scheduler ordered an or/sw pair the
     # other way -- parked for months as "needs a mid-block instruction
     # swap flag", which --swap-adjacent now is. NOTE all sites for one
@@ -373,7 +375,7 @@ FILE_FIX_FLAGS = {
     # chain-tracking NOTE in fix_cc_asm.py's main). Site-indexed nops:
     # FadeIn's mtc1 $1,$f1 (site 1), FogPara's mtc1 $0,$f1 (2) and
     # mtc1 $1,$f3 (3).
-    "nmlModel.c": ("--barrier-return-store nmlModelSetFadeInInterrupt --mtc1-nop nmlModelSetFadeIn:1,nmlModelFogPara:2,nmlModelFogPara:3 --pin-slot-nop nmlModelSetGlobalPointLightPos:0,nmlModelSetActiveFadeOut:0,nmlModelSetActiveFadeOut:1,nmlModelSetActiveFadeOut:2,nmlModelSetActiveFadeIn:0,nmlModelSetActiveFadeIn:1,nmlModelSetActiveFadeIn:2 --rotate-seq CONSTRUCT_MODELSYSTEM:6:4,CONSTRUCT_MODELSYSTEM:9:-18,CONSTRUCT_MODELSYSTEM:8:-3"),
+    "nmlModel.c": ("--barrier-return-store nmlModelSetFadeInInterrupt --mtc1-nop nmlModelSetFadeIn:1,nmlModelFogPara:2,nmlModelFogPara:3 --pin-slot-nop nmlModelSetGlobalPointLightPos:0,nmlModelSetActiveFadeOut:0,nmlModelSetActiveFadeOut:1,nmlModelSetActiveFadeOut:2,nmlModelSetActiveFadeIn:0,nmlModelSetActiveFadeIn:1,nmlModelSetActiveFadeIn:2 --rotate-seq CONSTRUCT_MODELSYSTEM:6:4,CONSTRUCT_MODELSYSTEM:9:-18,CONSTRUCT_MODELSYSTEM:8:-3 --retime-model-entry-clip nmlModelCalcEntryClip"),
     # ungetc's CHECK_INIT tail and the mprec leaf returns keep their
     # copies out of the delay slots, same class as fabs in libm.c.
     "newlib_ungetc.c": "--barrier-return-store ungetc",

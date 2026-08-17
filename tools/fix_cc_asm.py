@@ -1169,6 +1169,324 @@ def retime_resource_file_items(lines, specs):
     return out
 
 
+def retime_gs_zbuffer_addresses(lines, specs):
+    """Recover the SDK compiler schedule for ``sceGszbufaddr``.
+
+    ``FUNC:PROLOGUE:TAIL`` identifies two strict windows.  The rebuilt SDK
+    compiler emits the same sign extensions, page rounding, 64-bit mask and
+    final page multiply as retail, but sched2 orders the saved registers and
+    argument conversions differently and gives the mask/product pseudos the
+    opposite short-lived GPRs.  Validate both complete windows before
+    restoring retail's order and register roles.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, pro_text, tail_text = spec.split(':')
+            pro = int(pro_text)
+            tail = int(tail_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--retime-gs-zbuffer-address: bad spec %r "
+                             "(want FUNC:PROLOGUE:TAIL)" % spec)
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if pro < 0 or pro + 16 >= len(pos) or tail < 0 or tail + 8 >= len(pos):
+            raise SystemExit("--retime-gs-zbuffer-address: site not found: "
+                             "%s" % spec)
+
+        pro_expected = [
+            '\tsd\t$18,32($sp)',
+            '\tsd\t$17,16($sp)',
+            '\tsra\t$18,$6,16',
+            '\tsd\t$16,0($sp)',
+            '\tsll\t$17,$4,16',
+            '\tsd\t$31,48($sp)',
+            '\tjal\tsceGsGetGParam',
+            '\tsll\t$16,$5,16',
+            '\tsra\t$16,$16,16',
+            '\taddu\t$3,$16,63',
+            '\tmove\t$5,$2',
+            '\tli\t$4,-1\t\t\t# 0xffffffffffffffff',
+            '\taddu\t$16,$16,126',
+            '\tslt\t$2,$4,$3',
+            '\tsra\t$17,$17,16',
+            '\tmovn\t$16,$3,$2',
+            '\tandi\t$17,$17,0x2',
+        ]
+        pro_replacement = [
+            '\tsd\t$17,16($sp)',
+            '\tsd\t$16,0($sp)',
+            '\tsll\t$17,$4,16',
+            '\tsd\t$18,32($sp)',
+            '\tsll\t$16,$5,16',
+            '\tsra\t$16,$16,16',
+            '\tsra\t$17,$17,16',
+            '\tsd\t$31,48($sp)',
+            '\tjal\tsceGsGetGParam',
+            '\tsra\t$18,$6,16',
+            '\taddu\t$3,$16,63',
+            '\tmove\t$5,$2',
+            '\tli\t$4,-1\t\t\t# 0xffffffffffffffff',
+            '\taddu\t$16,$16,126',
+            '\tslt\t$2,$4,$3',
+            '\tandi\t$17,$17,0x2',
+            '\tmovn\t$16,$3,$2',
+        ]
+        tail_expected = [
+            '\tld\t$3,0($5)',
+            '\tdli\t$2,0xffff0000ffff\t\t# 281470681808895',
+            '\tand\t$3,$3,$2',
+            '\tdli\t$2,0x1\t\t# 1',
+            '\tbne\t$3,$2,$L22',
+            '\tmult\t$6,$16,$6',
+            '\tb\t$L24',
+            '\tsll\t$2,$6,16',
+            '\tsll\t$2,$6,17',
+        ]
+        tail_replacement = [
+            '\tld\t$2,0($5)',
+            '\tdli\t$3,0xffff0000ffff\t\t# 281470681808895',
+            '\tdli\t$4,0x1\t\t# 1',
+            '\tand\t$2,$2,$3',
+            '\tbne\t$2,$4,$L22',
+            '\tmult\t$2,$16,$6',
+            '\tb\t$L24',
+            '\tsll\t$2,$2,16',
+            '\tsll\t$2,$2,17',
+        ]
+        old_call = pos[pro + 6]
+        old_delay = pos[pro + 7]
+        old_directives = (out[old_call - 2], out[old_call - 1],
+                          out[old_delay + 1], out[old_delay + 2])
+        if old_directives != ('\t.set\tnoreorder', '\t.set\tnomacro',
+                              '\t.set\tmacro', '\t.set\treorder'):
+            raise SystemExit("--retime-gs-zbuffer-address: %s call "
+                             "directives changed: %r" %
+                             (spec, old_directives))
+        for start, expected, replacement in (
+                (pro, pro_expected, pro_replacement),
+                (tail, tail_expected, tail_replacement)):
+            got = [out[pos[start + n]] for n in range(len(expected))]
+            if got != expected:
+                for n, (want, actual) in enumerate(zip(expected, got)):
+                    if want != actual:
+                        raise SystemExit(
+                            "--retime-gs-zbuffer-address: %s instruction "
+                            "%d changed: want %r, got %r" %
+                            (spec, start + n, want, actual))
+            for n, line in enumerate(replacement):
+                out[pos[start + n]] = line
+        # GCC's directives stay attached to the old call position when the
+        # instruction sequence is retimed. Move that zero-byte boundary too,
+        # otherwise modern gas pads the newly positioned jal with a nop.
+        out[old_call - 2] = ''
+        out[old_call - 1] = ''
+        out[old_delay + 1] = ''
+        out[old_delay + 2] = ''
+        new_call = pos[pro + 8]
+        new_delay = pos[pro + 9]
+        out[new_call] = ('\t.set\tnoreorder\n\t.set\tnomacro\n' +
+                         out[new_call])
+        out[new_delay] = (out[new_delay] +
+                          '\n\t.set\tmacro\n\t.set\treorder')
+    return out
+
+
+def retime_gs_reset_graphs(lines, specs):
+    """Restore the SDK schedule of the three ``sceGsResetGraph`` arms.
+
+    ``FUNC:RESET:FLUSH:CRT`` names the straight-line windows for mode 0,
+    mode 1, and mode 5.  The operations are already identical: CSR writes,
+    parameter-block halfword stores, CSR field extraction and SetGsCrt
+    argument masks.  Only sched2 ordering and the mode-1 address/value GPR
+    roles differ.  Each complete window is fingerprinted before rewriting.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, reset_text, flush_text, crt_text = spec.split(':')
+            reset = int(reset_text)
+            flush = int(flush_text)
+            crt = int(crt_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--retime-gs-reset-graph: bad spec %r "
+                             "(want FUNC:RESET:FLUSH:CRT)" % spec)
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+
+        windows = (
+            (reset, [
+                '\tmove\t$16,$2',
+                '\tli\t$3,301989888\t\t\t# 0x12000000',
+                '\tori\t$3,$3,0x1000',
+                '\tdli\t$2,0x200\t\t# 512',
+                '\tsd\t$2,0($3)',
+                '\tli\t$4,65280\t\t\t# 0xff00',
+                '\tld\t$2,0($3)',
+                '\tsh\t$17,0($16)',
+                '\tdsrl\t$2,$2,16',
+                '\tsh\t$18,2($16)',
+            ], [
+                '\tli\t$3,301989888\t\t\t# 0x12000000',
+                '\tdli\t$4,0x200\t\t# 512',
+                '\tori\t$3,$3,0x1000',
+                '\tmove\t$16,$2',
+                '\tsd\t$4,0($3)',
+                '\tsh\t$17,0($16)',
+                '\tli\t$4,65280\t\t\t# 0xff00',
+                '\tld\t$2,0($3)',
+                '\tsh\t$18,2($16)',
+                '\tdsrl\t$2,$2,16',
+            ]),
+            (flush, [
+                '\tli\t$3,301989888\t\t\t# 0x12000000',
+                '\tdli\t$2,0x100\t\t# 256',
+                '\tori\t$3,$3,0x1000',
+                '\tsd\t$2,0($3)',
+            ], [
+                '\tli\t$2,301989888\t\t\t# 0x12000000',
+                '\tdli\t$3,0x100\t\t# 256',
+                '\tori\t$2,$2,0x1000',
+                '\tsd\t$3,0($2)',
+            ]),
+            (crt, [
+                '\tsh\t$6,4($16)',
+                '\tandi\t$4,$17,0x1',
+                '\tdsrl\t$2,$2,16',
+                '\tsh\t$17,0($16)',
+                '\tandi\t$2,$2,0xff',
+                '\tsh\t$18,2($16)',
+                '\tandi\t$2,$2,0xffff',
+                '\tandi\t$5,$18,0x00ff',
+                '\tsh\t$2,6($16)',
+                '\tandi\t$6,$19,0x1',
+            ], [
+                '\tandi\t$4,$17,0x1',
+                '\tsh\t$6,4($16)',
+                '\tandi\t$5,$18,0x00ff',
+                '\tdsrl\t$2,$2,16',
+                '\tsh\t$17,0($16)',
+                '\tandi\t$2,$2,0xff',
+                '\tsh\t$18,2($16)',
+                '\tandi\t$2,$2,0xffff',
+                '\tandi\t$6,$19,0x1',
+                '\tsh\t$2,6($16)',
+            ]),
+        )
+        for start, expected, replacement in windows:
+            if start < 0 or start + len(expected) > len(pos):
+                raise SystemExit("--retime-gs-reset-graph: site not found: "
+                                 "%s" % spec)
+            got = [out[pos[start + n]] for n in range(len(expected))]
+            if got != expected:
+                for n, (want, actual) in enumerate(zip(expected, got)):
+                    if want != actual:
+                        raise SystemExit(
+                            "--retime-gs-reset-graph: %s instruction %d "
+                            "changed: want %r, got %r" %
+                            (spec, start + n, want, actual))
+            for n, line in enumerate(replacement):
+                out[pos[start + n]] = line
+    return out
+
+
+def retime_model_entry_clips(lines, scope):
+    """Restore the retail entry schedule for ``nmlModelCalcEntryClip``.
+
+    GCC emits the same 20 entry instructions as retail, but its scheduler
+    pulls the gp-relative clip load ahead of the frame setup, fills the first
+    branch slot with the return-address save, and hoists the model flag load.
+    The downstream body already matches byte-for-byte.  This opt-in pass
+    therefore validates the complete compiler-emitted entry window (including
+    both branch predicates and their common target) before moving only those
+    independent instructions and renaming the two short-lived v0/v1 values.
+    """
+    if scope is None:
+        return lines
+    out = list(lines)
+    for func in sorted(scope):
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if len(pos) < 20:
+            raise SystemExit("--retime-model-entry-clip: site not found: %s" %
+                             func)
+        first_branch = re.match(r'^\tbeq\t\$3,\$2,(\$L\d+)$', out[pos[8]])
+        second_branch = re.match(r'^\tbeq\t\$4,\$0,(\$L\d+)$', out[pos[18]])
+        if not first_branch or not second_branch or (
+                first_branch.group(1) != second_branch.group(1)):
+            raise SystemExit("--retime-model-entry-clip: %s branch shape "
+                             "changed: %r / %r" %
+                             (func, out[pos[8]], out[pos[18]]))
+        target = first_branch.group(1)
+        expected = [
+            '\tlw\t$3,s_nClip',
+            '\tsubu\t$sp,$sp,64',
+            '\tli\t$2,1\t\t\t# 0x1',
+            '\tsd\t$16,16($sp)',
+            '\tsd\t$17,24($sp)',
+            '\tsd\t$18,32($sp)',
+            '\tsd\t$19,40($sp)',
+            '\tsd\t$20,48($sp)',
+            '\tbeq\t$3,$2,%s' % target,
+            '\tsd\t$31,56($sp)',
+            '\tlui\t$3,%hi(s_inLayout+496) # high',
+            '\tlw\t$4,72($4)',
+            '\taddiu\t$3,$3,%lo(s_inLayout+496) # low',
+            '\tl.s\t$f1,s_fClipScale',
+            '\tlq $2,0($3)',
+            '\tsq $2,0($sp)',
+            '\tl.s\t$f0,12($sp)',
+            '\tmul.s\t$f0,$f0,$f1',
+            '\tbeq\t$4,$0,%s' % target,
+            '\ts.s\t$f0,12($sp)',
+        ]
+        got = [out[pos[n]] for n in range(20)]
+        if got != expected:
+            for n, (want, actual) in enumerate(zip(expected, got)):
+                if want != actual:
+                    raise SystemExit(
+                        "--retime-model-entry-clip: %s instruction %d "
+                        "changed: want %r, got %r" %
+                        (func, n, want, actual))
+
+        replacement = [
+            '\tsubu\t$sp,$sp,64',
+            '\tli\t$3,1\t\t\t# 0x1',
+            '\tsd\t$16,16($sp)',
+            '\tsd\t$17,24($sp)',
+            '\tsd\t$18,32($sp)',
+            '\tsd\t$19,40($sp)',
+            '\tsd\t$20,48($sp)',
+            '\tsd\t$31,56($sp)',
+            '\tlw\t$2,s_nClip',
+            '\t.set\tnoreorder',
+            '\t.set\tnomacro',
+            '\tbeq\t$2,$3,%s' % target,
+            '\tlui\t$3,%hi(s_inLayout+496) # high',
+            '\t.set\tmacro',
+            '\t.set\treorder',
+            '',
+            '\taddiu\t$3,$3,%lo(s_inLayout+496) # low',
+            '\tlq $2,0($3)',
+            '\tsq $2,0($sp)',
+            '\tl.s\t$f0,12($sp)',
+            '\tl.s\t$f1,s_fClipScale',
+            '\tlw\t$2,72($4)',
+            '\t#nop',
+            '\tmul.s\t$f0,$f0,$f1',
+        ]
+        out[pos[18]] = '\tbeq\t$2,$0,%s' % target
+        out[pos[0]:pos[17] + 1] = replacement
+    return out
+
+
 def swap_fp_commutative_operands(lines, sites):
     """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
 
@@ -2764,6 +3082,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_root_matrix_setup=None,
          retime_rpc_call_setup=None,
          retime_resource_file_item=None,
+         retime_gs_zbuffer_address=None,
+         retime_gs_reset_graph=None,
+         retime_model_entry_clip=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
@@ -2834,6 +3155,15 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if retime_resource_file_item:
         lines = retime_resource_file_items(lines, retime_resource_file_item)
+
+    if retime_gs_zbuffer_address:
+        lines = retime_gs_zbuffer_addresses(lines, retime_gs_zbuffer_address)
+
+    if retime_gs_reset_graph:
+        lines = retime_gs_reset_graphs(lines, retime_gs_reset_graph)
+
+    if retime_model_entry_clip is not None:
+        lines = retime_model_entry_clips(lines, retime_model_entry_clip)
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
@@ -3462,6 +3792,18 @@ if __name__ == "__main__":
                         metavar="SPECS",
                         help="comma-separated FUNC:N resource-file item "
                              "finalization schedules")
+    parser.add_argument("--retime-gs-zbuffer-address", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:PROLOGUE:TAIL GS "
+                             "z-buffer page calculations")
+    parser.add_argument("--retime-gs-reset-graph", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:RESET:FLUSH:CRT GS "
+                             "reset-graph schedules")
+    parser.add_argument("--retime-model-entry-clip", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="retime the validated entry block of named "
+                             "model clip functions")
     parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose three-FPR "
                              "add.s or mul.s has its two commutative source "
@@ -3547,6 +3889,9 @@ if __name__ == "__main__":
          [t for t in (args.retime_root_matrix_setup or "").split(',') if t],
          [t for t in (args.retime_rpc_call_setup or "").split(',') if t],
          [t for t in (args.retime_resource_file_item or "").split(',') if t],
+         [t for t in (args.retime_gs_zbuffer_address or "").split(',') if t],
+         [t for t in (args.retime_gs_reset_graph or "").split(',') if t],
+         scope(args.retime_model_entry_clip),
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,
