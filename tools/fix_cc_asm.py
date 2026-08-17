@@ -1987,6 +1987,65 @@ def retime_branch_to_call(flat, sites):
     return out
 
 
+def retime_branch_arguments(flat, specs):
+    """Move a pre-branch argument copy into a plain branch delay slot.
+
+    At FUNC:N, accept only `ARG_A; branch / ARG_B`, where both arguments
+    are register copies and neither feeds the branch predicate.  Retail may
+    use ARG_A in the unconditional delay slot and leave ARG_B on only the
+    fall-through call path; GCC sometimes speculates ARG_B above the branch
+    instead.  The pass preserves both fall-through instructions and removes
+    only dead argument setup from the taken path.
+    """
+    if not specs:
+        return flat
+    out = list(flat)
+    for spec in specs:
+        try:
+            func, site_text = spec.split(':')
+            want = int(site_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--retime-branch-args: bad site %r "
+                             "(want FUNC:N)" % spec)
+        cur = None
+        branch_idx = 0
+        branch_i = None
+        for i, line in enumerate(out):
+            if line.startswith("\t.ent\t"):
+                cur = line.split("\t")[-1]
+                branch_idx = 0
+            if (not re.match(r'^\t(?:beq|bne|beqz|bnez|blez|bgtz|bltz|bgez)\t',
+                             line)
+                    or i < 3 or i + 3 >= len(out)
+                    or out[i - 2].strip().replace("\t", " ") != ".set noreorder"
+                    or out[i - 1].strip().replace("\t", " ") != ".set nomacro"):
+                continue
+            if cur == func and branch_idx == want:
+                branch_i = i
+                break
+            if cur == func:
+                branch_idx += 1
+        if branch_i is None:
+            raise SystemExit("--retime-branch-args: site not found: %s" % spec)
+        prior_i = branch_i - 3
+        prior = out[prior_i]
+        slot = out[branch_i + 1]
+        copy = re.compile(r'^\t(?:move\t\$\d+,\$\d+|'
+                          r'daddu\t\$\d+,\$\d+,\$0)$')
+        if (not copy.match(prior) or not copy.match(slot)
+                or out[branch_i + 2].strip().replace("\t", " ") != ".set macro"
+                or out[branch_i + 3].strip().replace("\t", " ") != ".set reorder"
+                or insn_regs(prior)[0] & insn_regs(out[branch_i])[1]
+                or not swap_ok(prior, slot)):
+            raise SystemExit("--retime-branch-args: %s shape/dependency "
+                             "check failed" % spec)
+        del out[prior_i]
+        branch_i -= 1
+        out[branch_i + 1] = prior
+        out.insert(branch_i + 4, slot)
+    return out
+
+
 def rebase_stack_memory(flat, specs):
     """Express a stack access through an already-computed stack pointer.
 
@@ -2298,6 +2357,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          swap_mem_slot=None,
          exchange_slot_prior=None,
          retime_branch_call=None,
+         retime_branch_args=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
          swap_reg_sources=None,
          exchange_derived=None,
@@ -2729,6 +2789,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = retime_branch_to_call(flat, retime_branch_call)
 
+    if retime_branch_args:
+        flat = "\n".join(out).split("\n")
+        out = retime_branch_arguments(flat, retime_branch_args)
+
     if swap_slot_tgt:
         flat = "\n".join(out).split("\n")
         out = swap_slot_target(flat, swap_slot_tgt)
@@ -2912,6 +2976,10 @@ if __name__ == "__main__":
                         help="retime UPDATE; branch/ARG; jal/NEXT to "
                              "branch/ARG; jal/UPDATE; NEXT at named "
                              "gcc-filled branch sites")
+    parser.add_argument("--retime-branch-args", default=None,
+                        metavar="SITES",
+                        help="retime ARG_A; branch/ARG_B to branch/ARG_A; "
+                             "ARG_B at named plain-branch sites")
     parser.add_argument("--rebase-stack-mem", action="append", default=None,
                         metavar="FUNC:SITES:BASE:BIAS",
                         help="rewrite named OFF($sp) memory sites through an "
@@ -3037,6 +3105,7 @@ if __name__ == "__main__":
          scope(args.swap_mem_into_slot),
          [t for t in (args.exchange_slot_prior or "").split(',') if t],
          scope(args.retime_branch_call),
+         [t for t in (args.retime_branch_args or "").split(',') if t],
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
          [t for t in (args.swap_reg_sources or "").split(',') if t],

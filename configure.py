@@ -259,7 +259,9 @@ FILE_FIX_FLAGS = {
     "sef.c": "--branch-likely sefAllocLocalData:2",
     "sc.c": ("--branch-likely scDispatchScript:4 "
              "--exchange-slot-prior scInitScript:2:2,scParseScript:0:1 "
-             "--swap-mem-into-slot scMISSILE3Script:2"),
+             "--swap-mem-into-slot scMISSILE3Script:2 "
+             "--swap-adjacent scDestroyScript2:10,scDestroyScript2:13 "
+             "--retime-branch-args scDestroyScript2:0"),
     "Game.c": "--rotate-seq GameModeDebugMenu:10:-2,GameModeDebugMenu:12:3,GameModeDebugMenu:12:2",
     "tskUmnBgCube.c": " --as-g0 --fp-pair-hazard tskUmnBgCubeMain",
     "sdv.c": "--branch-unlikely sdvScheduleSound:1 --rotate-seq sdvCreateAlter:3:3,sdvCreateAlter:4:2",
