@@ -796,14 +796,8 @@ int _ipuVdec(MPEGSTREAM *pStream, int nTbl)
 extern char D_004D5BD0[];  /* bad macroblock_address_increment */
 
 /* macroblock_address_increment(): escape and stuffing codes accumulate.
- *
- * PARKED at 35 differing words, right length (68).  The instruction stream
- * and the `sltiu` (nCode is unsigned) are right; what differs is block
- * placement -- the original puts the escape case OUT of line at +0x88 and
- * keeps `nTotal += nCode` as the fall-through, while gcc inlines the escape
- * and annuls the add into a bnezl delay slot.  Swept: `== 0` and `!= 0`
- * orderings of the inner test (identical output -- gcc canonicalises), and
- * int vs unsigned for nCode (unsigned is required for the sltiu). */
+ * VDEC's zero result is only MPEG-1 stuffing when the next 11 bits are 15;
+ * all other zero results flag a malformed stream. */
 int _mbAddressIncrement(MPEGSTREAM *pStream)
 {
     int nTotal;
@@ -814,29 +808,29 @@ int _mbAddressIncrement(MPEGSTREAM *pStream)
     nTotal = 0;
     do {
         nCode = _ipuVdec(pStream, 0);
-        if (nCode == 34) {
-            bMore = 1;                       /* macroblock_stuffing */
-        } else if (nCode < 35) {
-            if (nCode != 0) {
-                nTotal += nCode;
-                bMore = 0;
+        switch (nCode) {
+        case 35:
+            bMore = 1;
+            nTotal += 33;                    /* macroblock_escape */
+            break;
+        case 0:
+            nPeek = _peepBit(pStream, 11);
+            if (pStream->nUnk848 != 0 && nPeek == 15) {
+                _flushBuf(pStream, 11);
+                bMore = 1;
             } else {
-                nPeek = _peepBit(pStream, 11);
-                if (pStream->nUnk848 != 0 && nPeek == 15) {
-                    _flushBuf(pStream, 11);
-                    bMore = 1;
-                } else {
-                    _Error1(pStream, D_004D5BD0, nCode);
-                    pStream->nUnk11C = 1;
-                    return 1;
-                }
+                _Error1(pStream, D_004D5BD0, nCode);
+                pStream->nUnk11C = 1;
+                return 1;
             }
-        } else if (nCode != 35) {
+            break;
+        case 34:
+            bMore = 1;                       /* macroblock_stuffing */
+            break;
+        default:
             nTotal += nCode;
             bMore = 0;
-        } else {
-            nTotal += 33;                    /* macroblock_escape */
-            bMore = 1;
+            break;
         }
     } while (bMore);
     return nTotal;
