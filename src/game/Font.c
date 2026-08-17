@@ -224,14 +224,6 @@ void FontTestP1(void)
     xglFontDebugPrintf(16, 100, test07);
 }
 
-/* TODO: near-miss (8/74 words, REGISTER only). Every instruction and every
- * constant is right; the original ties the %hi and %lo halves of PadData's
- * address into one register (v1) and puts the 0x08000100 mask in a0, while
- * 2.96 here splits them across v0/v1 and puts the mask in v1. That is a
- * register-allocation coalesce of a HIGH/LO_SUM pair, not a renaming, so
- * --swap-regs cannot express it; four source shapings of the loop and the
- * condition (local pad pointer, reversed compare, xor form, early return)
- * all produced the same allocation. */
 /* Debug font browser main loop. Up/down on pad 1 wrap through the three
  * pages; L1+? on pad 0 quits. */
 void FontTest(void)

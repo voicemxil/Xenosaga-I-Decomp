@@ -274,7 +274,9 @@ FILE_FIX_FLAGS = {
     "tskMenuPausePage.c": "--swap-adjacent PauseMenuPage0:12 --rotate PauseMenuPage0:21:3",
     "xglCd.c": "--swap-adjacent xglCdReadCancel:41! --short-loop-pad FileSelectListReload:3:5,FileSelectListReload:4:0,FileSelectListReload:5:0",
     "xglDma.c": "--barrier-return-store xglDmaMFIFOKick --swap-adjacent xglDmaMFIFOKick:14",
-    "Font.c": "--branch-likely FontTestP1:2",
+    "Font.c": ("--branch-likely FontTestP1:2 "
+               "--swap-regs FontTest:3-4:12,14-17 "
+               "--coalesce-symbol-address FontTest:11:13:3"),
     "Drill.c": "--mtc1-nop DrillZMoveFunc:1,DrillPowerOffFunc:1 --rotate DrillReturnFunc:139:3",
     "eMessage.c": "--rotate eMessageNextGyouMaxGet:2:-5",
     "INIT.c": "--rotate InitEvsSymbol:33:-3,InitRetSymbol:33:-3 --rotate-seq InitShopSymbol:39:-4,InitShopSymbol:39:-3,InitSaveSymbol:39:-4,InitSaveSymbol:39:-3 --barrier-lo-load InitItemSymbol,InitItemBox",

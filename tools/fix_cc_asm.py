@@ -723,6 +723,55 @@ def split_loop_byte_loads(lines, specs):
     return out
 
 
+def coalesce_symbol_addresses(lines, specs):
+    """Coalesce a split %hi/%lo symbol address into one named GPR.
+
+    Specs are FUNC:HI:LO:REG instruction indices. HI must be a `lui` of
+    `%hi(SYM)` and LO an `addiu` using that result with `%lo(SYM)`.  The
+    old GCC allocator occasionally keeps both halves in one GPR while a
+    rebuild introduces a second destination.  This pass changes only those
+    three register fields, rejects intervening uses of either GPR, and
+    requires the two relocation symbols to agree.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, hi_text, lo_text, reg_text = spec.split(':')
+            hi_idx = int(hi_text)
+            lo_idx = int(lo_text)
+            new_reg = '$' + reg_text.lstrip('$')
+        except (ValueError, TypeError):
+            raise SystemExit("--coalesce-symbol-address: bad spec %r "
+                             "(want FUNC:HI:LO:REG)" % spec)
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if hi_idx < 0 or lo_idx <= hi_idx or lo_idx >= len(pos):
+            raise SystemExit("--coalesce-symbol-address: bad indices in %s" %
+                             spec)
+        hi, lo = pos[hi_idx], pos[lo_idx]
+        mh = re.match(r'^\tlui\t(\$\d+),%hi\(([^)]+)\)(.*)$', out[hi])
+        ml = re.match(r'^\taddiu\t(\$\d+),(\$\d+),%lo\(([^)]+)\)(.*)$',
+                      out[lo])
+        if (not mh or not ml or ml.group(2) != mh.group(1)
+                or ml.group(3) != mh.group(2) or new_reg == mh.group(1)):
+            raise SystemExit("--coalesce-symbol-address: %s shape changed: "
+                             "%r / %r" % (spec, out[hi], out[lo]))
+        old_reg = mh.group(1)
+        for i in pos[hi_idx + 1:lo_idx]:
+            writes, reads = insn_regs(out[i])
+            if old_reg in writes | reads or new_reg in writes | reads:
+                raise SystemExit("--coalesce-symbol-address: %s has an "
+                                 "intervening register use" % spec)
+        out[hi] = "\tlui\t%s,%%hi(%s)%s" % (new_reg, mh.group(2),
+                                              mh.group(3))
+        out[lo] = "\taddiu\t%s,%s,%%lo(%s)%s" % (new_reg, new_reg,
+                                                   mh.group(2), ml.group(4))
+    return out
+
+
 def swap_fp_commutative_operands(lines, sites):
     """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
 
@@ -2236,6 +2285,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          swap_reg_sources=None,
          exchange_derived=None,
          retime_byte_guard=None, split_loop_byte=None,
+         coalesce_symbol_address=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
@@ -2291,6 +2341,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if split_loop_byte:
         lines = split_loop_byte_loads(lines, split_loop_byte)
+
+    if coalesce_symbol_address:
+        lines = coalesce_symbol_addresses(lines, coalesce_symbol_address)
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
@@ -2889,6 +2942,10 @@ if __name__ == "__main__":
                         help="comma-separated FUNC:TEST:COPY sites where a "
                              "signed loop-test byte and unsigned copied byte "
                              "must be loaded separately")
+    parser.add_argument("--coalesce-symbol-address", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:HI:LO:REG sites whose "
+                             "%hi/%lo symbol address must use one GPR")
     parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose three-FPR "
                              "add.s or mul.s has its two commutative source "
@@ -2968,6 +3025,7 @@ if __name__ == "__main__":
          scope(args.exchange_derived_results),
          scope(args.retime_byte_copy_guard),
          [t for t in (args.split_loop_byte_load or "").split(',') if t],
+         [t for t in (args.coalesce_symbol_address or "").split(',') if t],
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,
