@@ -2,8 +2,8 @@
 """Audit every reordering-flag match for hidden logic differences.
 
 The reordering passes (--swap-adjacent, --rotate, --swap-into-slot,
---swap-slot-target) are only legitimate when the compiler emitted the
-RIGHT INSTRUCTIONS IN THE WRONG ORDER: instruction scheduling is not
+--swap-slot-target, --swap-fp-operands) are only legitimate when the compiler
+emitted the RIGHT INSTRUCTIONS IN THE WRONG ORDER: instruction scheduling is not
 expressible in C, so a pure reorder is a genuine toolchain gap. They are
 NOT legitimate as a way to paper over a C body that computes something
 different -- that would silently encode wrong logic behind right bytes.
@@ -52,6 +52,18 @@ def _identity(word):
     """
     word = mask_word(word)
     op = word >> 26
+    # COP1 single-precision add and multiply are commutative.  The original
+    # and rebuilt compilers can choose opposite fs/ft encodings even though
+    # the instruction has the same destination and semantics.  Canonicalize
+    # those two source fields so --swap-fp-operands remains auditable by the
+    # same multiset test as the instruction-order corrections.
+    if (op == 17 and ((word >> 21) & 0x1F) == 16
+            and (word & 0x3F) in (0, 2)):
+        ft = (word >> 16) & 0x1F
+        fs = (word >> 11) & 0x1F
+        lo, hi = sorted((ft, fs))
+        word &= ~((0x1F << 16) | (0x1F << 11))
+        word |= (lo << 16) | (hi << 11)
     if op == 0 or op == 16 or op == 17 or op == 18:
         return word                      # R-type / coprocessor: keep whole
     if op in (2, 3):
@@ -61,7 +73,8 @@ def _identity(word):
 
 REORDER_FLAGS = ("--swap-adjacent", "--rotate", "--rotate-seq",
                  "--swap-into-slot", "--swap-slot-target",
-                 "--hoist-div-arg", "--retime-branch-slot")
+                 "--hoist-div-arg", "--retime-branch-slot",
+                 "--swap-fp-operands")
 
 _TMPDIR = tempfile.mkdtemp(prefix="audit_swaps.")
 atexit.register(shutil.rmtree, _TMPDIR, True)

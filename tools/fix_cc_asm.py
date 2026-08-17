@@ -502,6 +502,54 @@ def swap_registers(lines, sites):
     return out
 
 
+def swap_fp_commutative_operands(lines, sites):
+    """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
+
+    Old GCC canonicalizes a commutative floating expression's two source
+    operands independently of the source spelling.  A rebuilt instruction can
+    consequently be semantically identical to retail while differing only in
+    the fs/ft encoding.  Sites use the ordinary FUNC:N convention, where N is
+    the 0-based instruction index and directives/labels do not count.
+
+    This pass deliberately accepts only add.s and mul.s.  It never changes the
+    destination, opcode, or instruction order, and it fails loudly if a named
+    site is not one of those two exact three-FPR forms.
+    """
+    if not sites:
+        return lines
+    owner = function_at(lines)
+    out = []
+    idx = 0
+    prev_owner = None
+    applied = set()
+    commutative = re.compile(
+        r'^(\t(?:add|mul)\.s\t)(\$f\d+)\s*,\s*(\$f\d+)\s*,\s*'
+        r'(\$f\d+)(.*)$')
+    for i, line in enumerate(lines):
+        if owner[i] != prev_owner:
+            idx = 0
+            prev_owner = owner[i]
+        is_insn = bool(RE_INSN.match(line))
+        if is_insn:
+            key = "%s:%d" % (owner[i], idx)
+            if key in sites:
+                m = commutative.match(line)
+                if not m:
+                    raise SystemExit(
+                        "--swap-fp-operands: %s is not a three-register "
+                        "add.s or mul.s instruction: %s" % (key, line))
+                prefix, fd, fs, ft, suffix = m.groups()
+                line = "%s%s,%s,%s%s" % (prefix, fd, ft, fs, suffix)
+                applied.add(key)
+            idx += 1
+        out.append(line)
+    missing = set(sites) - applied
+    if missing:
+        raise SystemExit("--swap-fp-operands: site(s) not found: %s" %
+                         ",".join(sorted(missing)))
+    return out
+
+
 def unfill_gcc_slots(flat, scope, owner_of):
     """Rewrite gcc's own delay-slot fills back to hoisted-insn + nop.
 
@@ -1445,6 +1493,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          war_restore=None, pin_slot=None, lis_hazard_nop=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
+         swap_fp_operands=None,
          rotate_seq=None, hoist_div_arg=None, retime_branch=None,
          zero_quad_store=None, fp_pair_hazard=None,
          short_loop_pad=None, byte_move=None, split_hi_lo_raw=None):
@@ -1483,6 +1532,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
                         lo = hi = int(part)
                     spec.setdefault(fn, []).append((a, b, lo, hi))
         lines = swap_registers(lines, spec)
+
+    if swap_fp_operands is not None:
+        lines = swap_fp_commutative_operands(lines, swap_fp_operands)
 
     owner = function_at(lines)
 
@@ -2008,6 +2060,11 @@ if __name__ == "__main__":
                              "tie-break, "
                              "distinct from the scheduling fixers above; "
                              "repeatable for multiple FUNC:A-B sites")
+    parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
+                        help="comma-separated FUNC:N sites whose three-FPR "
+                             "add.s or mul.s has its two commutative source "
+                             "operands exchanged; destination and opcode are "
+                             "unchanged")
     parser.add_argument("--expand-sym-loads", action="store_true",
                         help="also manually expand integer loads with "
                              "symbol(+off)(reg) addresses (see "
@@ -2064,6 +2121,7 @@ if __name__ == "__main__":
          scope(args.swap_into_slot), scope(args.mtc1_nop),
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
+         scope(args.swap_fp_operands),
          [t for t in (args.rotate_seq or "").split(',') if t],
          scope(args.hoist_div_arg),
          scope(args.retime_branch_slot),

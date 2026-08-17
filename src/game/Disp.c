@@ -55,35 +55,44 @@ typedef union {
 
 extern float xglSin(float fRad);
 extern float xglCos(float fRad);
+extern float D_004D7F88;
+extern float D_004D7F8C;
 
 /* Walk the seventeen 22.5-degree steps around a vertical cylinder at
  * pCenter, building the four corners of each wall quad.  The quad
  * submission itself is compiled out of the shipped build; the corner
  * maths is all that is left. */
-/* TODO: near-miss (49/98 words, one instruction long). Logic, loop count,
- * struct alignment and constants all verified against the original. The
- * single extra instruction is an FP callee-saved register: the original
- * keeps 0.39269908f and the i*step product in the SAME register (f20) and
- * therefore reloads the constant per angle, while 2.96 here hoists the
- * constant into f21 and saves two FP registers. Forcing the reload with a
- * static float works but then the product cannot be CSEd across the call
- * (a static could change), which costs more than it saves. */
+/* The two adjacent step-angle symbols intentionally stay distinct.  That
+ * source shape makes GCC reuse f20 for each constant and product, matching
+ * retail's lone callee-saved FPR.  GCC still canonicalizes the two sources of
+ * each commutative multiply in the opposite encoding, corrected at the two
+ * audited --swap-fp-operands sites without changing the operation. */
 void DispPillar(DISPXYZW *pCenter, float *pSize)
 {
     DISPVEC a;
     DISPVEC b;
     DISPVEC c;
     DISPVEC d;
+    float index_float;
+    float next_float;
+    float angle0;
+    float angle1;
     int i;
 
     pCenter->w = 1.0f;
     for (i = 0; i < 17; i++) {
         a.v = *pCenter;
         b.v = *pCenter;
-        a.v.x += xglSin(i * 0.39269908f) * pSize[0];
-        a.v.z += xglCos(i * 0.39269908f) * pSize[0];
-        b.v.x += xglSin((i + 1) * 0.39269908f) * pSize[0];
-        b.v.z += xglCos((i + 1) * 0.39269908f) * pSize[0];
+        index_float = (float)i;
+        angle0 = D_004D7F88;
+        angle0 = index_float * angle0;
+        a.v.x += xglSin(angle0) * pSize[0];
+        angle1 = D_004D7F8C;
+        a.v.z += xglCos(angle0) * pSize[0];
+        next_float = (float)(i + 1);
+        angle1 = next_float * angle1;
+        b.v.x += xglSin(angle1) * pSize[0];
+        b.v.z += xglCos(angle1) * pSize[0];
         c = a;
         d = b;
         c.v.y += pSize[1];
