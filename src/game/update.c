@@ -306,36 +306,16 @@ int fptodp(float f);
 int sprintf(char *pBuf, const char *pFmt, ...);
 void xglFontDebugPrintf(int nX, int nY, const char *pFmt, ...);
 
-/* TODO: near-miss (244/244 words, 25 diffs, all schedule/tie-break).
- * Two clusters remain:
- *   1. The `nTrigger & 0x400' test: the original hoists its `andi' into
- *      the preceding `beqz' delay slot, ours puts the cursor.fPos
- *      address materialisation there instead, because gcc splits that
- *      address as %hi(cursor) + (%lo(cursor) + 16) rather than folding
- *      the +16 into one %hi/%lo pair the way the original does.
- *   2. Both sprintf call sites set up the same five argument registers in
- *      a different order: the original leaves `move $a0,$sp' for the
- *      call's delay slot, gcc emits it second and puts $t0 (or $a2) there.
- *
- * Resolved here: splitting `cursorMode = -1` through the already-live
- * `n` local makes gcc use the original $v1 instead of reusing $v0.
- *
- * Swept: nX/nY/nZ camera-reset store order (all six -- (0,1,2) is best);
- * pRot at function scope vs inside the print block; one shared format
- * pointer vs two (TWO is worth 16 diffs -- one variable reused for both
- * strings gets $s4 and pushes every other callee-saved assignment along);
- * the format strings inline at the call (three words short); and the
- * fptodp results as named locals vs nested directly in the sprintf call
- * (identical output).  --swap-into-slot on the third fptodp of each block
- * (jal sites 10 and 15) is worth 4 and on the sprintfs (11, 16) another 2,
- * getting to 21, but they do not finish it, so no flags are registered --
- * the a0/t0 cluster needs a three-way rotate across the jal that
- * --swap-into-slot cannot express.
- *
- * Top of the debug free-cursor: read the pad with whichever button mask
+/* Top of the debug free-cursor: read the pad with whichever button mask
  * this tool mode wants, let L1/R1 walk the camera mode while SELECT or
  * START is held (and the camera-move speed otherwise), then dispatch to
  * the per-mode handler and print the cursor and camera positions.
+ *
+ * Preparing pPos before xglStudioGetCamera is load-bearing: it reproduces
+ * retail's duplicated cursor+16 materialization and its call delay slot.
+ * Splitting cursorMode = -1 through the already-live n local likewise keeps
+ * retail's $v1 allocation.  The two equivalent sprintf argument schedules
+ * and one branch-annul tie are recorded by audited site-scoped flags.
  *
  * The three &cursor materialisations in the camera-speed arm each come
  * from their own block-local pointer, but the whole run of tests after
@@ -414,8 +394,8 @@ void updateCursor(int nTool)
             p->nSpeed &= 7;
         }
     }
-    xglStudioGetCamera(&pCamera, 0);
     pPos = cursor.fPos;
+    xglStudioGetCamera(&pCamera, 0);
     if (pKey->nTrigger & 0x200) {
         pPos[0] = 0.0f;
         pPos[1] = 0.0f;
