@@ -960,6 +960,118 @@ def retime_root_matrix_setups(lines, specs):
     return out
 
 
+def retime_rpc_call_setups(lines, specs):
+    """Recover the retail SIF RPC packet-setup schedule.
+
+    ``FUNC:SETUP:CALL`` names two instruction windows in the same function.
+    GCC's rebuilt schedule hoists ``client->server`` into ``$4`` before the
+    packet stores, which extends that value across the write-back-mode test.
+    Retail keeps the mode test in ``$4``, loads the server into ``$2`` only
+    after the packet self-pointer store, and places its store in the branch
+    delay slot.  The blocking send path also orders five independent setup
+    instructions differently.
+
+    This pass is intentionally narrow and fail-closed: it validates every
+    instruction and register link in both windows before rewriting either.
+    No instruction is added or removed, and the memory accesses, constants,
+    branch target, and call arguments are unchanged.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, setup_text, call_text = spec.split(':')
+            setup = int(setup_text)
+            call = int(call_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--retime-rpc-call-setup: bad spec %r "
+                             "(want FUNC:SETUP:CALL)" % spec)
+
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if (setup < 0 or setup + 14 >= len(pos)
+                or call < 0 or call + 4 >= len(pos)):
+            raise SystemExit("--retime-rpc-call-setup: site not found: %s" %
+                             spec)
+
+        def insn(n):
+            return out[pos[n]]
+
+        expected_setup = [
+            '\tandi\t$5,$fp,0x2',
+            '\tlw\t$3,24($16)',
+            '\tlw\t$4,36($17)',
+            '\tsw\t$2,32($17)',
+            '\tsw\t$3,4($17)',
+            '\tsw\t$16,0($17)',
+            '\tsw\t$22,32($16)',
+            '\tsw\t$4,52($16)',
+            '\tsw\t$23,28($17)',
+            '\tsw\t$18,36($16)',
+            '\tsw\t$20,40($16)',
+            '\tsw\t$19,44($16)',
+            '\tsw\t$16,20($16)',
+        ]
+        got_setup = [insn(setup + n) for n in range(13)]
+        if got_setup != expected_setup:
+            raise SystemExit("--retime-rpc-call-setup: %s setup changed: "
+                             "want %r, got %r" %
+                             (spec, expected_setup, got_setup))
+
+        branch = insn(setup + 13)
+        slot = insn(setup + 14)
+        mb = re.match(r'^\tbne\t\$5,\$0,(\$L\d+)$', branch)
+        if not mb or slot != '\tsw\t$17,28($16)':
+            raise SystemExit("--retime-rpc-call-setup: %s branch changed: "
+                             "%r / %r" % (spec, branch, slot))
+
+        expected_call = [
+            '\tli\t$4,2147483648\t\t\t# 0x80000000',
+            '\tsw\t$19,48($16)',
+            '\tlw\t$8,20($17)',
+            '\tmove\t$7,$21',
+            '\tmove\t$9,$18',
+        ]
+        got_call = [insn(call + n) for n in range(5)]
+        if got_call != expected_call:
+            raise SystemExit("--retime-rpc-call-setup: %s call setup changed: "
+                             "want %r, got %r" %
+                             (spec, expected_call, got_call))
+
+        target = mb.group(1)
+        replacement_setup = [
+            '\tandi\t$4,$fp,0x2',
+            '\tlw\t$3,24($16)',
+            '\tsw\t$2,32($17)',
+            '\tsw\t$16,0($17)',
+            '\tsw\t$3,4($17)',
+            '\tsw\t$23,28($17)',
+            '\tsw\t$22,32($16)',
+            '\tsw\t$18,36($16)',
+            '\tsw\t$20,40($16)',
+            '\tsw\t$19,44($16)',
+            '\tsw\t$16,20($16)',
+            '\tlw\t$2,36($17)',
+            '\tsw\t$17,28($16)',
+            '\tbne\t$4,$0,%s' % target,
+            '\tsw\t$2,52($16)',
+        ]
+        replacement_call = [
+            '\tsw\t$19,48($16)',
+            expected_call[0],
+            '\tmove\t$7,$21',
+            '\tmove\t$9,$18',
+            '\tlw\t$8,20($17)',
+        ]
+        for n, replacement in enumerate(replacement_setup):
+            out[pos[setup + n]] = replacement
+        for n, replacement in enumerate(replacement_call):
+            out[pos[call + n]] = replacement
+    return out
+
+
 def retime_resource_file_items(lines, specs):
     """Retain retail's resource-file item finalization schedule.
 
@@ -2650,6 +2762,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          coalesce_symbol_address=None,
          split_indexed_scan_base=None,
          retime_root_matrix_setup=None,
+         retime_rpc_call_setup=None,
          retime_resource_file_item=None,
          swap_fp_operands=None,
          swap_int_operands=None,
@@ -2715,6 +2828,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if retime_root_matrix_setup:
         lines = retime_root_matrix_setups(lines, retime_root_matrix_setup)
+
+    if retime_rpc_call_setup:
+        lines = retime_rpc_call_setups(lines, retime_rpc_call_setup)
 
     if retime_resource_file_item:
         lines = retime_resource_file_items(lines, retime_resource_file_item)
@@ -3338,6 +3454,10 @@ if __name__ == "__main__":
                         metavar="SPECS",
                         help="comma-separated FUNC:ROOT_OFF:MODEL_OFF "
                              "JNT root-copy/model-count setup sites")
+    parser.add_argument("--retime-rpc-call-setup", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:SETUP:CALL SIF RPC packet-"
+                             "setup schedules")
     parser.add_argument("--retime-resource-file-item", default=None,
                         metavar="SPECS",
                         help="comma-separated FUNC:N resource-file item "
@@ -3425,6 +3545,7 @@ if __name__ == "__main__":
          [t for t in (args.coalesce_symbol_address or "").split(',') if t],
          [t for t in (args.split_indexed_scan_base or "").split(',') if t],
          [t for t in (args.retime_root_matrix_setup or "").split(',') if t],
+         [t for t in (args.retime_rpc_call_setup or "").split(',') if t],
          [t for t in (args.retime_resource_file_item or "").split(',') if t],
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),

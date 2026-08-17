@@ -248,7 +248,9 @@ FILE_FIX_FLAGS = {
                  "--swap-regs updateCursorMode1:3-7:74,78,80-87 "
                  "--swap-regs updateCursorMode1:2-7:82-83,86-87 "
                  "--rebase-stack-mem updateCursorMode1:89,91,93,95:5:32"),
-    "sceSif.c": "--swap-regs sceSifInitIopHeap:2-3:25,27 --swap-adjacent sceSifInitIopHeap:26!",
+    "sceSif.c": ("--swap-regs sceSifInitIopHeap:2-3:25,27 "
+                 "--swap-adjacent sceSifInitIopHeap:26! "
+                 "--retime-rpc-call-setup sceSifCallRpc:26:88"),
     "sceFs.c": "--swap-regs sceFsInit:2-3:31,32,37,48,74,76",
     "sceMpegDec.c": "--swap-regs _isOutSizeOK:2-3:17-22",
     "xglMc.c": "--byte-move-andi xglMcSetMapName:0,xglMcSetMapName:1",
