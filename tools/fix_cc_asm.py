@@ -1296,6 +1296,48 @@ def retime_res_model_file_names(lines, funcs):
     return out
 
 
+def retarget_fp_hazard_nops(lines, funcs):
+    """Attach an assembler-inserted FP hazard nop to its branch label.
+
+    With ``c.le.s / label / bc1f``, modern gas inserts the required compare
+    hazard nop *before* the label, so a branch to the label skips it.  The
+    old assembler attached that nop to the label instead.  For each scoped
+    function, require exactly one unconditional branch whose target has
+    this precise shape, then put an explicit nop after the label; gas no
+    longer synthesizes another one.  Fallthrough and taken paths execute
+    the same instructions as retail, and any source drift fails closed.
+    """
+    if funcs is None:
+        return lines
+    out = list(lines)
+    owner = function_at(out)
+    for func in sorted(funcs):
+        candidates = []
+        for i, line in enumerate(out):
+            if owner[i] != func:
+                continue
+            branch = re.match(r'^\tb\t(\$L\d+)$', line)
+            if not branch:
+                continue
+            label = branch.group(1) + ':'
+            try:
+                label_i = out.index(label, i + 1)
+            except ValueError:
+                continue
+            if (label_i < 1 or
+                    not re.match(r'^\tc\.le\.s\t', out[label_i - 1]) or
+                    not re.match(r'^\tbc1f\t', next_insn(out, label_i) or '')):
+                continue
+            candidates.append(label_i)
+        if len(candidates) != 1:
+            raise SystemExit('--retarget-fp-hazard-nop: %s expected one '
+                             'validated site, got %d' %
+                             (func, len(candidates)))
+        label_i = candidates[0]
+        out.insert(label_i + 1, '\tnop')
+    return out
+
+
 def retime_ebattle_windows(lines, funcs):
     """Recover two retail battle-window allocator/scheduler decisions.
 
@@ -3631,7 +3673,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_branch=None,
          zero_quad_store=None, fp_pair_hazard=None,
          short_loop_pad=None, byte_move=None, split_hi_lo_raw=None,
-         rebase_stack_mem=None):
+         rebase_stack_mem=None, retarget_fp_hazard_nop=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -4140,6 +4182,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         out = retime_res_model_file_names(
             flat, retime_res_model_file_name)
 
+    if retarget_fp_hazard_nop is not None:
+        flat = "\n".join(out).split("\n")
+        out = retarget_fp_hazard_nops(flat, retarget_fp_hazard_nop)
+
     with open(path, 'w') as f:
         f.write('\n'.join(out))
 
@@ -4355,6 +4401,10 @@ if __name__ == "__main__":
                         metavar="FUNCS",
                         help="comma-separated RES model-name byte-copy "
                              "functions with a validated allocator mismatch")
+    parser.add_argument("--retarget-fp-hazard-nop", default=None,
+                        metavar="FUNCS",
+                        help="comma-separated functions whose validated "
+                             "local branch targets an FP hazard nop")
     parser.add_argument("--retime-ebattle-window", default=None,
                         metavar="FUNCS",
                         help="comma-separated eBattle window functions whose "
@@ -4486,4 +4536,4 @@ if __name__ == "__main__":
          scope(args.zero_quad_store), scope(args.fp_pair_hazard),
          [t for t in (args.short_loop_pad or "").split(',') if t],
          scope(args.byte_move_andi), args.split_hi_lo,
-         args.rebase_stack_mem)
+         args.rebase_stack_mem, scope(args.retarget_fp_hazard_nop))

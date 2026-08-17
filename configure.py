@@ -301,7 +301,9 @@ FILE_FIX_FLAGS = {
     "Get.c": ("--swap-adjacent Get_Rnd:5 "
               "--fill-center-branch-from-target GetCenter:2:5"),
     "Check.c": "--mtc1-nop CheckDoorDist:0",
-    "Undu.c": "--swap-adjacent UnduParamInit:5",
+    "Undu.c": ("--swap-adjacent UnduParamInit:5 "
+               "--swap-regs UnduCheckSubHeightCheck:f2-f3:22-46 "
+               "--retarget-fp-hazard-nop UnduCheckSubHeightCheck"),
     "SEQ.c": "--mtc1-nop SEQ_motion:3",
     "xglFont.c": "--swap-adjacent xglFontAscii2Euc:47",
     # JS_classLight_setDirection2: the li/lw pair is a scheduling

@@ -2969,3 +2969,4 @@ GetCenter = 0x00246DC0, 0x64; // Get.c
 eBattleWinOpen4 = 0x002826F0, 0xE0; // eBattle.c
 eBattleWinInit2 = 0x002828B0, 0x6C; // eBattle.c
 RES_GetMdlFileName = 0x0024CED8, 0xB8; // RES.c
+UnduCheckSubHeightCheck = 0x00322608, 0x1A4; // Undu.c
