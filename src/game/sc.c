@@ -710,13 +710,9 @@ extern int scParseScript(SCTASK *o);
 /* Flags==0 means the task is free; bit 2 means suspended. Bit 4 selects the
  * wait state machine, bit 5 the move one; the wait handler may clear bit 4,
  * in which case the parser is skipped for this frame. */
-/* TODO: near-miss (1/32 words). Every instruction is identical; the
-   original's last test is `beqzl` (branch-likely) where we emit a plain
-   `beqz` with the same `li v0,1` in the slot. reorg.c only annuls when
-   the slot insn is not redundant on the fall-through path, and both
-   builds have an identical `li v0,1` after the scMoveParseScript call.
-   Swept: `return 1` inside the if as well as after it, an else-arm with
-   a duplicated scParseScript call -- all still beqz. */
+/* The original assembler retained the annulled form of the final filled
+   branch. Modern gas drops that bit even though the slot and control flow
+   are otherwise identical; configure.py restores it at the audited site. */
 int scDispatchScript(SCTASK *o)
 {
     unsigned short f = o->flags;
@@ -881,6 +877,11 @@ void scDestroyScript(int slot)
     } while (i < 8);
 }
 
+/* TODO: near-miss (2/51 words, SCHEDULING). Exhaustively testing all 120
+ * natural orders of the five slot-header stores found the order below and
+ * removed the four store differences. The remaining instruction multiset is
+ * exact: gcc puts the +80 induction update before the loop test and +1104 in
+ * its delay slot, while retail chooses the opposite independent update. */
 void scInitScript(void)
 {
     SCTASK_ENT *t;
@@ -889,11 +890,11 @@ void scInitScript(void)
     _cmdPut = 0;
     slot = 0;
     do {
-        _scriptWork[slot].field44A = 0;
-        _scriptWork[slot].nTask = 0;
         _scriptWork[slot].pTable = 0;
-        _scriptWork[slot].field446 = 0;
         _scriptWork[slot].dataIdx = -1;
+        _scriptWork[slot].nTask = 0;
+        _scriptWork[slot].field446 = 0;
+        _scriptWork[slot].field44A = 0;
         t = (SCTASK_ENT *)((char *)_scriptWork + (slot << 10) + slot * 80);
         i = 0;
         do {

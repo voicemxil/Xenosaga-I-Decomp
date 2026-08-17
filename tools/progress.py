@@ -58,7 +58,7 @@ def main():
     per_file = {}
 
     for e in entries:
-        ok = repo.compare(e.name, e.addr, e.size)["status"] == "OK"
+        ok = repo.compare(e.name, e.addr, e.size, e.source)["status"] == "OK"
         if ok:
             matched_bytes += e.size
             matched_count += 1

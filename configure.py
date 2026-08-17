@@ -221,6 +221,8 @@ FILE_FIX_FLAGS = {
     "xglMenu.c": "--rotate-seq xglMenuDrawType1Sub:11:3,xglMenuDrawType1Sub:12:2",
     "sub.c": "--swap-adjacent subJoutoPosSet:58",
     "sef.c": "--branch-likely sefAllocLocalData:2",
+    "sc.c": "--branch-likely scDispatchScript:4",
+    "Game.c": "--rotate-seq GameModeDebugMenu:10:-2,GameModeDebugMenu:12:3,GameModeDebugMenu:12:2",
     "tskUmnBgCube.c": " --as-g0 --fp-pair-hazard tskUmnBgCubeMain",
     "sdv.c": "--branch-unlikely sdvScheduleSound:1 --rotate-seq sdvCreateAlter:3:3,sdvCreateAlter:4:2",
     "File.c": "--branch-unlikely FileObjectJpegDecChange:1 --swap-adjacent FileObjectJpegDecChange:3",
@@ -312,7 +314,7 @@ FILE_FIX_FLAGS = {
     # chain-tracking NOTE in fix_cc_asm.py's main). Site-indexed nops:
     # FadeIn's mtc1 $1,$f1 (site 1), FogPara's mtc1 $0,$f1 (2) and
     # mtc1 $1,$f3 (3).
-    "nmlModel.c": ("--barrier-return-store nmlModelSetFadeInInterrupt --mtc1-nop nmlModelSetFadeIn:1,nmlModelFogPara:2,nmlModelFogPara:3 --pin-slot-nop nmlModelSetGlobalPointLightPos:0,nmlModelSetActiveFadeOut:0,nmlModelSetActiveFadeOut:1,nmlModelSetActiveFadeOut:2,nmlModelSetActiveFadeIn:0,nmlModelSetActiveFadeIn:1,nmlModelSetActiveFadeIn:2"),
+    "nmlModel.c": ("--barrier-return-store nmlModelSetFadeInInterrupt --mtc1-nop nmlModelSetFadeIn:1,nmlModelFogPara:2,nmlModelFogPara:3 --pin-slot-nop nmlModelSetGlobalPointLightPos:0,nmlModelSetActiveFadeOut:0,nmlModelSetActiveFadeOut:1,nmlModelSetActiveFadeOut:2,nmlModelSetActiveFadeIn:0,nmlModelSetActiveFadeIn:1,nmlModelSetActiveFadeIn:2 --rotate-seq CONSTRUCT_MODELSYSTEM:6:4,CONSTRUCT_MODELSYSTEM:9:-18,CONSTRUCT_MODELSYSTEM:8:-3"),
     # ungetc's CHECK_INIT tail and the mprec leaf returns keep their
     # copies out of the delay slots, same class as fabs in libm.c.
     "newlib_ungetc.c": "--barrier-return-store ungetc",

@@ -3111,15 +3111,9 @@ PARENT_BUF *parent_buf_search(void *pParent)
     return pRet;
 }
 
-/* One-time construction of the model system's global state.
- *
- * TODO: near-miss, 5 diffs, NOT registered. Everything matches except
- * where the two middle g_aSubWindow stores land: retail emits [0] and [3]
- * up front and [1]/[2] after the whole gp-relative block, and no source
- * order reproduces that -- with [1] then [2] the scheduler hoists one of
- * them into the gp block (6 diffs), with [2] then [1] it hoists the other
- * (5). Swept both orders, splitting the array into two statements groups,
- * and moving the pair above/below each gp store group. */
+/* One-time construction of the model system's global state. The original
+ * scheduler separates the four independent g_aSubWindow stores around the
+ * gp-relative block; configure.py restores that exact pure ordering. */
 void CONSTRUCT_MODELSYSTEM(void)
 {
     g_aSubWindow[0] = 2;

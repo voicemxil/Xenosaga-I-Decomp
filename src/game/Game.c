@@ -845,19 +845,10 @@ int GameModeCfEvent(void)
 extern void ACT_pauseUpdate(void);
 extern void GameDebugMenu(void);
 
-/* NEAR MISS -- 8 diffs, SCHEDULING (identical multiset). gas's reorder
-   pass hoists the `lw` of nFlags above the quadword-zero store's address
-   macro, and sinks the `and` below the nSaveA load; the original keeps
-   both where gcc emitted them. Swept: all six orderings of the three
-   guarded statements, `&=` vs explicit read-modify-write, a staged int
-   local for the flags, and plain/volatile GAME_QUAD* block-local
-   pointers for the quad store (the pointer forms cost 38 diffs, LENGTH).
-   The gcc -S emission order already matches the original -- the residue
-   is entirely gas, so a source lever cannot reach it; it wants
-   --rotate/--rotate-seq if it is worth a flag later.
-
-   Debug-menu game mode: SELECT re-arms the scene skip, then the debug
-   menu runs on top of a paused actor update. */
+/* Debug-menu game mode: SELECT re-arms the scene skip, then the debug menu
+   runs on top of a paused actor update. The original assembler preserves
+   gcc's load/store schedule here; configure.py restores that ordering after
+   modern gas moves the flag load and mask around the two address macros. */
 int GameModeDebugMenu(void)
 {
     if (PadData[0].nDebugPress & 0x100) {

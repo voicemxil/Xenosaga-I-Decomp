@@ -162,7 +162,10 @@ class Repo:
         """
         loc = None
         if source:
-            hits = glob.glob(f"{self.built_dir}/**/{source}.o", recursive=True)
+            base = os.path.basename(source)
+            stem, ext = os.path.splitext(base)
+            objbase = stem if ext in (".c", ".s") else base
+            hits = glob.glob(f"{self.built_dir}/**/{objbase}.o", recursive=True)
             for path in sorted(hits):
                 try:
                     off = self.obj(path).func_symbols().get(name)
