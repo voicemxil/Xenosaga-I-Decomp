@@ -263,7 +263,8 @@ FILE_FIX_FLAGS = {
                 "--swap-regs sceLseek:17-18 "
                 "--swap-regs sceLseek:18-19 "
                 "--retime-sce-open sceOpen "
-                "--retime-sce-lseek sceLseek"),
+                "--retime-sce-lseek sceLseek "
+                "--retime-sce-read sceRead"),
     "sceTty.c": ("--swap-regs sceTtyInit:3-4:16-25 "
                  "--rotate-seq sceTtyInit:19:3,sceTtyInit:20:7,"
                  "sceTtyInit:23:2,sceTtyInit:24:2,sceTtyInit:25:4,"

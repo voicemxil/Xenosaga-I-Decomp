@@ -1480,6 +1480,203 @@ def retime_sce_lseeks(lines, funcs):
     return out
 
 
+def retime_sce_reads(lines, funcs):
+    """Recover sceRead's cached flag test and peeled queue schedule.
+
+    Writing the first queue predicate as ``p->used & 0x8000`` keeps GCC from
+    extending that mask across the later RPC calls.  That natural source
+    shape recovers retail's saved-register allocation: s8 carries the
+    ``_rcv_data_rpc`` high half, s5 carries 0x20000000, and the final 0x8000
+    test is recomputed in v0.  This compiler remains conservative across
+    ``CreateSema`` and reloads ``p->used`` even though the value is already
+    live in s3; it also emits the same peeled-probe tie-break as sceLseek,
+    with two successor-local copies of the RPC high half and an alignment
+    pad.
+
+    Validate the complete request/probe windows, frame, and reply-tail
+    anchors.  Then use the already-live s3 value, restore retail's size/dst
+    value registers, put the shared high half in the bne delay slot, and
+    remove only the redundant successor copy and alignment pad.  No call,
+    memory write, predicate, or result path is added or removed.
+    """
+    if funcs is None:
+        return lines
+    unsupported = set(funcs) - {"sceRead"}
+    if unsupported:
+        raise SystemExit('--retime-sce-read: unsupported function(s): ' +
+                         ','.join(sorted(unsupported)))
+    out = list(lines)
+    for func in sorted(funcs):
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if len(pos) != 152:
+            raise SystemExit('--retime-sce-read: %s expected 152 compiler '
+                             'instructions, got %d' % (func, len(pos)))
+
+        anchors = {
+            0: '\tsubu\t$sp,$sp,224',
+            1: '\tsd\t$23,176($sp)',
+            2: '\tsd\t$22,160($sp)',
+            3: '\tmove\t$23,$6',
+            4: '\tsd\t$20,128($sp)',
+            5: '\tmove\t$22,$5',
+            6: '\tsd\t$17,80($sp)',
+            7: '\tlui\t$20,%hi(_send_data) # high',
+            8: '\tsd\t$16,64($sp)',
+            9: '\taddiu\t$17,$20,%lo(_send_data) # low',
+            139: '\tlw\t$2,48($sp)',
+            140: '\tld\t$31,208($sp)',
+            141: '\tld\t$fp,192($sp)',
+            150: '\tj\t$31',
+            151: '\taddu\t$sp,$sp,224',
+        }
+        for n, want in anchors.items():
+            if out[pos[n]] != want:
+                raise SystemExit('--retime-sce-read: %s anchor instruction '
+                                 '%d changed: want %r, got %r' %
+                                 (func, n, want, out[pos[n]]))
+
+        request_expected = {
+            46: '\tmove\t$18,$2',
+            47: '\taddu\t$3,$sp,48',
+            48: '\tli\t$2,4\t\t\t# 0x4',
+            49: '\tsw\t$3,4($17)',
+            50: '\tsw\t$2,8($17)',
+            51: '\tsw\t$18,%lo(_send_data)($20)',
+            52: '\tlw\t$2,4($16)',
+            53: '\tandi\t$2,$2,0x8000',
+            55: '\tlui\t$16,%hi(_fs_fsq_semid) # high',
+        }
+        for n, want in request_expected.items():
+            if out[pos[n]] != want:
+                raise SystemExit('--retime-sce-read: %s request instruction '
+                                 '%d changed: want %r, got %r' %
+                                 (func, n, want, out[pos[n]]))
+        queue_skip_m = re.match(r'^\tbeq\t\$2,\$0,(\$L\d+)$',
+                                out[pos[54]])
+        if not queue_skip_m:
+            raise SystemExit('--retime-sce-read: %s queue branch changed: '
+                             '%r' % (func, out[pos[54]]))
+        if (pos[54] < 2 or pos[55] != pos[54] + 1
+                or out[pos[54] - 2].strip().replace('\t', ' ') !=
+                   '.set noreorder'
+                or out[pos[54] - 1].strip().replace('\t', ' ') !=
+                   '.set nomacro'
+                or out[pos[55] + 1].strip().replace('\t', ' ') !=
+                   '.set macro'
+                or out[pos[55] + 2].strip().replace('\t', ' ') !=
+                   '.set reorder'):
+            raise SystemExit('--retime-sce-read: %s queue branch directives '
+                             'changed' % func)
+
+        request_start = pos[46]
+        request_end = pos[55] + 3
+        request_replacement = [
+            '\tmove\t$18,$2',
+            '\tli\t$3,4\t\t\t# 0x4',
+            '\taddu\t$2,$sp,48',
+            '\tsw\t$3,8($17)',
+            '\tsw\t$2,4($17)',
+            '\tandi\t$2,$19,0x8000',
+            '\t.set\tnoreorder',
+            '\t.set\tnomacro',
+            out[pos[54]],
+            out[pos[51]],
+            '\t.set\tmacro',
+            '\t.set\treorder',
+            '\tlui\t$16,%hi(_fs_fsq_semid) # high',
+        ]
+        out[request_start:request_end] = request_replacement
+
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if len(pos) != 151:
+            raise SystemExit('--retime-sce-read: %s request rewrite produced '
+                             '%d instructions, expected 151' %
+                             (func, len(pos)))
+        probe_expected = {
+            57: '\tlui\t$7,%hi(_sceFs_q) # high',
+            58: '\tlw\t$3,%lo(_sceFs_q)($7)',
+            59: '\tli\t$2,-1\t\t\t# 0xffffffffffffffff',
+            61: '\tmove\t$6,$0',
+            62: '\tlw\t$3,%lo(_send_data)($20)',
+            63: '\tlui\t$fp,%hi(_rcv_data_rpc) # high',
+            64: '\tsubu\t$2,$0,$3',
+            65: '\tsw\t$3,%lo(_sceFs_q)($7)',
+            67: '\tsw\t$2,%lo(_send_data)($20)',
+            68: '\tlui\t$fp,%hi(_rcv_data_rpc) # high',
+            69: '\taddu\t$6,$6,1',
+        }
+        for n, want in probe_expected.items():
+            if out[pos[n]] != want:
+                raise SystemExit('--retime-sce-read: %s probe instruction '
+                                 '%d changed: want %r, got %r' %
+                                 (func, n, want, out[pos[n]]))
+        probe_m = re.match(r'^\tbne\t\$3,\$2,(\$L\d+)$', out[pos[60]])
+        done_m = re.match(r'^\tb\t(\$L\d+)$', out[pos[66]])
+        if not probe_m or not done_m:
+            raise SystemExit('--retime-sce-read: %s peeled probe branches '
+                             'changed' % func)
+        probe_target = probe_m.group(1)
+        try:
+            target_i = out.index(probe_target + ':', pos[67], pos[68] + 1)
+        except ValueError:
+            raise SystemExit('--retime-sce-read: %s probe target moved: %s' %
+                             (func, probe_target))
+        align_i = target_i - 1
+        while align_i > pos[67] and not out[align_i].strip().startswith(
+                '.p2align'):
+            align_i -= 1
+        if out[align_i].strip() != '.p2align 3':
+            raise SystemExit('--retime-sce-read: %s probe alignment changed' %
+                             func)
+        for branch_n, slot_n in ((60, 61), (66, 67)):
+            if (pos[branch_n] < 2 or pos[slot_n] != pos[branch_n] + 1
+                    or out[pos[branch_n] - 2].strip().replace('\t', ' ') !=
+                       '.set noreorder'
+                    or out[pos[branch_n] - 1].strip().replace('\t', ' ') !=
+                       '.set nomacro'
+                    or out[pos[slot_n] + 1].strip().replace('\t', ' ') !=
+                       '.set macro'
+                    or out[pos[slot_n] + 2].strip().replace('\t', ' ') !=
+                       '.set reorder'):
+                raise SystemExit('--retime-sce-read: %s probe branch '
+                                 'directives changed at instruction %d' %
+                                 (func, branch_n))
+
+        probe_start = pos[57]
+        probe_end = pos[68] + 1
+        probe_replacement = [
+            out[pos[57]],
+            out[pos[61]],
+            out[pos[58]],
+            out[pos[59]],
+            '\t.set\tnoreorder',
+            '\t.set\tnomacro',
+            out[pos[60]],
+            out[pos[63]],
+            '\t.set\tmacro',
+            '\t.set\treorder',
+            '',
+            out[pos[62]],
+            out[pos[64]],
+            out[pos[65]],
+            '\t.set\tnoreorder',
+            '\t.set\tnomacro',
+            out[pos[66]],
+            out[pos[67]],
+            '\t.set\tmacro',
+            '\t.set\treorder',
+            '',
+            '\t.p2align 2',
+            probe_target + ':',
+        ]
+        out[probe_start:probe_end] = probe_replacement
+    return out
+
+
 def retime_res_model_file_names(lines, funcs):
     """Recover the retail byte-copy loop in ``RES_GetMdlFileName``.
 
@@ -4103,6 +4300,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_resource_file_item=None,
          retime_sce_open=None,
          retime_sce_lseek=None,
+         retime_sce_read=None,
          retime_res_model_file_name=None,
          retime_ebattle_window=None,
          retime_gs_zbuffer_address=None,
@@ -4192,6 +4390,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if retime_sce_lseek is not None:
         lines = retime_sce_lseeks(lines, retime_sce_lseek)
+
+    if retime_sce_read is not None:
+        lines = retime_sce_reads(lines, retime_sce_read)
 
     if retime_gs_zbuffer_address:
         lines = retime_gs_zbuffer_addresses(lines, retime_gs_zbuffer_address)
@@ -4874,6 +5075,10 @@ if __name__ == "__main__":
                         metavar="FUNCS",
                         help="comma-separated sceLseek functions with a "
                              "validated peeled async-queue probe mismatch")
+    parser.add_argument("--retime-sce-read", default=None,
+                        metavar="FUNCS",
+                        help="comma-separated sceRead functions with a "
+                             "validated cached-flag/queue-probe mismatch")
     parser.add_argument("--retime-res-model-file-name", default=None,
                         metavar="FUNCS",
                         help="comma-separated RES model-name byte-copy "
@@ -5007,6 +5212,7 @@ if __name__ == "__main__":
          [t for t in (args.retime_resource_file_item or "").split(',') if t],
          scope(args.retime_sce_open),
          scope(args.retime_sce_lseek),
+         scope(args.retime_sce_read),
          scope(args.retime_res_model_file_name),
          scope(args.retime_ebattle_window),
          [t for t in (args.retime_gs_zbuffer_address or "").split(',') if t],

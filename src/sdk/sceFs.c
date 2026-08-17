@@ -1391,24 +1391,13 @@ int sceIoctl2(int fd, int cmd, char *arg, unsigned int arglen,
 /* The read/write request layout.  The 0x20000000 flag bit means the
  * caller's buffer is already an uncached-accelerated pointer, so it
  * needs no writeback -- and gcc shares that constant with the
- * uncached alias built for the completion word further down.
- *
- * PARKED NEAR-MISS (sceRead), TWO WORDS short, 154 vs 156, and the same
- * two residues as sceLseek above:
- *   - gcc keeps `flags & 0x8000` in a callee-saved register instead of
- *     recomputing it in the second test.  In the original ALL NINE
- *     callee-saved registers are already taken (p, sd, semid, flags,
- *     two %hi bases, the 0x20000000 mask, buf, len), so there was
- *     nowhere to keep it.  Swept: hoisting `&_rcv_data_rpc` into a
- *     local (158 words), hoisting 0x20000000 into a local (161), both
- *     together (162) -- each buys the register back but costs more in
- *     spills than it saves.  LAUNDER(flags) also spills `len` (161).
- *   - the peeled queue probe's `bne` delay slot takes `move a2,zero`
- *     where the original takes the `lui %hi` from the block after the
- *     branch.  Pure delay-slot-filler tie-break; no source shape
- *     reached it.
- * The whole request layout, both writeback guards and the entire reply
- * tail are exact. */
+ * uncached alias built for the completion word further down.  Reading
+ * p->used for the first queue gate keeps that test distinct from the
+ * cached `flags` value used after the RPC calls; this recovers the
+ * original saved-register roles and makes the final 0x8000 test a fresh
+ * `andi`.  The configured fail-closed retimer removes gcc's conservative
+ * reload across CreateSema and restores the peeled queue probe's retail
+ * delay-slot schedule. */
 typedef struct t_fs_send_rw {
     int   semid;
     void *dst;
@@ -1461,7 +1450,7 @@ int sceRead(int fd, void *buf, int len)
     sd->size = 4;
     sd->dst = &result;
     _send_data.semid = semid;
-    if (flags & 0x8000) {
+    if (p->used & 0x8000) {
         WaitSema(_fs_fsq_semid);
         for (i = 0; i < 32; i++) {
             if (_sceFs_q[i] == -1) {
