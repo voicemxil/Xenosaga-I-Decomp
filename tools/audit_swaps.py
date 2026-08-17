@@ -81,7 +81,9 @@ def _identity(word):
 
 
 REORDER_FLAGS = ("--swap-adjacent", "--rotate", "--rotate-seq",
-                 "--swap-into-slot", "--swap-slot-target",
+                 "--post-rotate-seq",
+                 "--swap-into-slot", "--swap-mem-into-slot",
+                 "--swap-slot-target",
                  "--hoist-div-arg", "--retime-branch-slot",
                  "--swap-fp-operands", "--swap-int-operands")
 

@@ -371,21 +371,6 @@ extern int RES_loadFileSub(int nType, int nId, unsigned int pAddr);
 extern unsigned int RES_loadFile(int nIndex, int nType, int nId,
                                  int (*pLoad)(int, int, unsigned int));
 
-/* TODO: near-miss, 16 diffs of 134 words, RIGHT LENGTH. Two independent
-   register tie-breaks plus one delay-slot fill:
-   (a) &GameResource[nIndex].nSize and &GameResource[nIndex+1].nId land in
-       the mirror-image pair of $t0/$a3 (6 words) -- the same mirror-image
-       residue as GameResourceAlloc/GameResourceRealloc in GameResource.c;
-   (b) the resource_typeid_translate tail swaps $v0/$v1 (5 words), which
-       looks like a knock-on of (a);
-   (c) the recursive RES_loadFile(nFree, 7, ...) call takes `lw a2,4(sp)`
-       into its delay slot instead of retail's `sw v0,8(s1)` (3 words).
-   Swept: single-exit restructure (90 -> 16, the big win: every non-zero
-   return must funnel through ONE variable or gcc const-folds the zero
-   returns to `move v0,zero` and loses retail's $s4), a held
-   `int *pCurSize = &GameResource[nIndex].nSize` (16, no change), a named
-   `GAME_RESOURCE *pNext` (47, and one word SHORT), a temp local for the
-   sub-entry address (16), LAUNDER_V(nFree) (21). Not registered. */
 /* Load a resource into slot nIndex through pLoad (RES_loadFileSub by
    default), then trim the slot to the loaded size and hand the remainder to
    the following free slot. nIndex == -1 means "find or allocate a slot
@@ -452,8 +437,6 @@ unsigned int RES_loadFile(int nIndex, int nType, int nId,
                     GameResource[nIndex + 1].nId = pAddr + nSize;
                     GameResource[nIndex].nSize = nSize;
                 }
-            } else {
-                GameResource[nIndex].nSize = nSize;
             }
         }
         resource_typeid_translate(nIndex, &nType2, &nId2);

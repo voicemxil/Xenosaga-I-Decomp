@@ -996,7 +996,7 @@ def _is_empty_asm_marker(line):
     return t in ("#APP", "#NO_APP", "")
 
 
-def rotate_insns(flat, sites):
+def rotate_insns(flat, sites, allow_nop_marker=False):
     """Rotate a short window of instructions right by one.
 
     Site-keyed FUNC:N[:LEN] -- the window is the LEN instructions (LEN
@@ -1069,7 +1069,8 @@ def rotate_insns(flat, sites):
                         continue
                     if RE_INSN.match(w):
                         window.append(w)
-                    elif _is_empty_asm_marker(w):
+                    elif (_is_empty_asm_marker(w)
+                          or (allow_nop_marker and w.strip() == "#nop")):
                         # An empty #APP/#NO_APP block -- LAUNDER, LAUNDER_V,
                         # SCHED_NOP's siblings -- emits no bytes, so it is a
                         # textual boundary, not a real one. Carry it along
@@ -1280,7 +1281,7 @@ def zero_quad_stores(flat, scope):
     return out
 
 
-def rotate_insns_seq(flat, site_list):
+def rotate_insns_seq(flat, site_list, allow_nop_marker=False):
     """Apply --rotate sites ONE AT A TIME, re-resolving indices each time.
 
     rotate_insns() resolves every site against a single scan of the
@@ -1299,7 +1300,8 @@ def rotate_insns_seq(flat, site_list):
     windows sharing instructions).
     """
     for site in site_list:
-        flat = "\n".join(rotate_insns(flat, [site])).split("\n")
+        flat = "\n".join(rotate_insns(
+            flat, [site], allow_nop_marker=allow_nop_marker)).split("\n")
     return flat
 
 
@@ -1453,7 +1455,7 @@ def swap_adjacent_insns(flat, sites):
     return res
 
 
-def swap_into_slot(flat, sites):
+def swap_into_slot(flat, sites, allow_stack_mem=False):
     """Exchange a jal's filled delay-slot insn with the insn before it.
 
     FUNC:N names the Nth `jal` of FUNC (0-based, counting every jal line
@@ -1485,8 +1487,18 @@ def swap_into_slot(flat, sites):
             if (f"{cur}:{idx}" in sites and i >= 3 and i + 1 < len(flat)):
                 a, s1, s2, slot = flat[i - 3], flat[i - 2], flat[i - 1], flat[i + 1]
                 sets = [x.strip().replace("\t", " ") for x in (s1, s2)]
+                eligible = swap_ok(a, slot)
+                if (allow_stack_mem and not eligible
+                        and RE_MEMOP.match(a) and RE_MEMOP.match(slot)):
+                    wa, ra = insn_regs(a)
+                    wb, rb = insn_regs(slot)
+                    a_sp = "($sp)" in a
+                    b_sp = "($sp)" in slot
+                    eligible = (a_sp != b_sp
+                                and not (wa & (rb | wb))
+                                and not (wb & ra))
                 if (sets == [".set noreorder", ".set nomacro"]
-                        and swap_ok(a, slot)
+                        and eligible
                         and "$31" not in a + slot and "$ra" not in a + slot):
                     res[-3:] = [slot, s1, s2]
                     res.append(line)
@@ -1808,11 +1820,13 @@ def main(path, omitted_hazards, barrier_return_store=None,
          branch_likely=None, branch_unlikely=None,
          war_restore=None, pin_slot=None, lis_hazard_nop=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
+         swap_mem_slot=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
-         rotate_seq=None, hoist_div_arg=None, retime_branch=None,
+         rotate_seq=None, post_rotate_seq=None, hoist_div_arg=None,
+         retime_branch=None,
          zero_quad_store=None, fp_pair_hazard=None,
          short_loop_pad=None, byte_move=None, split_hi_lo_raw=None,
          rebase_stack_mem=None):
@@ -2202,6 +2216,15 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = swap_into_slot(flat, swap_slot)
 
+    if swap_mem_slot:
+        flat = "\n".join(out).split("\n")
+        out = swap_into_slot(flat, swap_mem_slot, allow_stack_mem=True)
+
+    if post_rotate_seq:
+        flat = "\n".join(out).split("\n")
+        out = rotate_insns_seq(flat, post_rotate_seq,
+                               allow_nop_marker=True)
+
     if swap_slot_tgt:
         flat = "\n".join(out).split("\n")
         out = swap_slot_target(flat, swap_slot_tgt)
@@ -2275,6 +2298,10 @@ if __name__ == "__main__":
                              "are applied ONE AT A TIME with indices "
                              "re-resolved after each, so overlapping "
                              "windows can both fire (order matters)")
+    parser.add_argument("--post-rotate-seq", default=None, metavar="SITES",
+                        help="apply sequential instruction rotations after "
+                             "--swap-into-slot; for schedules whose call "
+                             "delay-slot exchange must happen first")
     parser.add_argument("--hoist-div-arg", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="hoist an independent $t0 fifth-call argument "
@@ -2366,6 +2393,10 @@ if __name__ == "__main__":
                              "FUNC (0-based, emission order), exchange the "
                              "gcc-filled delay-slot insn with the insn "
                              "immediately before the jal's noreorder block")
+    parser.add_argument("--swap-mem-into-slot", default=None,
+                        metavar="SITES",
+                        help="like --swap-into-slot, but also accept an "
+                             "independent stack load/non-stack memory op pair")
     parser.add_argument("--rebase-stack-mem", action="append", default=None,
                         metavar="FUNC:SITES:BASE:BIAS",
                         help="rewrite named OFF($sp) memory sites through an "
@@ -2464,12 +2495,14 @@ if __name__ == "__main__":
          scope(args.war_restore_swap), scope(args.pin_slot_nop),
          scope(args.lis_hazard_nop), scope(args.swap_adjacent),
          scope(args.swap_into_slot), scope(args.mtc1_nop),
+         scope(args.swap_mem_into_slot),
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,
          [t for t in (args.rotate_seq or "").split(',') if t],
+         [t for t in (args.post_rotate_seq or "").split(',') if t],
          scope(args.hoist_div_arg),
          scope(args.retime_branch_slot),
          scope(args.zero_quad_store), scope(args.fp_pair_hazard),

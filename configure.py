@@ -214,6 +214,9 @@ FILE_FIX_FLAGS = {
     "Hit.c": ("--rotate HitCheckCorner:17:5 "
               "--swap-regs HitCheckMapUnitWithNyuru:19-20:73-91 "
               "--rotate-seq HitCheckMapUnitWithNyuru:72:3,HitCheckMapUnitWithNyuru:73:-3"),
+    "RES.c": ("--swap-regs RES_loadFile:2-3:110-116 "
+              "--swap-mem-into-slot RES_loadFile:4 "
+              "--post-rotate-seq RES_loadFile:46:3,RES_loadFile:47:2"),
     "Disp.c": "--swap-fp-operands DispPillar:27,DispPillar:51",
     "task.c": ("--swap-regs taskItemGet:2-6:18-26,32 "
                "--swap-regs taskItemGet:2-7:18-26,32 "
