@@ -621,6 +621,108 @@ def exchange_derived_results(lines, sites):
     return out
 
 
+def retime_byte_copy_guards(lines, sites):
+    """Recover the guarded first-byte copy used before a byte-copy loop.
+
+    FUNC:N names `lb TEST,ADDR; branch TEST; lbu TMP,ADDR; move COPY,TMP;
+    move WALK,BASE`. Retail schedules WALK between the signed test load and
+    branch, loads directly into COPY in the delay slot, and leaves a nop in
+    place of the eliminated TMP copy. The accepted register/address shape is
+    exact and any deviation is fatal.
+    """
+    if not sites:
+        return lines
+    out = list(lines)
+    for site in sorted(sites):
+        try:
+            func, idx_text = site.split(':')
+            start = int(idx_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--retime-byte-copy-guard: bad site %r "
+                             "(want FUNC:N)" % site)
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if start < 0 or start + 4 >= len(pos):
+            raise SystemExit("--retime-byte-copy-guard: site not found: %s" %
+                             site)
+        i0, i1, i2, i3, i4 = pos[start:start + 5]
+        m0 = re.match(r'^\tlb\t(\$\d+),([^()]+\(\$(\d+)\))(.*)$', out[i0])
+        m2 = re.match(r'^\tlbu\t(\$\d+),([^()]+\(\$(\d+)\))(.*)$', out[i2])
+        m3 = re.match(r'^\t(?:move\t(\$\d+),(\$\d+)|'
+                      r'daddu\t(\$\d+),(\$\d+),\$0)$', out[i3])
+        m4 = re.match(r'^\t(?:move\t(\$\d+),(\$\d+)|'
+                      r'daddu\t(\$\d+),(\$\d+),\$0)$', out[i4])
+        m3_dst, m3_src = ((m3.group(1), m3.group(2)) if m3 and m3.group(1)
+                          else (m3.group(3), m3.group(4)) if m3
+                          else (None, None))
+        m4_dst, m4_src = ((m4.group(1), m4.group(2)) if m4 and m4.group(1)
+                          else (m4.group(3), m4.group(4)) if m4
+                          else (None, None))
+        if (not m0 or not m2 or not m3 or not m4
+                or not re.match(r'^\tb(?:eq|ne)\t%s,\$0,' %
+                                re.escape(m0.group(1)), out[i1])
+                or m0.group(2) != m2.group(2)
+                or m2.group(1) != m3_src
+                or m4_dst != m2.group(1)
+                or m0.group(3) != m4_src.lstrip('$')):
+            raise SystemExit("--retime-byte-copy-guard: %s shape changed: "
+                             "%r" % (site, [out[i] for i in
+                                             (i0, i1, i2, i3, i4)]))
+        copy_reg = m3_dst
+        out[i2] = "\tlbu\t%s,%s%s" % (copy_reg, m2.group(2), m2.group(4))
+        out[i3] = "\tnop"
+        walk = out[i4]
+        del out[i4]
+        out.insert(i0 + 1, walk)
+    return out
+
+
+def split_loop_byte_loads(lines, specs):
+    """Split a loop-carried lbu+move into retail's lb test + lbu reload.
+
+    Specs are FUNC:TEST:COPY instruction indices. TEST must be
+    `lbu T,ADDR`; COPY must be `move C,T` after a branch that reads T.
+    The result is `lb T,ADDR` and `lbu C,ADDR`, preserving byte semantics
+    while reproducing the original signed test/unsigned copy lowering.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, test_text, copy_text = spec.split(':')
+            test_idx = int(test_text)
+            copy_idx = int(copy_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--split-loop-byte-load: bad spec %r "
+                             "(want FUNC:TEST:COPY)" % spec)
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if (test_idx < 0 or copy_idx <= test_idx or copy_idx >= len(pos)):
+            raise SystemExit("--split-loop-byte-load: bad indices in %s" %
+                             spec)
+        ti, ci = pos[test_idx], pos[copy_idx]
+        mt = re.match(r'^\tlbu\t(\$\d+),(.+)$', out[ti])
+        mc = re.match(r'^\t(?:move\t(\$\d+),(\$\d+)|'
+                      r'daddu\t(\$\d+),(\$\d+),\$0)$', out[ci])
+        mc_dst, mc_src = ((mc.group(1), mc.group(2)) if mc and mc.group(1)
+                          else (mc.group(3), mc.group(4)) if mc
+                          else (None, None))
+        if not mt or not mc or mc_src != mt.group(1):
+            raise SystemExit("--split-loop-byte-load: %s shape changed" % spec)
+        between = [out[j] for j in range(ti + 1, ci)
+                   if RE_INSN.match(out[j])]
+        if not any(RE_ANY_JUMP_OR_BRANCH.match(x)
+                   and mt.group(1) in insn_regs(x)[1] for x in between):
+            raise SystemExit("--split-loop-byte-load: %s has no branch test" %
+                             spec)
+        out[ti] = out[ti].replace("\tlbu\t", "\tlb\t", 1)
+        out[ci] = "\tlbu\t%s,%s" % (mc_dst, mt.group(2))
+    return out
+
+
 def swap_fp_commutative_operands(lines, sites):
     """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
 
@@ -2133,6 +2235,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
          swap_reg_sources=None,
          exchange_derived=None,
+         retime_byte_guard=None, split_loop_byte=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
@@ -2182,6 +2285,12 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if exchange_derived:
         lines = exchange_derived_results(lines, exchange_derived)
+
+    if retime_byte_guard:
+        lines = retime_byte_copy_guards(lines, retime_byte_guard)
+
+    if split_loop_byte:
+        lines = split_loop_byte_loads(lines, split_loop_byte)
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
@@ -2769,6 +2878,17 @@ if __name__ == "__main__":
                         metavar="SITES",
                         help="exchange the destinations of an adjacent "
                              "common-base addu/addiu derived-value pair")
+    parser.add_argument("--retime-byte-copy-guard", default=None,
+                        metavar="SITES",
+                        help="comma-separated FUNC:N guarded byte-copy "
+                             "sites whose loop walker is initialized before "
+                             "the guard and whose first byte loads directly "
+                             "into the copy register")
+    parser.add_argument("--split-loop-byte-load", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:TEST:COPY sites where a "
+                             "signed loop-test byte and unsigned copied byte "
+                             "must be loaded separately")
     parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose three-FPR "
                              "add.s or mul.s has its two commutative source "
@@ -2846,6 +2966,8 @@ if __name__ == "__main__":
          args.swap_regs,
          [t for t in (args.swap_reg_sources or "").split(',') if t],
          scope(args.exchange_derived_results),
+         scope(args.retime_byte_copy_guard),
+         [t for t in (args.split_loop_byte_load or "").split(',') if t],
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,

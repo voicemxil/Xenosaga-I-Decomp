@@ -215,8 +215,12 @@ FILE_FIX_FLAGS = {
               "--swap-regs HitCheckMapUnitWithNyuru:19-20:73-91 "
               "--rotate-seq HitCheckMapUnitWithNyuru:72:3,HitCheckMapUnitWithNyuru:73:-3"),
     "RES.c": ("--swap-regs RES_loadFile:2-3:110-116 "
+              "--swap-regs RES_loadFileSubMapSub:4-5:49-68 "
               "--swap-mem-into-slot RES_loadFile:4 "
-              "--post-rotate-seq RES_loadFile:46:3,RES_loadFile:47:2"),
+              "--post-rotate-seq RES_loadFile:46:3,RES_loadFile:47:2 "
+              "--retime-byte-copy-guard RES_loadFileSubMapSub:29 "
+              "--split-loop-byte-load RES_loadFileSubMapSub:56:59 "
+              "--branch-likely RES_loadFileSubMapSub:4"),
     "GameResource.c": (
         "--swap-reg-sources GameResourceAlloc:17:4-18,GameResourceAlloc:19:4-18 "
         "--rotate-seq GameResourceAlloc:13:3,GameResourceAlloc:14:2 "
