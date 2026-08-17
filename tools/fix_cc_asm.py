@@ -1486,6 +1486,87 @@ def retime_hdd_full_setups(lines, specs):
     return out
 
 
+def fill_center_branches_from_targets(lines, specs):
+    """Reproduce retail's target-thread delay-slot fill in ``GetCenter``.
+
+    ``FUNC:BRANCH:TARGET`` identifies the raw branch and the first target
+    instruction.  GCC normally puts the default float load in the slot and
+    leaves the target's address ``lui`` after its label.  Retail hoists the
+    default load before the compare, puts that target ``lui`` in the branch
+    slot, and moves the label one instruction down so the taken path retains
+    the matching ``%lo`` address half.  The entire specialized shape is
+    validated, including FP destination, symbol and branch label.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, branch_text, target_text = spec.split(':')
+            branch = int(branch_text)
+            target = int(target_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--fill-center-branch-from-target: bad spec %r "
+                             "(want FUNC:BRANCH:TARGET)" % spec)
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if (branch < 1 or target != branch + 3
+                or target + 2 >= len(pos)):
+            raise SystemExit("--fill-center-branch-from-target: bad site: %s" %
+                             spec)
+        expected = [
+            '\tslt\t$2,$2,1618',
+            '\tbne\t$2,$0,$L98',
+            '\tl.s\t$f3,D_00347D08',
+            '\tli.s\t$f3,3.00000000000000000000e0',
+            '\tlui\t$2,%hi(D_004DC9D0) # high',
+            '\tl.s\t$f1,16($5)',
+            '\taddiu\t$2,$2,%lo(D_004DC9D0) # low',
+        ]
+        start = branch - 1
+        got = [out[pos[start + n]] for n in range(len(expected))]
+        if got != expected:
+            for n, (want, actual) in enumerate(zip(expected, got)):
+                if want != actual:
+                    raise SystemExit(
+                        "--fill-center-branch-from-target: %s instruction "
+                        "%d changed: want %r, got %r" %
+                        (spec, start + n, want, actual))
+
+        old_branch = pos[branch]
+        old_delay = pos[branch + 1]
+        directives = (out[old_branch - 2], out[old_branch - 1],
+                      out[old_delay + 1], out[old_delay + 2])
+        if directives != ('\t.set\tnoreorder', '\t.set\tnomacro',
+                          '\t.set\tmacro', '\t.set\treorder'):
+            raise SystemExit("--fill-center-branch-from-target: %s branch "
+                             "directives changed: %r" %
+                             (spec, directives))
+        label_i = pos[target] - 1
+        if out[label_i] != '$L98:':
+            raise SystemExit("--fill-center-branch-from-target: %s target "
+                             "label changed: %r" % (spec, out[label_i]))
+
+        replacement = [expected[2], expected[0], expected[1], expected[4],
+                       expected[3], expected[5], expected[6]]
+        for n, line in enumerate(replacement):
+            out[pos[start + n]] = line
+        out[old_branch - 2] = ''
+        out[old_branch - 1] = ''
+        out[old_delay + 1] = ''
+        out[old_delay + 2] = ''
+        new_branch = pos[branch + 1]
+        new_delay = pos[branch + 2]
+        out[new_branch] = ('\t.set\tnoreorder\n\t.set\tnomacro\n' +
+                           out[new_branch])
+        out[new_delay] = (out[new_delay] +
+                          '\n\t.set\tmacro\n\t.set\treorder')
+        out[label_i] = ''
+        out[pos[target + 1]] = '$L98:\n' + out[pos[target + 1]]
+    return out
+
+
 def retime_model_entry_clips(lines, scope):
     """Restore the retail entry schedule for ``nmlModelCalcEntryClip``.
 
@@ -3175,6 +3256,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_gs_zbuffer_address=None,
          retime_gs_reset_graph=None,
          retime_hdd_full_setup=None,
+         fill_center_branch_target=None,
          retime_model_entry_clip=None,
          swap_fp_operands=None,
          swap_int_operands=None,
@@ -3255,6 +3337,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if retime_hdd_full_setup:
         lines = retime_hdd_full_setups(lines, retime_hdd_full_setup)
+
+    if fill_center_branch_target:
+        lines = fill_center_branches_from_targets(
+            lines, fill_center_branch_target)
 
     if retime_model_entry_clip is not None:
         lines = retime_model_entry_clips(lines, retime_model_entry_clip)
@@ -3898,6 +3984,10 @@ if __name__ == "__main__":
                         metavar="SPECS",
                         help="comma-separated FUNC:N HDD-full prologue/call "
                              "schedules")
+    parser.add_argument("--fill-center-branch-from-target", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:BRANCH:TARGET center "
+                             "branch target-thread fills")
     parser.add_argument("--retime-model-entry-clip", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="retime the validated entry block of named "
@@ -3990,6 +4080,7 @@ if __name__ == "__main__":
          [t for t in (args.retime_gs_zbuffer_address or "").split(',') if t],
          [t for t in (args.retime_gs_reset_graph or "").split(',') if t],
          [t for t in (args.retime_hdd_full_setup or "").split(',') if t],
+         [t for t in (args.fill_center_branch_from_target or "").split(',') if t],
          scope(args.retime_model_entry_clip),
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),

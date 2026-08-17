@@ -294,7 +294,8 @@ FILE_FIX_FLAGS = {
     "Drill.c": "--mtc1-nop DrillZMoveFunc:1,DrillPowerOffFunc:1 --rotate DrillReturnFunc:139:3",
     "eMessage.c": "--rotate eMessageNextGyouMaxGet:2:-5",
     "INIT.c": "--rotate InitEvsSymbol:33:-3,InitRetSymbol:33:-3 --rotate-seq InitShopSymbol:39:-4,InitShopSymbol:39:-3,InitSaveSymbol:39:-4,InitSaveSymbol:39:-3 --barrier-lo-load InitItemSymbol,InitItemBox",
-    "Get.c": "--swap-adjacent Get_Rnd:5",
+    "Get.c": ("--swap-adjacent Get_Rnd:5 "
+              "--fill-center-branch-from-target GetCenter:2:5"),
     "Check.c": "--mtc1-nop CheckDoorDist:0",
     "Undu.c": "--swap-adjacent UnduParamInit:5",
     "SEQ.c": "--mtc1-nop SEQ_motion:3",
