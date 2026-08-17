@@ -2977,3 +2977,4 @@ sceTtyInit = 0x00201CF0, 0xBC; // sceTty.c
 InitCfSystem = 0x002439E0, 0x200; // INIT.c
 sceLseek = 0x00204AD0, 0x238; // sceFs.c
 _mbAddressIncrement = 0x002128B8, 0x110; // sceMpegDec.c
+HddTestDummySave = 0x00255FD0, 0x194; // HddTest.c

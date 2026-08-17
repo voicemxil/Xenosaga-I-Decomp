@@ -211,7 +211,9 @@ FILE_FIX_FLAGS = {
                 "Enemy_Route_Chase:61:2,Enemy_Route_Chase:63:2,Enemy_Route_Chase:65:2"),
     "eBattle.c": "--retime-ebattle-window eBattleWinOpen4,eBattleWinInit2",
     "HddTest.c": ("--swap-regs HddTest1024Save:2-3:16-17 "
-                  "--retime-hdd-full-setup HddTestHddFull:6"),
+                  "--retime-hdd-full-setup HddTestHddFull:6 "
+                  "--rotate-seq HddTestDummySave:15:-5 "
+                  "--exchange-slot-prior HddTestDummySave:1:1"),
     "xglHdd.c": "--swap-regs xglHddMcCheckCore:10-11:50 --swap-regs xglHddMcCheckCore:3-10:52-55 --swap-regs xglHddMcCheckCore:11-3:52 --rotate xglHddMcCheckYourSaves:1:3 --split-hi-lo xglHddMcCheckYourSaves:1:2",
     "Hit.c": ("--rotate HitCheckCorner:17:5 "
               "--swap-regs HitCheckMapUnitWithNyuru:19-20:73-91 "
