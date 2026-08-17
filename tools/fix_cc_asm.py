@@ -1512,6 +1512,94 @@ def swap_into_slot(flat, sites, allow_stack_mem=False):
     return res
 
 
+def exchange_slot_with_prior(flat, specs):
+    """Exchange a filled delay slot with an earlier independent instruction.
+
+    Specs are FUNC:N:BACK. N counts gcc-filled branches/jumps in emission
+    order, using the same convention as --unfill-gcc-slots; BACK selects the
+    Nth preceding instruction before the branch.  Both instructions must be
+    independent of each other, every instruction they cross, and the branch
+    predicate. Branch-likely sites are rejected because their slots are not
+    executed on the fall-through path.
+    """
+    if not specs:
+        return flat
+    parsed = {}
+    for spec in specs:
+        try:
+            func, site_text, back_text = spec.split(':')
+            site = int(site_text)
+            back = int(back_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--exchange-slot-prior: bad spec %r "
+                             "(want FUNC:N:BACK)" % spec)
+        if site < 0 or back < 1:
+            raise SystemExit("--exchange-slot-prior: invalid site/back in "
+                             "%r" % spec)
+        parsed[(func, site)] = back
+
+    out = list(flat)
+    cur = None
+    branch_idx = 0
+    applied = set()
+    likely = re.compile(
+        r'^\t(?:beql|bnel|beqzl|bnezl|bgezl|bgtzl|blezl|bltzl|'
+        r'bc1tl|bc1fl)[ \t]')
+    for i, line in enumerate(out):
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            branch_idx = 0
+        if (not RE_ANY_JUMP_OR_BRANCH.match(line) or i < 2
+                or i + 1 >= len(out)
+                or out[i - 2].strip().replace("\t", " ") != ".set noreorder"
+                or out[i - 1].strip().replace("\t", " ") != ".set nomacro"
+                or not RE_INSN.match(out[i + 1])):
+            continue
+        key = (cur, branch_idx)
+        branch_idx += 1
+        if key not in parsed:
+            continue
+        if likely.match(line):
+            raise SystemExit("--exchange-slot-prior: %s:%d is branch-likely" %
+                             key)
+        back = parsed[key]
+        prior_i = i - 3
+        seen = 0
+        while prior_i >= 0:
+            if out[prior_i].startswith("\t.ent\t") or out[prior_i].endswith(":"):
+                prior_i = -1
+                break
+            if RE_INSN.match(out[prior_i]):
+                seen += 1
+                if seen == back:
+                    break
+            prior_i -= 1
+        if prior_i < 0:
+            raise SystemExit("--exchange-slot-prior: %s:%d has no BACK=%d "
+                             "instruction" % (cur, key[1], back))
+        prior = out[prior_i]
+        slot = out[i + 1]
+        mids = [out[j] for j in range(prior_i + 1, i)
+                if RE_INSN.match(out[j])]
+        branch_reads = insn_regs(line)[1]
+        prior_writes = insn_regs(prior)[0]
+        slot_writes = insn_regs(slot)[0]
+        if (not swap_ok(prior, slot)
+                or prior_writes & branch_reads
+                or slot_writes & branch_reads
+                or any(not swap_ok(prior, mid) for mid in mids)
+                or any(not swap_ok(slot, mid) for mid in mids)):
+            raise SystemExit("--exchange-slot-prior: %s:%d dependency check "
+                             "failed" % key)
+        out[prior_i], out[i + 1] = slot, prior
+        applied.add(key)
+    missing = set(parsed) - applied
+    if missing:
+        raise SystemExit("--exchange-slot-prior: site(s) not found: %s" %
+                         ",".join("%s:%d" % x for x in sorted(missing)))
+    return out
+
+
 def rebase_stack_memory(flat, specs):
     """Express a stack access through an already-computed stack pointer.
 
@@ -1821,6 +1909,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          war_restore=None, pin_slot=None, lis_hazard_nop=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
          swap_mem_slot=None,
+         exchange_slot_prior=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
          swap_fp_operands=None,
          swap_int_operands=None,
@@ -2225,6 +2314,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         out = rotate_insns_seq(flat, post_rotate_seq,
                                allow_nop_marker=True)
 
+    if exchange_slot_prior:
+        flat = "\n".join(out).split("\n")
+        out = exchange_slot_with_prior(flat, exchange_slot_prior)
+
     if swap_slot_tgt:
         flat = "\n".join(out).split("\n")
         out = swap_slot_target(flat, swap_slot_tgt)
@@ -2397,6 +2490,11 @@ if __name__ == "__main__":
                         metavar="SITES",
                         help="like --swap-into-slot, but also accept an "
                              "independent stack load/non-stack memory op pair")
+    parser.add_argument("--exchange-slot-prior", default=None,
+                        metavar="SPECS",
+                        help="exchange a gcc-filled delay slot with its "
+                             "BACK-th preceding independent instruction; "
+                             "comma-separated FUNC:N:BACK specs")
     parser.add_argument("--rebase-stack-mem", action="append", default=None,
                         metavar="FUNC:SITES:BASE:BIAS",
                         help="rewrite named OFF($sp) memory sites through an "
@@ -2496,6 +2594,7 @@ if __name__ == "__main__":
          scope(args.lis_hazard_nop), scope(args.swap_adjacent),
          scope(args.swap_into_slot), scope(args.mtc1_nop),
          scope(args.swap_mem_into_slot),
+         [t for t in (args.exchange_slot_prior or "").split(',') if t],
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
          scope(args.swap_fp_operands),

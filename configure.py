@@ -247,7 +247,8 @@ FILE_FIX_FLAGS = {
     "xglMenu.c": "--rotate-seq xglMenuDrawType1Sub:11:3,xglMenuDrawType1Sub:12:2",
     "sub.c": "--swap-adjacent subJoutoPosSet:58",
     "sef.c": "--branch-likely sefAllocLocalData:2",
-    "sc.c": "--branch-likely scDispatchScript:4",
+    "sc.c": ("--branch-likely scDispatchScript:4 "
+             "--exchange-slot-prior scInitScript:2:2,scParseScript:0:1"),
     "Game.c": "--rotate-seq GameModeDebugMenu:10:-2,GameModeDebugMenu:12:3,GameModeDebugMenu:12:2",
     "tskUmnBgCube.c": " --as-g0 --fp-pair-hazard tskUmnBgCubeMain",
     "sdv.c": "--branch-unlikely sdvScheduleSound:1 --rotate-seq sdvCreateAlter:3:3,sdvCreateAlter:4:2",

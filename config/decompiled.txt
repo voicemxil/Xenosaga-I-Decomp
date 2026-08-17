@@ -2945,3 +2945,5 @@ scePadInit = 0x0020B698, 0x140; // scePad.c
 sceFsInit = 0x00204438, 0x1C8; // sceFs.c
 AgwsSwitchMain = 0x0029D530, 0x1F8; // Agws.c
 RES_loadFile = 0x0024D5A0, 0x218; // RES.c
+scInitScript = 0x002E9B28, 0xCC; // sc.c
+scParseScript = 0x002EBA50, 0xB0; // sc.c
