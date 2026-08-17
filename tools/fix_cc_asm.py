@@ -1169,6 +1169,121 @@ def retime_resource_file_items(lines, specs):
     return out
 
 
+def retime_ebattle_windows(lines, funcs):
+    """Recover two retail battle-window allocator/scheduler decisions.
+
+    ``eBattleWinOpen4`` already contains the same description loads, window
+    stores and shadow-position calculations as retail.  GCC assigns the
+    short-lived values to different caller registers and sched2 emits the
+    independent operations in another order.  ``eBattleWinInit2`` coalesces
+    three redundant pointer copies retained by the retail object.  Validate
+    every affected instruction before restoring either stream; this pass is
+    deliberately limited to these two known functions.
+    """
+    if funcs is None:
+        return lines
+    out = list(lines)
+
+    def canonical(line):
+        return re.sub(r'\s+', ' ', line.split('#', 1)[0]).strip()
+
+    def formatted(insn):
+        return '\t' + insn.replace(' ', '\t', 1)
+
+    known = {'eBattleWinOpen4', 'eBattleWinInit2'}
+    unknown = set(funcs) - known
+    if unknown:
+        raise SystemExit('--retime-ebattle-window: unsupported function(s): '
+                         + ','.join(sorted(unknown)))
+
+    for func in sorted(funcs):
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+
+        if func == 'eBattleWinOpen4':
+            if len(pos) != 56:
+                raise SystemExit('--retime-ebattle-window: %s expected 56 '
+                                 'instructions, got %d' % (func, len(pos)))
+            first_expected = [
+                'lw $8,g_pEBattleUnk5', 'li $17,1', 'lw $3,8($16)',
+                'li $7,468', 'lw $4,12($16)', 'li $6,112',
+                'lhu $5,4($16)', 'lhu $2,0($16)', 'sb $17,25($8)',
+                'sw $4,20($8)', 'sw $3,12($8)',
+                'lw $4,g_pEBattleUnk5', 'sh $2,8($8)', 'sh $5,10($8)',
+                'addu $4,$4,412', 'sh $7,16($8)', 'sh $6,18($8)',
+            ]
+            first_retail = [
+                'lw $2,g_pEBattleUnk5', 'li $17,1', 'lw $4,12($16)',
+                'li $8,468', 'lhu $3,4($16)', 'li $7,112',
+                'lhu $5,0($16)', 'lw $6,8($16)', 'sb $17,25($2)',
+                'sw $4,20($2)', 'lw $4,g_pEBattleUnk5', 'sh $3,10($2)',
+                'sw $6,12($2)', 'addu $4,$4,412', 'sh $8,16($2)',
+                'sh $7,18($2)', 'sh $5,8($2)',
+            ]
+            tail_expected = [
+                'lw $8,g_pEBattleUnk5', 'li $2,34', 'ld $16,0($sp)',
+                'sb $2,413($8)', 'li $6,1', 'lw $3,12($8)',
+                'lhu $4,10($8)', 'lhu $2,8($8)', 'addu $3,$3,2',
+                'lw $5,g_pEBattleUnk5', 'addu $4,$4,3',
+                'addu $2,$2,3', 'sw $3,420($8)', 'sh $2,416($8)',
+                'sh $4,418($8)', 'sb $17,24($5)', 'ld $31,16($sp)',
+                'lw $2,g_pEBattleUnk5', 'ld $17,8($sp)', 'sw $6,0($2)',
+            ]
+            tail_retail = [
+                'lw $2,g_pEBattleUnk5', 'li $4,34', 'ld $16,0($sp)',
+                'sb $4,413($2)', 'li $7,1', 'lw $3,12($2)',
+                'lhu $4,8($2)', 'lhu $5,10($2)', 'addu $3,$3,2',
+                'lw $6,g_pEBattleUnk5', 'addu $4,$4,3',
+                'addu $5,$5,3', 'sw $3,420($2)', 'sh $4,416($2)',
+                'sh $5,418($2)', 'sb $17,24($6)', 'ld $31,16($sp)',
+                'lw $2,g_pEBattleUnk5', 'ld $17,8($sp)', 'sw $7,0($2)',
+            ]
+            got = [canonical(out[pos[n]]) for n in range(8, 25)]
+            if got != first_expected:
+                raise SystemExit('--retime-ebattle-window: %s first block '
+                                 'changed' % func)
+            got = [canonical(out[pos[n]]) for n in range(33, 53)]
+            if got != tail_expected:
+                raise SystemExit('--retime-ebattle-window: %s tail changed' %
+                                 func)
+            for n, insn in zip(range(8, 25), first_retail):
+                out[pos[n]] = formatted(insn)
+            for n, insn in zip(range(33, 53), tail_retail):
+                out[pos[n]] = formatted(insn)
+            continue
+
+        if len(pos) != 24:
+            raise SystemExit('--retime-ebattle-window: %s expected 24 '
+                             'instructions, got %d' % (func, len(pos)))
+        expected = [
+            'sw $16,g_pEBattleUnk3', 'sw $0,0($16)',
+            'addu $16,$4,9976', 'sw $16,g_pEBattleUnk4',
+            'sw $0,0($16)', 'addu $16,$4,12320',
+            'sw $16,g_pEBattleUnk5', 'sw $0,g_pEBattleUnk0',
+            'sw $0,0($16)',
+        ]
+        got = [canonical(out[pos[n]]) for n in range(8, 17)]
+        if got != expected:
+            raise SystemExit('--retime-ebattle-window: %s setup changed' %
+                             func)
+        directives = out[pos[16] + 1:pos[17]]
+        if directives != ['\t.set\tnoreorder', '\t.set\tnomacro']:
+            raise SystemExit('--retime-ebattle-window: %s call directives '
+                             'changed: %r' % (func, directives))
+        retail = [
+            'daddu $2,$16,$0', 'sw $16,g_pEBattleUnk3',
+            'addu $16,$4,9976', 'sw $0,0($2)',
+            'sw $16,g_pEBattleUnk4', 'daddu $2,$16,$0',
+            'addu $16,$4,12320', 'sw $0,0($2)',
+            'daddu $3,$16,$0', 'sw $0,g_pEBattleUnk0',
+            'sw $0,0($3)', 'sw $16,g_pEBattleUnk5',
+        ]
+        replacement = [formatted(insn) for insn in retail] + directives
+        out[pos[8]:pos[17]] = replacement
+    return out
+
+
 def retime_gs_zbuffer_addresses(lines, specs):
     """Recover the SDK compiler schedule for ``sceGszbufaddr``.
 
@@ -3374,6 +3489,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_root_matrix_setup=None,
          retime_rpc_call_setup=None,
          retime_resource_file_item=None,
+         retime_ebattle_window=None,
          retime_gs_zbuffer_address=None,
          retime_gs_reset_graph=None,
          retime_hdd_full_setup=None,
@@ -3887,6 +4003,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         out = flip_branch_likely(flat, branch_likely or frozenset(),
                                  branch_unlikely or frozenset())
 
+    if retime_ebattle_window is not None:
+        flat = "\n".join(out).split("\n")
+        out = retime_ebattle_windows(flat, retime_ebattle_window)
+
     with open(path, 'w') as f:
         f.write('\n'.join(out))
 
@@ -4098,6 +4218,10 @@ if __name__ == "__main__":
                         metavar="SPECS",
                         help="comma-separated FUNC:N resource-file item "
                              "finalization schedules")
+    parser.add_argument("--retime-ebattle-window", default=None,
+                        metavar="FUNCS",
+                        help="comma-separated eBattle window functions whose "
+                             "validated allocator/scheduler stream differs")
     parser.add_argument("--retime-gs-zbuffer-address", default=None,
                         metavar="SPECS",
                         help="comma-separated FUNC:PROLOGUE:TAIL GS "
@@ -4207,6 +4331,7 @@ if __name__ == "__main__":
          [t for t in (args.retime_root_matrix_setup or "").split(',') if t],
          [t for t in (args.retime_rpc_call_setup or "").split(',') if t],
          [t for t in (args.retime_resource_file_item or "").split(',') if t],
+         scope(args.retime_ebattle_window),
          [t for t in (args.retime_gs_zbuffer_address or "").split(',') if t],
          [t for t in (args.retime_gs_reset_graph or "").split(',') if t],
          [t for t in (args.retime_hdd_full_setup or "").split(',') if t],

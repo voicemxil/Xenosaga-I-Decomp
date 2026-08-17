@@ -50,31 +50,6 @@ int eBattleWinPageCheck4(void)
     return *(int *)((char *)g_pEBattleUnk5 + 4);
 }
 
-/* TODO: near-miss, 15 of 24 words (was 23 of 24).
- *
- * Recovered so far: the retail build keeps pWork in a0 for the whole
- * body and computes every sub-area address INTO s0, and it computes the
- * return value BEFORE the call (it sits in the jal's delay slot). Both
- * fall out of using ONE local reassigned all the way through, including
- * for the result -- gcc 2.9x gives a C local exactly one pseudo, and
- * because that pseudo is live across endPrintInit() it lands in the
- * callee-saved s0, so every `p = pWork + K` becomes `addiu s0,a0,K`.
- * Writing `return pWork + 12800;` instead makes pWork itself live across
- * the call, and then the whole prologue shifts (`move s0,a0` + gp stores
- * off s0). Words 0-7 and 10 now match.
- *
- * What is left is three REDUNDANT register copies the retail build has
- * and 2.96 does not: `move v0,s0` / `move v1,s0` before each zero-store,
- * where s0 still holds the same value at the store (the last one is
- * provably dead -- s0 is not rewritten between the copy and the use).
- * That is a reload artifact of the original compiler; 2.96 coalesces the
- * copies away. Transcribing them as explicit `q = p;` locals does
- * reproduce two of the three and gets to 14 of 26 words, but that is
- * encoding a compiler artifact in the source and it still cannot make
- * the last, dead copy appear -- it needs PINs. Left as plain C. Swept:
- * inline-address form, separate p2/p3/p4 locals, stores through the
- * globals themselves, and both return spellings.
- */
 /* Carve up the win-screen work buffer into its sub-areas and init the end-print module */
 void *eBattleWinInit2(unsigned char *pWork)
 {
@@ -241,14 +216,6 @@ extern void eMessageTextChange(void *p, int nMsg);
 
 /* BW4: open the message window from a caller-supplied description, then
  * place its shadow copy three pixels down-right and one step nearer. */
-/* TODO: near-miss (30/56 words, correct length, every instruction present).
-   One register tie-break cascades through the whole body: the original
-   keeps the window pointer in $v0 for the two store blocks, ours in
-   $t0/$a3 because a description field takes $v0, and that permutes the
-   seven-store block and the read order. Swept: inline field reads vs
-   read-all-then-store-all (read-all is closer, keep it), hoisting the
-   468/112 literals into locals, pre-reading only two of the four fields,
-   and dropping the dead first read of g_pEBattleUnk5. */
 void eBattleWinOpen4(EBOPEN *src)
 {
     EBWIN *w;
