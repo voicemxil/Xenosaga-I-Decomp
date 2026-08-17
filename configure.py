@@ -227,9 +227,14 @@ FILE_FIX_FLAGS = {
                     "nmlPacketAddGifTag:26:2,nmlPacketAddGifTag:27:3"),
     "update.c": ("--branch-unlikely updateCursor:22 "
                  "--rotate-seq updateCursor:169:2,updateCursor:170:2,"
-                 "updateCursor:189:2,updateCursor:190:2 "
+                 "updateCursor:189:2,updateCursor:190:2,"
+                 "updateCursorMode1:83:-13,updateCursorMode1:84:-12,"
+                 "updateCursorMode1:85:-11 "
                  "--swap-into-slot updateCursor:10,updateCursor:11,"
-                 "updateCursor:15,updateCursor:16"),
+                 "updateCursor:15,updateCursor:16 "
+                 "--swap-regs updateCursorMode1:3-7:74,78,80-87 "
+                 "--swap-regs updateCursorMode1:2-7:82-83,86-87 "
+                 "--rebase-stack-mem updateCursorMode1:89,91,93,95:5:32"),
     "sceSif.c": "--swap-regs sceSifInitIopHeap:2-3:25,27 --swap-adjacent sceSifInitIopHeap:26!",
     "sceFs.c": "--swap-regs sceFsInit:2-3:31,32,37,48,74,76",
     "sceMpegDec.c": "--swap-regs _isOutSizeOK:2-3:17-22",

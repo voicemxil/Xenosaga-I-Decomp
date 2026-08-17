@@ -1500,6 +1500,83 @@ def swap_into_slot(flat, sites):
     return res
 
 
+def rebase_stack_memory(flat, specs):
+    """Express a stack access through an already-computed stack pointer.
+
+    Specs are FUNC:SITES:BASE:BIAS, where SITES is a comma-separated list of
+    0-based instruction indices.  Each named load/store `OFF($sp)` becomes
+    `OFF-BIAS($BASE)`.  The pass scans backward from every site and requires
+    the most recent write to BASE to be exactly BASE = $sp + BIAS.  It fails
+    on any other shape, making the address rewrite algebraically auditable.
+    """
+    if not specs:
+        return flat
+    parsed = {}
+    for spec in specs:
+        try:
+            func, site_text, base_text, bias_text = spec.split(':')
+            site_ids = [int(x) for x in site_text.split(',')]
+            base = base_text.lstrip('$')
+            bias = int(bias_text, 0)
+        except (ValueError, TypeError):
+            raise SystemExit("--rebase-stack-mem: bad spec %r "
+                             "(want FUNC:SITES:BASE:BIAS)" % spec)
+        if not re.match(r'^\d+$', base) or not site_ids:
+            raise SystemExit("--rebase-stack-mem: bad base/sites in %r" %
+                             spec)
+        for site in site_ids:
+            parsed[(func, site)] = (base, bias)
+
+    owner = function_at(flat)
+    out = list(flat)
+    idx = 0
+    prev_owner = None
+    applied = set()
+    mem_re = re.compile(
+        r'^(\t[a-z0-9.]+[ \t]+\$\w+,)(-?\d+)\(\$sp\)(.*)$')
+    for i, line in enumerate(flat):
+        if owner[i] != prev_owner:
+            idx = 0
+            prev_owner = owner[i]
+        if not RE_INSN.match(line):
+            continue
+        key = (owner[i], idx)
+        if key in parsed:
+            base, bias = parsed[key]
+            m = mem_re.match(line)
+            if not m or not RE_MEMOP.match(line):
+                raise SystemExit("--rebase-stack-mem: %s:%d is not a "
+                                 "stack load/store: %s" %
+                                 (owner[i], idx, line))
+            base_reg = "$%s" % base
+            defining = None
+            for j in range(i - 1, -1, -1):
+                if owner[j] != owner[i]:
+                    break
+                if not RE_INSN.match(flat[j]):
+                    continue
+                writes, _reads = insn_regs(flat[j].replace(' ', '\t', 1))
+                if base_reg in writes:
+                    defining = flat[j]
+                    break
+            base_def = re.compile(
+                r'^\t(?:addiu|addu|daddu)[ \t]+\$%s,\$sp,%d$' %
+                (re.escape(base), bias))
+            if defining is None or not base_def.match(defining):
+                raise SystemExit("--rebase-stack-mem: %s:%d has no live "
+                                 "$%s = $sp + %d definition" %
+                                 (owner[i], idx, base, bias))
+            off = int(m.group(2)) - bias
+            out[i] = "%s%d($%s)%s" % (m.group(1), off, base, m.group(3))
+            applied.add(key)
+        idx += 1
+    missing = set(parsed) - applied
+    if missing:
+        raise SystemExit("--rebase-stack-mem: site(s) not found: %s" %
+                         ",".join("%s:%d" % x for x in sorted(missing)))
+    return out
+
+
 def swap_slot_target(flat, sites):
     """Exchange a filled branch delay slot with its target block's head.
 
@@ -1737,7 +1814,8 @@ def main(path, omitted_hazards, barrier_return_store=None,
          remat_call_constants=None,
          rotate_seq=None, hoist_div_arg=None, retime_branch=None,
          zero_quad_store=None, fp_pair_hazard=None,
-         short_loop_pad=None, byte_move=None, split_hi_lo_raw=None):
+         short_loop_pad=None, byte_move=None, split_hi_lo_raw=None,
+         rebase_stack_mem=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -2069,6 +2147,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = hoist_div_call_arg(flat, hoist_div_arg)
 
+    if rebase_stack_mem:
+        flat = "\n".join(out).split("\n")
+        out = rebase_stack_memory(flat, rebase_stack_mem)
+
     if swap_adjacent:
         flat = "\n".join(out).split("\n")
         out = swap_adjacent_insns(flat, swap_adjacent)
@@ -2284,6 +2366,11 @@ if __name__ == "__main__":
                              "FUNC (0-based, emission order), exchange the "
                              "gcc-filled delay-slot insn with the insn "
                              "immediately before the jal's noreorder block")
+    parser.add_argument("--rebase-stack-mem", action="append", default=None,
+                        metavar="FUNC:SITES:BASE:BIAS",
+                        help="rewrite named OFF($sp) memory sites through an "
+                             "already-live BASE=$sp+BIAS pointer, validating "
+                             "that definition before every site")
     parser.add_argument("--swap-slot-target", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites: at the Nth "
                              "gcc-filled branch of FUNC (0-based, emission "
@@ -2387,4 +2474,5 @@ if __name__ == "__main__":
          scope(args.retime_branch_slot),
          scope(args.zero_quad_store), scope(args.fp_pair_hazard),
          [t for t in (args.short_loop_pad or "").split(',') if t],
-         scope(args.byte_move_andi), args.split_hi_lo)
+         scope(args.byte_move_andi), args.split_hi_lo,
+         args.rebase_stack_mem)

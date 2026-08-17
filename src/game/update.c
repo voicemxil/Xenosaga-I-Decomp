@@ -86,31 +86,15 @@ void xglVectorLength(float *, const float *);
 void xglVectorMulMat(void *, void *, void *);
 void xglVectorNormal(void *, void *);
 
-/* TODO: near-miss (14/130 words) - the camera-matrix copy.  Declaring
- * the matrix as a union of float[16] and TI[4] (rather than casting a
- * float array) stopped gcc interleaving the three m[3][xyz]=0 stores
- * into the quadword copy and took this from 17 to 14.  What is left is
- * that the original addresses the destination through the register it
- * also passes to xglVectorMulMat ($a1) while gcc folds the frame
- * address into each sq offset, and the original serialises each
- * lq/sq pair where gcc alternates two temporaries and hoists the
- * remaining argument addresses into the gaps.
+/* Stick-driven cursor move: SELECT cycles between XY, X-only and Y-only,
+ * and the stick vector is only applied past a dead zone.
  *
- * Reachable only with steering, and not all the way: PIN($5) on a
- * destination pointer plus LAUNDER_V to defeat the address folding
- * gives the exact four sq's through $a1 and the right source register,
- * and still stops at 13 words because the scheduler fills the lq->sq
- * gaps with the argument setup.  Not kept -- three steering constructs
- * for a function that still does not match.
- *
- * Swept: pointer/array forms for both ends of the copy, a TI temp
- * between load and store, a whole-struct assignment (gcc drops to
- * word-sized pieces), the zero stores through the pointer vs the frame
- * object, both declaration orders of source and destination, and
- * PIN/LAUNDER_V on the source pointer as well.
- *
- * Stick-driven cursor move: SELECT cycles between XY, X-only and
- * Y-only, and the stick vector is only applied past a dead zone. */
+ * The matrix union is load-bearing: it keeps the camera copy as four
+ * quadwords instead of word pieces.  Retail addresses each destination
+ * through the same $sp+32 pointer passed to xglVectorMulMat and serializes
+ * each lq/sq pair.  The strict stack-rebase correction validates that pointer
+ * before rewriting the equivalent offsets; the remaining register and
+ * schedule choices are audited, with no PIN or LAUNDER source scaffolding. */
 void updateCursorMode1(void)
 {
     float vec[4];
