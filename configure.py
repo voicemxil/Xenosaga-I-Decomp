@@ -407,7 +407,7 @@ FILE_FIX_FLAGS = {
     # FUNC in asm order; see flip_branch_likely in fix_cc_asm.py).
     # scalbn needs one flip in EACH direction (its likely bit sits on the
     # wrong one of two adjacent branches).
-    "libm.c": ("--barrier-return-store fabs,__ieee754_fmod --as-g0 --fp-pair-hazard --barrier-branch-move --barrier-lo-load --rotate cos:27:2,sin:28:2 --pin-slot-nop cos:8,cos:10,sin:7,sin:9,__kernel_rem_pio2:32,__kernel_rem_pio2:42,__kernel_rem_pio2:43,__ieee754_pow:87,__ieee754_pow:95 --branch-likely sinf:2,cosf:2,__ieee754_atan2:2,__ieee754_rem_pio2:5,scalbn:6,__kernel_tanf:2,__ieee754_rem_pio2f:5,cos:3,sin:3 --branch-unlikely scalbn:7"),
+    "libm.c": ("--barrier-return-store fabs,__ieee754_fmod --as-g0 --fp-pair-hazard --barrier-branch-move --barrier-lo-load --rotate cos:27:2,sin:28:2 --pin-slot-nop cos:8,cos:10,sin:7,sin:9,__kernel_rem_pio2:32,__kernel_rem_pio2:42,__kernel_rem_pio2:43,__ieee754_pow:87,__ieee754_pow:95 --short-loop-pad __ieee754_pow:0:3 --branch-likely sinf:2,cosf:2,__ieee754_atan2:2,__ieee754_rem_pio2:5,scalbn:6,__kernel_tanf:2,__ieee754_rem_pio2f:5,cos:3,sin:3 --branch-unlikely scalbn:7"),
     # _dtoa_r: `dpcmp(d.d, 0.0)`'s `a1 = 0` argument setup is left as a
     # separate instruction (with a genuine nop in the jal delay slot) in
     # the original, but gas's reorder pass steals it into the jal's delay

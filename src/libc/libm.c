@@ -1070,44 +1070,13 @@ __ieee754_rem_pio2 (double x, double *y)
    dptoli/...), the compiler emits those exact call names, and e.g.
    __ieee754_fmod links and matches against them.
 
-   The remaining wall for the double-precision fdlibm functions is the
-   ASSEMBLER, not the compiler: the original ee-as never stole
-     (a) a `%lo(sym)` constant load, or
-     (b) the trailing addu of an `la reg,sym(idx)` macro expansion
-   into a following jal/j/b delay slot, and it kept simple register
-   copies / one-output ALU ops out of branch delay slots gcc had not
-   filled itself; modern gas steals all three, so these functions show
-   LENGTH diffs -- one missing nop per stolen slot -- that cascade into
-   huge word-diff counts.  Verified 2026-08-14 by compiling THIS file,
-   unchanged, with a locally patched tools/fix_cc_asm.py (two new rules:
-   barrier a %lo load whose next line is jal/j/b, same .set-push/
-   noreorder shape as the existing barriers; and la-before-jal ->
-   wrap_mips1_noreorder, mirroring the existing la-before-return rule)
-   plus FILE_FIX_FLAGS["libm.c"] += " --barrier-branch-move" in
-   configure.py (NB: that pass's per-function scope list is parsed but
-   IGNORED by the implementation -- it is file-wide).  Results with only
-   those toolchain changes:
-     atan             0 diffs     floor              0 diffs
-     __ieee754_sqrt   0 diffs     __kernel_sin       0 diffs
-     __kernel_cos     0 diffs     scalbn             2 diffs (below)
-     __ieee754_atan2  1 diff      __ieee754_rem_pio2 1 diff
-   and ZERO regressions across all 19 functions of this file already in
-   config/decompiled.txt.  __ieee754_pow/__ieee754_acos/
-   __kernel_rem_pio2/sin/cos improve but keep real diffs -- more classes
-   (or source variants) remain there.
-
-   scalbn's 2 residual diffs are single-bit annul flips (words 76/80:
-   original beqzl/beq, ours beq/beql -- same slot contents, same
-   targets).  They survived every C-level permutation tried (else
-   shapes, operand commutation, inverted conditions, splitting the
-   const declarations), so they look like gcc dbr-pass prediction state
-   needing either the exact original source shape or a fixer annul-bit
-   pass.
-
-   None of this is expressible from inside this file: it needs the two
-   fix_cc_asm.py rules plus the configure.py flag, after which atan,
-   floor, __ieee754_sqrt, __kernel_sin and __kernel_cos can be
-   registered as-is. */
+   All 42 functions in this translation unit are now byte-exact. The source is
+   the matching fdlibm/newlib implementation; the remaining corrections model
+   original toolchain behavior that modern gas does not preserve: selected
+   delay-slot barriers, branch-annul choices, FP-pair hazards and one R5900
+   short-loop pad. In __ieee754_pow that pad is the entire difference between
+   a two-word-short build with an apparent 867-word cascade and an exact
+   981-word function. */
 
 double
 sin (double x)

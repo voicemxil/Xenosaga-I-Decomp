@@ -1564,6 +1564,7 @@ __ieee754_sqrtf = 0x00327300, 0xD4; // libm.c
 acos = 0x00324038, 0x14; // libm.c
 atan2 = 0x00324050, 0x14; // libm.c
 fmod = 0x00324068, 0x14; // libm.c
+__ieee754_pow = 0x00324F98, 0xF54; // libm.c
 pow = 0x00324080, 0x14; // libm.c
 sqrt = 0x00324098, 0x14; // libm.c
 asinf = 0x003240B0, 0x14; // libm.c

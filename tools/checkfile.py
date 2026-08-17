@@ -125,7 +125,8 @@ def main():
     registered = {e.name: (e.addr, e.size) for e in entries + hardware}
     repo = Repo()
 
-    sources = sorted(glob.glob("src/*.c")) if args.all else [args.source]
+    sources = (sorted(glob.glob("src/**/*.c", recursive=True))
+               if args.all else [args.source])
     tmpdir = tempfile.mkdtemp(prefix="checkfile_")
     grand = [0, 0, 0]
     suggestions = []
