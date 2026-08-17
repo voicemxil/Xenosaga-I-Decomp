@@ -2066,30 +2066,6 @@ float s_fStealthScale;
 float s_fStealthMinRange;
 float s_fStealthBias;
 
-/* TODO: near-miss, 32 diffs, NOT registered. Right length (93 words),
- * right instructions, right control flow -- only 2 words differ in
- * OPCODE (the outer sort loop comes out `bnezl` where the original has
- * a plain `bnez`, and the original reuses its layout pointer where we
- * rematerialise `lui %hi`). Everything else is register naming: the
- * original keeps pCamera in $s2 and &s_inLayout in $s1 (we have them the
- * other way round), and the whole bubble-sort body lands on
- * $s0/$v1/$a3/$a0/$t0 where we get $a1/$a0/$v1/$v0/$a2.
- * Swept and REJECTED: block-scoping the sort temporaries (no change);
- * a function-scope `LAYOUT *pL = &s_inLayout` (91 words); the same
- * pointer scoped to the if-arm (96 words); the sort as
- * `do { nSwap = 0; ... } while (nSwap)` instead of
- * `nSwap = 1; while (nSwap) { nSwap = 0; ... }` (92 words -- the while
- * form is the one that gives the right length, and gcc folds the
- * initial 1 away by itself).
- * The layout base is what to attack next: the original hoists the FULL
- * address out of the outer loop (`move $a2,$s1`), we hoist only the
- * `lui %hi` -- so in the original the sort's base is derived from a
- * POINTER pseudo, not from the symbol_ref that `&s_inLayout.aStealth[1]`
- * gives us.
- *
- * Also names LAYOUT+0x280 as aStealth[10] and +0x2C8 as nStealthNum.
- */
-
 /* Queue the stealth (heat-haze) filter entries for this model. When the
  * model wants per-studio entries all ten slots are built and then bubble
  * sorted back to front by depth; otherwise a single entry is made. */
@@ -2115,11 +2091,10 @@ void nmlModelStealthEntry(void *pModel, void *pCamera)
             nSwap = 1;
             while (nSwap != 0) {
                 STEALTH **pp;
-                int n;
 
                 nSwap = 0;
                 pp = &s_inLayout.aStealth[1];
-                for (n = 8; n >= 0; n--) {
+                for (i = 8; i >= 0; i--) {
                     STEALTH *pA;
 
                     pA = pp[-1];

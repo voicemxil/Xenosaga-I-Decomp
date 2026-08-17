@@ -1658,6 +1658,127 @@ def retime_model_entry_clips(lines, scope):
     return out
 
 
+def retime_model_stealth_entries(lines, scope):
+    """Recover the retail allocation of ``nmlModelStealthEntry``.
+
+    The natural source reuses its outer loop index in the inner bubble sort,
+    which recovers retail's saved ``s0`` counter and plain outer branch.  The
+    remaining difference is allocator-only: this compiler exchanges the
+    camera/layout ``s1`` and ``s2`` pseudos, rematerializes the layout symbol
+    instead of copying the already-live pointer, and assigns the five sort
+    temporaries different caller-saved GPRs.  Validate every affected source
+    instruction and the complete sort window before restoring retail's
+    register names.  Any source or control-flow drift is a hard failure.
+    """
+    if scope is None:
+        return lines
+    out = list(lines)
+    for func in sorted(scope):
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if len(pos) < 80:
+            raise SystemExit("--retime-model-stealth-entry: site not found: "
+                             "%s" % func)
+
+        if (out[pos[1]] != '\tsd\t$17,24($sp)' or
+                out[pos[5]] != '\tsd\t$18,32($sp)'):
+            raise SystemExit("--retime-model-stealth-entry: %s save shape "
+                             "changed: %r / %r" %
+                             (func, out[pos[1]], out[pos[5]]))
+        saved_uses = {
+            2: '\tmove\t$17,$5',
+            9: '\taddu\t$4,$17,1136',
+            10: '\taddu\t$4,$17,128',
+            12: '\taddu\t$5,$17,112',
+            14: '\taddiu\t$18,$2,%lo(s_inLayout+496) # low',
+            17: '\tmove\t$5,$18',
+            18: '\tl.s\t$f0,148($17)',
+            31: '\taddu\t$18,$18,-496',
+            36: '\tmove\t$5,$17',
+            38: '\tmove\t$6,$18',
+            39: '\tlw\t$2,712($18)',
+            43: '\tsw\t$2,712($18)',
+            73: '\tmove\t$5,$17',
+        }
+        ranges = list(range(2, 5)) + list(range(6, 80))
+        actual_uses = {n: out[pos[n]] for n in ranges
+                       if re.search(r'\$(?:17|18)\b', out[pos[n]])}
+        if actual_uses != saved_uses:
+            raise SystemExit("--retime-model-stealth-entry: %s s1/s2 live "
+                             "range changed: want %r, got %r" %
+                             (func, saved_uses, actual_uses))
+
+        bubble_expected = {
+            45: '\tlui\t$6,%hi(s_inLayout+644) # high',
+            46: '\tl.s\t$f2,s_fStealthBias',
+            47: '\tmove\t$5,$0',
+            48: '\taddiu\t$4,$6,%lo(s_inLayout+644) # low',
+            49: '\tli\t$16,8\t\t\t# 0x8',
+            50: '\tlw\t$3,-4($4)',
+            51: '\tl.s\t$f0,32($3)',
+            52: '\tc.lt.s\t$f3,$f0',
+            54: '\taddu\t$16,$16,-1',
+            55: '\tl.s\t$f1,12($3)',
+            56: '\tlw\t$2,0($4)',
+            57: '\tadd.s\t$f1,$f1,$f2',
+            58: '\tl.s\t$f0,12($2)',
+            59: '\tc.lt.s\t$f1,$f0',
+            61: '\tsw\t$2,-4($4)',
+            62: '\tli\t$5,1\t\t\t# 0x1',
+            63: '\tsw\t$3,0($4)',
+            65: '\taddu\t$4,$4,4',
+            67: '\tmove\t$5,$0',
+        }
+        for n, want in bubble_expected.items():
+            if out[pos[n]] != want:
+                raise SystemExit(
+                    "--retime-model-stealth-entry: %s instruction %d "
+                    "changed: want %r, got %r" %
+                    (func, n, want, out[pos[n]]))
+        branch_patterns = {
+            53: r'^\tbc1f\t\$L\d+$',
+            60: r'^\tbc1f\t\$L\d+$',
+            64: r'^\tbgez\t\$16,\$L\d+$',
+            66: r'^\tbne\t\$5,\$0,\$L\d+$',
+        }
+        for n, pattern in branch_patterns.items():
+            if not re.match(pattern, out[pos[n]]):
+                raise SystemExit(
+                    "--retime-model-stealth-entry: %s branch %d changed: "
+                    "%r" % (func, n, out[pos[n]]))
+        if out[pos[53]].split(',')[-1] != out[pos[60]].split(',')[-1]:
+            raise SystemExit("--retime-model-stealth-entry: %s inner branch "
+                             "targets diverged" % func)
+
+        for n in ranges:
+            line = out[pos[n]]
+            line = re.sub(r'\$17\b', '\x01', line)
+            line = re.sub(r'\$18\b', '$17', line)
+            out[pos[n]] = line.replace('\x01', '$18')
+        out[pos[1]], out[pos[5]] = out[pos[5]], out[pos[1]]
+
+        replacements = {
+            45: '\tmove\t$6,$17',
+            47: '\tmove\t$8,$0',
+            48: '\taddiu\t$3,$6,644',
+            50: '\tlw\t$7,-4($3)',
+            51: '\tl.s\t$f0,32($7)',
+            55: '\tl.s\t$f1,12($7)',
+            56: '\tlw\t$4,0($3)',
+            58: '\tl.s\t$f0,12($4)',
+            61: '\tsw\t$4,-4($3)',
+            62: '\tli\t$8,1\t\t\t# 0x1',
+            63: '\tsw\t$7,0($3)',
+            65: '\taddu\t$3,$3,4',
+            66: out[pos[66]].replace('$5,$0', '$8,$0'),
+            67: '\tmove\t$8,$0',
+        }
+        for n, line in replacements.items():
+            out[pos[n]] = line
+    return out
+
+
 def swap_fp_commutative_operands(lines, sites):
     """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
 
@@ -3258,6 +3379,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_hdd_full_setup=None,
          fill_center_branch_target=None,
          retime_model_entry_clip=None,
+         retime_model_stealth_entry=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
@@ -3344,6 +3466,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if retime_model_entry_clip is not None:
         lines = retime_model_entry_clips(lines, retime_model_entry_clip)
+
+    if retime_model_stealth_entry is not None:
+        lines = retime_model_stealth_entries(
+            lines, retime_model_stealth_entry)
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
@@ -3992,6 +4118,10 @@ if __name__ == "__main__":
                         default=None, metavar="FUNCS",
                         help="retime the validated entry block of named "
                              "model clip functions")
+    parser.add_argument("--retime-model-stealth-entry", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="retime the validated allocator and sort window "
+                             "of named model stealth functions")
     parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose three-FPR "
                              "add.s or mul.s has its two commutative source "
@@ -4082,6 +4212,7 @@ if __name__ == "__main__":
          [t for t in (args.retime_hdd_full_setup or "").split(',') if t],
          [t for t in (args.fill_center_branch_from_target or "").split(',') if t],
          scope(args.retime_model_entry_clip),
+         scope(args.retime_model_stealth_entry),
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,
