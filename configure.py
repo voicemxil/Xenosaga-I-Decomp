@@ -217,6 +217,12 @@ FILE_FIX_FLAGS = {
     "RES.c": ("--swap-regs RES_loadFile:2-3:110-116 "
               "--swap-mem-into-slot RES_loadFile:4 "
               "--post-rotate-seq RES_loadFile:46:3,RES_loadFile:47:2"),
+    "GameResource.c": (
+        "--swap-reg-sources GameResourceAlloc:17:4-18,GameResourceAlloc:19:4-18 "
+        "--rotate-seq GameResourceAlloc:13:3,GameResourceAlloc:14:2 "
+        "--swap-regs GameResourceAlloc:4-5:28,32 "
+        "--swap-regs GameResourceRealloc:6-7:23,27 "
+        "--branch-likely GameResourceRealloc:1"),
     "Disp.c": "--swap-fp-operands DispPillar:27,DispPillar:51",
     "task.c": ("--swap-regs taskItemGet:2-6:18-26,32 "
                "--swap-regs taskItemGet:2-7:18-26,32 "

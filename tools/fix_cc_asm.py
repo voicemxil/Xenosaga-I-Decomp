@@ -502,6 +502,71 @@ def swap_registers(lines, sites):
     return out
 
 
+def swap_register_sources(lines, specs):
+    """Swap two GPR tokens only in the source operands of named ALU sites.
+
+    Specs are FUNC:N:A-B, with the ordinary 0-based instruction index. This
+    covers allocator ties where two address pseudos use the opposite physical
+    registers while their destination roles must remain fixed.  Only three-
+    register addu/daddu instructions are accepted, and exactly one of A/B
+    must occur in the two source operands at every site.
+    """
+    if not specs:
+        return lines
+    parsed = {}
+    for spec in specs:
+        try:
+            func, idx_text, regs = spec.split(':')
+            idx = int(idx_text)
+            a, b = (x.lstrip('$') for x in regs.split('-'))
+        except (ValueError, TypeError):
+            raise SystemExit("--swap-reg-sources: bad spec %r "
+                             "(want FUNC:N:A-B)" % spec)
+        if idx < 0 or not all(re.match(r'^\d+$', x) for x in (a, b)):
+            raise SystemExit("--swap-reg-sources: bad index/registers in %r" %
+                             spec)
+        parsed[(func, idx)] = (a, b)
+
+    owner = function_at(lines)
+    out = []
+    idx = 0
+    prev_owner = None
+    applied = set()
+    alu = re.compile(r'^(\t(?:addu|daddu)\t)(\$\d+),(.+)$')
+    for i, line in enumerate(lines):
+        if owner[i] != prev_owner:
+            idx = 0
+            prev_owner = owner[i]
+        if RE_INSN.match(line):
+            key = (owner[i], idx)
+            if key in parsed:
+                m = alu.match(line)
+                if not m:
+                    raise SystemExit("--swap-reg-sources: %s:%d is not an "
+                                     "addu/daddu: %s" %
+                                     (owner[i], idx, line))
+                a, b = parsed[key]
+                rest = m.group(3)
+                hits = len(re.findall(r'\$(?:%s|%s)\b' %
+                                      (re.escape(a), re.escape(b)), rest))
+                if hits != 1:
+                    raise SystemExit("--swap-reg-sources: %s:%d expected "
+                                     "exactly one $%s/$%s source: %s" %
+                                     (owner[i], idx, a, b, line))
+                rest = re.sub(r'\$%s\b' % re.escape(a), '\x01', rest)
+                rest = re.sub(r'\$%s\b' % re.escape(b), '$%s' % a, rest)
+                rest = rest.replace('\x01', '$%s' % b)
+                line = "%s%s,%s" % (m.group(1), m.group(2), rest)
+                applied.add(key)
+            idx += 1
+        out.append(line)
+    missing = set(parsed) - applied
+    if missing:
+        raise SystemExit("--swap-reg-sources: site(s) not found: %s" %
+                         ",".join("%s:%d" % x for x in sorted(missing)))
+    return out
+
+
 def swap_fp_commutative_operands(lines, sites):
     """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
 
@@ -1911,6 +1976,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          swap_mem_slot=None,
          exchange_slot_prior=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
+         swap_reg_sources=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
@@ -1954,6 +2020,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
                         lo = hi = int(part)
                     spec.setdefault(fn, []).append((a, b, lo, hi))
         lines = swap_registers(lines, spec)
+
+    if swap_reg_sources:
+        lines = swap_register_sources(lines, swap_reg_sources)
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
@@ -2523,6 +2592,11 @@ if __name__ == "__main__":
                              "tie-break, "
                              "distinct from the scheduling fixers above; "
                              "repeatable for multiple FUNC:A-B sites")
+    parser.add_argument("--swap-reg-sources", default=None,
+                        metavar="SPECS",
+                        help="swap two GPRs only in the source operands of "
+                             "named addu/daddu sites; comma-separated "
+                             "FUNC:N:A-B specs")
     parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose three-FPR "
                              "add.s or mul.s has its two commutative source "
@@ -2597,6 +2671,7 @@ if __name__ == "__main__":
          [t for t in (args.exchange_slot_prior or "").split(',') if t],
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
+         [t for t in (args.swap_reg_sources or "").split(',') if t],
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,
