@@ -140,20 +140,16 @@ void taskMapChange(void *pPacket)
     }
 }
 
-/* TODO: near-miss (17/205 words) - everything is structurally right and
- * the residual is register naming in the ItemBoxTbl read: the original
- * puts the table base in $a3, the index shift in $a2 and the byte temp
- * in $v0, gcc rotates that to $a2/$v0/$a3.  Two findings did land: the
- * original computes the entry address TWICE (one base for the four byte
- * fields, another for the money word) which only appears if the reads
- * are written as ItemBoxTbl[n].field rather than through a cached
- * pointer; and the count-down credit loop is a guarded do-while
- * (blez guard, bnez back-edge), not `while (n > 0)`.  Swept: all 120
- * orderings of the five table reads, cached-pointer forms for the byte
- * and money halves, int vs short index, and moving the nCreated store.
- * Treasure-chest item-get: look the chest contents up in ItemBoxTbl,
+/* Treasure-chest item-get: look the chest contents up in ItemBoxTbl,
  * build the banner text (money, single item, or a spelled-out count),
- * credit the inventory, then tell the owning map unit it is open. */
+ * credit the inventory, then tell the owning map unit it is open.
+ *
+ * Retail computes the entry address twice: one base feeds the four byte
+ * fields and another feeds the money word.  Keeping the direct indexed reads
+ * reproduces that shape.  The guarded do-while reproduces its count-down
+ * credit loop.  The remaining GCC allocation cycle and one independent
+ * ItemBoxTbl scheduling window are encoded by audited, range-scoped fix flags
+ * rather than source-side asm. */
 void taskItemGet(EVTITEMGET *pTask)
 {
     char szMsg[64];
