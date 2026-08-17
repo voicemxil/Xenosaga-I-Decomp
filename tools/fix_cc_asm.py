@@ -836,6 +836,121 @@ def split_indexed_scan_bases(lines, specs):
     return out
 
 
+def split_symbol_offsets(lines, specs):
+    """Materialize a folded ``SYMBOL+OFFSET`` address in two additions.
+
+    FUNC:HI:LO:OFFSET names the compiler instruction indices of a matching
+    ``lui %hi(SYMBOL+OFFSET)`` / ``addiu %lo(SYMBOL+OFFSET)`` pair.  Some
+    retail objects retain the base-symbol materialization and add the field
+    offset separately, even though this compiler normally folds the constant
+    into both relocations.  Validate the complete register/symbol link and
+    requested signed-16-bit offset before rewriting it as ``%hi(SYMBOL)``,
+    ``%lo(SYMBOL)``, then ``addiu reg,reg,OFFSET``.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, hi_text, lo_text, off_text = spec.split(':')
+            hi_idx = int(hi_text)
+            lo_idx = int(lo_text)
+            want_off = int(off_text, 0)
+        except (ValueError, TypeError):
+            raise SystemExit("--split-symbol-offset: bad spec %r "
+                             "(want FUNC:HI:LO:OFFSET)" % spec)
+        if not -0x8000 <= want_off <= 0x7fff:
+            raise SystemExit("--split-symbol-offset: offset out of range in "
+                             "%s" % spec)
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if (hi_idx < 0 or lo_idx <= hi_idx or lo_idx >= len(pos)):
+            raise SystemExit("--split-symbol-offset: site not found: %s" %
+                             spec)
+        hi, lo = pos[hi_idx], pos[lo_idx]
+        mh = re.match(r'^\tlui\t(\$\d+),%hi\(([^)]+)\)(.*)$', out[hi])
+        ml = re.match(r'^\taddiu\t(\$\d+),(\$\d+),%lo\(([^)]+)\)(.*)$',
+                      out[lo])
+        if (not mh or not ml or ml.group(1) != mh.group(1)
+                or ml.group(2) != mh.group(1)
+                or ml.group(3) != mh.group(2)):
+            raise SystemExit("--split-symbol-offset: %s address pair "
+                             "changed: %r / %r" % (spec, out[hi], out[lo]))
+        suffix = "+%d" % want_off if want_off >= 0 else str(want_off)
+        if not mh.group(2).endswith(suffix):
+            raise SystemExit("--split-symbol-offset: %s folded symbol "
+                             "changed: %s" % (spec, mh.group(2)))
+        symbol = mh.group(2)[:-len(suffix)]
+        if not symbol:
+            raise SystemExit("--split-symbol-offset: empty base symbol in %s"
+                             % spec)
+        reg = mh.group(1)
+        out[hi] = "\tlui\t%s,%%hi(%s)%s" % (reg, symbol, mh.group(3))
+        out[lo] = "\taddiu\t%s,%s,%%lo(%s)%s" % (
+            reg, reg, symbol, ml.group(4))
+        out.insert(lo + 1, "\taddiu\t%s,%s,%d" % (reg, reg, want_off))
+    return out
+
+
+def hoist_int_stores_before_far_fp(lines, sites):
+    """Hoist a disjoint integer store ahead of a wrapped far FP store.
+
+    FUNC:N names the Nth adjacent ``.set push / .set mips1 / s.s / .set
+    pop / sw`` sequence in a function.  The far FP access is a macro wrapper
+    synthesized above; moving the following integer store inside the wrapper
+    under ``noreorder`` reproduces retail's store order without changing the
+    two disjoint writes.  Both offsets and their shared base are validated,
+    and every requested site must be found.
+    """
+    if not sites:
+        return lines
+    out = []
+    cur = None
+    count = 0
+    found = set()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            count = 0
+        if i + 4 < len(lines):
+            fp = re.match(r'^\t(?:s\.s|swc1)\t\$f\d+,(-?\d+)\((\$\d+)\)$',
+                          lines[i + 2])
+            integer = re.match(r'^\tsw\t\$\d+,(-?\d+)\((\$\d+)\)$',
+                               lines[i + 4])
+            shape = (line.strip() == ".set push"
+                     and lines[i + 1].strip() == ".set mips1"
+                     and fp is not None
+                     and lines[i + 3].strip() == ".set pop"
+                     and integer is not None)
+            if shape:
+                key = "%s:%d" % (cur, count)
+                if key in sites:
+                    if (fp.group(2) != integer.group(2)
+                            or abs(int(fp.group(1)) -
+                                   int(integer.group(1))) < 4):
+                        raise SystemExit(
+                            "--hoist-int-store-before-fp: %s stores may "
+                            "alias: %r / %r" %
+                            (key, lines[i + 2], lines[i + 4]))
+                    out.extend((line, "\t.set noreorder", lines[i + 4],
+                                lines[i + 1], lines[i + 2], lines[i + 3]))
+                    found.add(key)
+                    i += 5
+                    count += 1
+                    continue
+                count += 1
+        out.append(line)
+        i += 1
+    missing = set(sites) - found
+    if missing:
+        raise SystemExit("--hoist-int-store-before-fp: site(s) not found: " +
+                         ",".join(sorted(missing)))
+    return out
+
+
 def retime_root_matrix_setups(lines, specs):
     """Recover the retail root-matrix copy/count setup schedule.
 
@@ -3872,6 +3987,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_byte_guard=None, split_loop_byte=None,
          coalesce_symbol_address=None,
          split_indexed_scan_base=None,
+         split_symbol_offset=None,
          retime_root_matrix_setup=None,
          retime_rpc_call_setup=None,
          retime_resource_file_item=None,
@@ -3892,7 +4008,8 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_branch=None,
          zero_quad_store=None, fp_pair_hazard=None,
          short_loop_pad=None, byte_move=None, split_hi_lo_raw=None,
-         rebase_stack_mem=None, retarget_fp_hazard_nop=None):
+         rebase_stack_mem=None, retarget_fp_hazard_nop=None,
+         hoist_int_store_before_fp=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -3946,6 +4063,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if split_indexed_scan_base:
         lines = split_indexed_scan_bases(lines, split_indexed_scan_base)
+
+    if split_symbol_offset:
+        lines = split_symbol_offsets(lines, split_symbol_offset)
 
     if retime_root_matrix_setup:
         lines = retime_root_matrix_setups(lines, retime_root_matrix_setup)
@@ -4411,6 +4531,11 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = retarget_fp_hazard_nops(flat, retarget_fp_hazard_nop)
 
+    if hoist_int_store_before_fp:
+        flat = "\n".join(out).split("\n")
+        out = hoist_int_stores_before_far_fp(
+            flat, hoist_int_store_before_fp)
+
     with open(path, 'w') as f:
         f.write('\n'.join(out))
 
@@ -4610,6 +4735,11 @@ if __name__ == "__main__":
                         help="comma-separated FUNC:N:OFFSET:STRIDE reverse-"
                              "scan sites whose folded symbol offset and "
                              "walker lifetime must be split")
+    parser.add_argument("--split-symbol-offset", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:HI:LO:OFFSET sites whose "
+                             "folded SYMBOL+OFFSET address must be emitted "
+                             "as a base-symbol address plus addiu")
     parser.add_argument("--retime-root-matrix-setup", default=None,
                         metavar="SPECS",
                         help="comma-separated FUNC:ROOT_OFF:MODEL_OFF "
@@ -4634,6 +4764,11 @@ if __name__ == "__main__":
                         metavar="FUNCS",
                         help="comma-separated functions whose validated "
                              "local branch targets an FP hazard nop")
+    parser.add_argument("--hoist-int-store-before-fp", default=None,
+                        metavar="SITES",
+                        help="comma-separated FUNC:N wrapped far-FP stores "
+                             "whose following disjoint integer store must "
+                             "be hoisted before the macro")
     parser.add_argument("--retime-ebattle-window", default=None,
                         metavar="FUNCS",
                         help="comma-separated eBattle window functions whose "
@@ -4748,6 +4883,7 @@ if __name__ == "__main__":
          [t for t in (args.split_loop_byte_load or "").split(',') if t],
          [t for t in (args.coalesce_symbol_address or "").split(',') if t],
          [t for t in (args.split_indexed_scan_base or "").split(',') if t],
+         [t for t in (args.split_symbol_offset or "").split(',') if t],
          [t for t in (args.retime_root_matrix_setup or "").split(',') if t],
          [t for t in (args.retime_rpc_call_setup or "").split(',') if t],
          [t for t in (args.retime_resource_file_item or "").split(',') if t],
@@ -4771,4 +4907,5 @@ if __name__ == "__main__":
          scope(args.zero_quad_store), scope(args.fp_pair_hazard),
          [t for t in (args.short_loop_pad or "").split(',') if t],
          scope(args.byte_move_andi), args.split_hi_lo,
-         args.rebase_stack_mem, scope(args.retarget_fp_hazard_nop))
+         args.rebase_stack_mem, scope(args.retarget_fp_hazard_nop),
+         [t for t in (args.hoist_int_store_before_fp or "").split(',') if t])

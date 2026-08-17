@@ -303,7 +303,12 @@ FILE_FIX_FLAGS = {
                "--coalesce-symbol-address FontTest:11:13:3"),
     "Drill.c": "--mtc1-nop DrillZMoveFunc:1,DrillPowerOffFunc:1 --rotate DrillReturnFunc:139:3",
     "eMessage.c": "--rotate eMessageNextGyouMaxGet:2:-5",
-    "INIT.c": "--rotate InitEvsSymbol:33:-3,InitRetSymbol:33:-3 --rotate-seq InitShopSymbol:39:-4,InitShopSymbol:39:-3,InitSaveSymbol:39:-4,InitSaveSymbol:39:-3 --barrier-lo-load InitItemSymbol,InitItemBox",
+    "INIT.c": ("--rotate InitEvsSymbol:33:-3,InitRetSymbol:33:-3 "
+               "--rotate-seq InitShopSymbol:39:-4,InitShopSymbol:39:-3,"
+               "InitSaveSymbol:39:-4,InitSaveSymbol:39:-3 "
+               "--barrier-lo-load InitItemSymbol,InitItemBox "
+               "--split-symbol-offset InitCfSystem:101:103:480 "
+               "--hoist-int-store-before-fp InitCfSystem:0"),
     "Get.c": ("--swap-adjacent Get_Rnd:5 "
               "--fill-center-branch-from-target GetCenter:2:5"),
     "Check.c": "--mtc1-nop CheckDoorDist:0",

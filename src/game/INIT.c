@@ -937,23 +937,7 @@ void InitItemBox(MAPUNIT *pUnit)
     }
 }
 
-/* TODO: near-miss (18/128 words).  Two residuals:
- *  - the `GameLoopState.fUnk29F44 = 3.0f` store.  The original
- *    materialises the constant at the very top of the flags block but
- *    stores it AFTER the nUnk20/nUnk14 stores; putting the assignment
- *    early reproduces the early lui/mtc1 (56 -> 18 diffs) but also
- *    moves the store early.  A --rotate of the three-line window cannot
- *    fire because fix_cc_asm wraps the `s.s` macro in .set mips1/mips3
- *    and --rotate requires contiguous instruction lines.
- *  - the 32-word descending clear.  The original addresses it as
- *    &GameLoopState then a SEPARATE `addiu +480`, gcc folds the 480
- *    into the %lo; the extra instruction also shifts the loop-head
- *    alignment pad, so the one folded addiu costs three words.
- *    Swept: pointer-plus-index, char* offset and two index-range loop
- *    forms, all much worse.
- * Everything else, including the thirteen-mask flag chain, matches.
- *
- * Per-battle/per-scene system reset: reload the font for the current
+/* Per-battle/per-scene system reset: reload the font for the current
  * disc region, silence sound and vibration, rebuild the actor and map
  * layers, clear the run-time half of the game-loop flags, and reset all
  * sixteen id-lights. */
