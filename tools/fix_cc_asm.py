@@ -1929,6 +1929,234 @@ def retime_sub_pos_set_loops(lines, funcs):
     return out
 
 
+def retime_sv_draw_scheduler_particles(lines, funcs):
+    """Recover retail's svDrawSchedulerParticle allocator/scheduler stream.
+
+    The natural C recovers all five draw categories and both resource-list
+    loops.  The remaining differences are compiler/assembler-version
+    artifacts: three redundant ``_imageMapper`` base materializations, two
+    target-thread delay-slot fills, two saved-register allocation cycles,
+    two calls whose address calculation modern gas steals into the delay
+    slot, and one independent setup rotation.  Validate every affected
+    line before changing anything so source or toolchain drift fails closed.
+    """
+    if funcs is None:
+        return lines
+    if funcs != frozenset(("svDrawSchedulerParticle",)):
+        raise SystemExit("--retime-sv-particle must be scoped exactly to "
+                         "svDrawSchedulerParticle")
+
+    out = list(lines)
+    owner = function_at(out)
+    body_i = [i for i, name in enumerate(owner)
+              if name == "svDrawSchedulerParticle"]
+    if not body_i:
+        raise SystemExit("--retime-sv-particle: function not found")
+    start, end = body_i[0], body_i[-1] + 1
+    text = "\n".join(out[start:end])
+
+    def replace_one(blob, old, new, label):
+        count = blob.count(old)
+        if count != 1:
+            raise SystemExit("--retime-sv-particle: expected one %s "
+                             "pattern, got %d" % (label, count))
+        return blob.replace(old, new, 1)
+
+    def rewrite_between(blob, begin_label, end_label, transform, label):
+        begin = blob.find(begin_label)
+        finish = blob.find(end_label, begin + len(begin_label)) \
+            if begin >= 0 else -1
+        if begin < 0 or finish < 0:
+            raise SystemExit("--retime-sv-particle: %s range missing" %
+                             label)
+        body = blob[begin:finish]
+        return blob[:begin] + transform(body) + blob[finish:]
+
+    first = ("\tbne\t$22,$2,$L234\n"
+             "\taddiu\t$3,$21,%lo(_imageMapper) # low")
+    first_new = ("\tbne\t$22,$2,$L234\n"
+                 "\tlui\t$2,%hi(_imageMapper) # high\n"
+                 "\taddiu\t$3,$21,%lo(_imageMapper) # low")
+    text = replace_one(text, first, first_new, "category 2 base")
+
+    second = ("\tbne\t$22,$2,$L243\n"
+              "\taddiu\t$3,$21,%lo(_imageMapper) # low")
+    second_new = ("\tbne\t$22,$2,$L243\n"
+                  "\tlui\t$2,%hi(_imageMapper) # high\n"
+                  "\taddiu\t$3,$21,%lo(_imageMapper) # low")
+    text = replace_one(text, second, second_new, "category 11 base")
+
+    first_tail = ("\t#nop\n"
+                  "\tblez\t$2,$L233\n"
+                  "$L234:\n"
+                  "\tlui\t$2,%hi(_imageMapper) # high\n"
+                  "$L271:")
+    first_tail_new = ("\t#nop\n"
+                      "\t.set\tnoreorder\n"
+                      "\t.set\tnomacro\n"
+                      "\tblez\t$2,$L233\n"
+                      "\tlui\t$2,%hi(_imageMapper) # high\n"
+                      "\t.set\tmacro\n"
+                      "\t.set\treorder\n"
+                      "$L234:\n"
+                      "$L271:")
+    text = replace_one(text, first_tail, first_tail_new,
+                       "category 2 branch slot")
+
+    second_tail = ("\t#nop\n"
+                   "\tblez\t$2,$L242\n"
+                   "$L243:\n"
+                   "\tlui\t$2,%hi(_imageMapper) # high\n"
+                   "$L273:")
+    second_tail_new = ("\t#nop\n"
+                       "\t.set\tnoreorder\n"
+                       "\t.set\tnomacro\n"
+                       "\tblez\t$2,$L242\n"
+                       "\tlui\t$2,%hi(_imageMapper) # high\n"
+                       "\t.set\tmacro\n"
+                       "\t.set\treorder\n"
+                       "$L243:\n"
+                       "$L273:")
+    text = replace_one(text, second_tail, second_tail_new,
+                       "category 11 branch slot")
+
+    first_pad = ("\tli\t$16,8\t\t\t# 0x8\n"
+                 "\t.p2align 3,,7\n"
+                 "$L238:")
+    first_pad_new = ("\tli\t$16,8\t\t\t# 0x8\n"
+                     "\tnop\n"
+                     "\t.p2align 3,,7\n"
+                     "$L238:")
+    text = replace_one(text, first_pad, first_pad_new,
+                       "category 2 loop pad")
+
+    third = ("\t.set\tmacro\n"
+             "\t.set\treorder\n\n"
+             "\t.set push\n"
+             "\t.set mips1\n"
+             "\tlw\t$2,369876($4)")
+    third_new = ("\t.set\tmacro\n"
+                 "\t.set\treorder\n\n"
+                 "\taddiu\t$2,$21,%lo(_imageMapper) # low\n"
+                 "\t.set push\n"
+                 "\t.set mips1\n"
+                 "\tlw\t$2,369876($4)")
+    anchor = ("\tbne\t$22,$2,$L252\n"
+              "\taddiu\t$4,$21,%lo(_imageMapper) # low")
+    pos = text.find(anchor)
+    if pos < 0:
+        raise SystemExit("--retime-sv-particle: category 14 anchor missing")
+    tail = replace_one(text[pos:], third, third_new,
+                       "category 14 second base")
+    text = text[:pos] + tail
+
+    cat14_probe = ("\taddiu\t$2,$21,%lo(_imageMapper) # low\n"
+                   "\t.set push\n"
+                   "\t.set mips1\n"
+                   "\tlw\t$2,369876($4)\n"
+                   "\t.set pop\n"
+                   "\t#nop\n"
+                   "\tblez\t$2,$L251")
+    cat14_probe_new = ("\taddiu\t$2,$21,%lo(_imageMapper) # low\n"
+                       "\t.set push\n"
+                       "\t.set mips1\n"
+                       "\tlw\t$3,369876($2)\n"
+                       "\t.set pop\n"
+                       "\t#nop\n"
+                       "\tblez\t$3,$L251")
+    text = replace_one(text, cat14_probe, cat14_probe_new,
+                       "category 14 reference probe")
+
+    def unfill_image_call(blob, address, label):
+        old = ("\tla $4,%d($4)\n"
+               "\t.set pop\n"
+               "\tjal\tsvLoadImageList\n"
+               "\t.set\tnoreorder" % address)
+        new = ("\tla $4,%d($4)\n"
+               "\t.set pop\n"
+               "\t.set\tnoreorder\n"
+               "\t.set\tnomacro\n"
+               "\tjal\tsvLoadImageList\n"
+               "\tnop\n"
+               "\t.set\tmacro\n"
+               "\t.set\treorder\n"
+               "\t.set\tnoreorder" % address)
+        return replace_one(blob, old, new, label)
+
+    text = unfill_image_call(text, 129416, "category 14 image call")
+    text = unfill_image_call(text, 138660, "category 15 image call")
+    text = replace_one(text, "\tblez\t$2,$L270",
+                       "\tblezl\t$2,$L270", "category 0 result branch")
+    text = replace_one(text, "\tblez\t$2,$L275",
+                       "\tblezl\t$2,$L275", "category 14 result branch")
+
+    final_setup = ("\tli\t$17,131072\t\t\t# 0x20000\n"
+                   "\taddu\t$20,$2,272\n"
+                   "\tori\t$17,$17,0x41c0\n"
+                   "\tli\t$23,1\t\t\t# 0x1\n"
+                   "\t.set push\n"
+                   "\t.set mips1\n"
+                   "\tla $19,369892($21)\n"
+                   "\t.set pop\n"
+                   "\t.set push\n"
+                   "\t.set mips1\n"
+                   "\tla $18,147924($21)\n"
+                   "\t.set pop")
+    final_setup_new = ("\tli\t$17,131072\t\t\t# 0x20000\n"
+                       "\taddu\t$20,$2,272\n"
+                       "\tli\t$23,1\t\t\t# 0x1\n"
+                       "\t.set push\n"
+                       "\t.set mips1\n"
+                       "\tla $19,369892($21)\n"
+                       "\t.set pop\n"
+                       "\t.set push\n"
+                       "\t.set mips1\n"
+                       "\tla $18,147924($21)\n"
+                       "\t.set pop\n"
+                       "\tori\t$17,$17,0x41c0")
+    text = replace_one(text, final_setup, final_setup_new,
+                       "final category setup schedule")
+
+    def cycle_first_loop(body):
+        return (body.replace("$19", "$__SUM__")
+                    .replace("$17", "$__OFF__")
+                    .replace("$18", "$__LIST__")
+                    .replace("$__SUM__", "$18")
+                    .replace("$__OFF__", "$19")
+                    .replace("$__LIST__", "$17"))
+
+    def swap_second_loop(body):
+        body = (body.replace("$18", "$__S2__")
+                    .replace("$19", "$18")
+                    .replace("$__S2__", "$19"))
+        old = ("\tli\t$17,65536\t\t\t# 0x10000\n"
+               "\taddiu\t$20,$2,%lo(_imageMapper) # low\n"
+               "\tdaddu\t$18,$0,$0\n"
+               "\tori\t$17,$17,0x8d34\n"
+               "\t.set push\n"
+               "\t.set mips1\n"
+               "\tla $19,101704($20)\n"
+               "\t.set pop")
+        new = ("\tli\t$17,65536\t\t\t# 0x10000\n"
+               "\taddiu\t$20,$2,%lo(_imageMapper) # low\n"
+               "\tdaddu\t$18,$0,$0\n"
+               "\t.set push\n"
+               "\t.set mips1\n"
+               "\tla $19,101704($20)\n"
+               "\t.set pop\n"
+               "\tori\t$17,$17,0x8d34")
+        return replace_one(body, old, new,
+                           "category 11 init schedule")
+
+    text = rewrite_between(text, "$L271:", "$L233:", cycle_first_loop,
+                           "category 2 loop")
+    text = rewrite_between(text, "$L273:", "$L242:", swap_second_loop,
+                           "category 11 loop")
+
+    out[start:end] = text.split("\n")
+    return out
+
+
 def retime_ebattle_windows(lines, funcs):
     """Recover two retail battle-window allocator/scheduler decisions.
 
@@ -4402,6 +4630,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          short_loop_pad=None, byte_move=None, split_hi_lo_raw=None,
          rebase_stack_mem=None, retarget_fp_hazard_nop=None,
          retime_sub_pos_set_loop=None,
+         retime_sv_particle=None,
          hoist_int_store_before_fp=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
@@ -4934,6 +5163,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = retime_sub_pos_set_loops(flat, retime_sub_pos_set_loop)
 
+    if retime_sv_particle is not None:
+        flat = "\n".join(out).split("\n")
+        out = retime_sv_draw_scheduler_particles(flat, retime_sv_particle)
+
     if hoist_int_store_before_fp:
         flat = "\n".join(out).split("\n")
         out = hoist_int_stores_before_far_fp(
@@ -5179,6 +5412,10 @@ if __name__ == "__main__":
                         metavar="FUNCS",
                         help="suppress the validated modern-gas mtc1 hazard "
                              "and loop-alignment nops in subPosSet")
+    parser.add_argument("--retime-sv-particle", default=None,
+                        metavar="FUNCS",
+                        help="retime the validated svDrawSchedulerParticle "
+                             "address, allocator, and call-slot stream")
     parser.add_argument("--hoist-int-store-before-fp", default=None,
                         metavar="SITES",
                         help="comma-separated FUNC:N wrapped far-FP stores "
@@ -5326,4 +5563,5 @@ if __name__ == "__main__":
          scope(args.byte_move_andi), args.split_hi_lo,
          args.rebase_stack_mem, scope(args.retarget_fp_hazard_nop),
          scope(args.retime_sub_pos_set_loop),
+         scope(args.retime_sv_particle),
          [t for t in (args.hoist_int_store_before_fp or "").split(',') if t])

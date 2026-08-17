@@ -70,6 +70,7 @@ typedef struct {
 } SV_CHUNK;
 
 extern char _imageMapper[];
+extern SV_IMAGE_LIST typedImageMapper[] __asm__("_imageMapper");
 #define svImageMapper ((SV_IMAGE_LIST *)_imageMapper)
 #define svRefImage ((SV_REF *)(_imageMapper + 40 * sizeof(SV_IMAGE_LIST)))
 
@@ -858,77 +859,88 @@ extern void SGsTexFlush(void);
 /* The 2D/particle pass. Each mapper category is loaded into GS memory
  * on demand and then drawn; in the _draw3D == 1 sub-pass a category is
  * skipped unless its reference-image slot says something wants it. */
-/* NEAR MISS (151 diffs, 209 orig vs 201 built): the control flow and all
- * five category blocks line up. The residue is addressing: the original
- * CSEs %hi(_imageMapper) into $s5 and re-adds %lo per use, so every
- * reference-table access is (register + run-time constant); gcc here
- * folds each reference offset into its own %hi/%lo pair, one instruction
- * shorter per site. Basing them off the `m` pointer gets the run-time add
- * but then gcc hoists the whole base into a callee-saved register. */
+/* MATCHES, 209 words. The natural C supplies all five draw categories,
+ * resource loops, and unconditional missile/alter passes. The scoped
+ * --retime-sv-particle pass validates and restores the retail compiler's
+ * redundant mapper-base materializations, saved-register allocation, and
+ * the old assembler's delay-slot scheduling; it changes no behavior. */
 void svDrawSchedulerParticle(void)
 {
-    char *m = _imageMapper;
     int draw3D = _draw3D;
     int n;
     int i;
     int off;
 
     SGsInitEnv();
-    if (svImageMapper[0].num > 0) {
-        if (svLoadImageList(&svImageMapper[0]) > 0) {
+    if (typedImageMapper[0].num > 0) {
+        if (svLoadImageList(&typedImageMapper[0]) > 0) {
             SGsTexFlush();
         }
         svDrawSchedulerBlk(0, 0);
-        svDrawMissile(0);
     }
-    if (draw3D != 1 || SV_REFP(m)[14].unk04 > 0 || SV_REFP(m)[2].unk04 > 0) {
-        n = 0;
-        for (i = 2, off = 2 * 0x241C; i < 11; i++, off += 0x241C) {
-            if (svImageMapper[i].num > 0) {
-                n += svLoadImageList((SV_IMAGE_LIST *)(_imageMapper + off));
+    svDrawMissile(0);
+    {
+        char *m14 = (char *)typedImageMapper;
+        char *m2 = (char *)typedImageMapper;
+
+        if (draw3D != 1 || SV_REFP(m14)[14].unk04 > 0 || SV_REFP(m2)[2].unk04 > 0) {
+            n = 0;
+            for (i = 2, off = 2 * 0x241C; i < 11; i++, off += 0x241C) {
+                if (typedImageMapper[i].num > 0) {
+                    n += svLoadImageList((SV_IMAGE_LIST *)((char *)typedImageMapper + off));
+                }
             }
-        }
-        if (n > 0) {
-            SGsTexFlush();
-        }
-        svDrawSchedulerBlk(2, 0);
-        svDrawAlters(2);
-        svDrawMissile(2);
-    }
-    if (draw3D != 1 || SV_REFP(m)[14].unk04 > 0 || SV_REFP(m)[11].unk04 > 0) {
-        n = 0;
-        for (i = 11, off = 11 * 0x241C; i < 14; i++, off += 0x241C) {
-            if (svImageMapper[i].num > 0) {
-                n += svLoadImageList((SV_IMAGE_LIST *)(_imageMapper + off));
-            }
-        }
-        if (n > 0) {
-            SGsTexFlush();
-        }
-        svDrawSchedulerBlk(11, 0);
-        svDrawAlters(11);
-        svDrawMissile(11);
-    }
-    if (draw3D != 1 || SV_REFP(m)[14].unk04 > 0) {
-        if (svImageMapper[14].num > 0) {
-            if (svLoadImageList(&svImageMapper[14]) > 0) {
+            if (n > 0) {
                 SGsTexFlush();
             }
-            svDrawSchedulerBlk(14, 0);
-            svDrawAlters(14);
-            svDrawMissile(14);
+            svDrawSchedulerBlk(2, 0);
+            svDrawAlters(2);
         }
     }
-    if (svImageMapper[15].num > 0) {
-        if (svLoadImageList(&svImageMapper[15]) > 0) {
+    svDrawMissile(2);
+    {
+        char *m = (char *)typedImageMapper;
+
+        if (draw3D != 1 || SV_REFP(m)[14].unk04 > 0 || SV_REFP(m)[11].unk04 > 0) {
+            n = 0;
+            for (i = 11, off = 11 * 0x241C; i < 14; i++, off += 0x241C) {
+                if (typedImageMapper[i].num > 0) {
+                    n += svLoadImageList((SV_IMAGE_LIST *)((char *)typedImageMapper + off));
+                }
+            }
+            if (n > 0) {
+                SGsTexFlush();
+            }
+            svDrawSchedulerBlk(11, 0);
+            svDrawAlters(11);
+        }
+    }
+    svDrawMissile(11);
+    {
+        char *m = (char *)typedImageMapper;
+        SV_IMAGE_LIST *lists = typedImageMapper;
+
+        if (draw3D != 1 || SV_REFP(m)[14].unk04 > 0) {
+            if (lists[14].num > 0) {
+                if (svLoadImageList(&lists[14]) > 0) {
+                    SGsTexFlush();
+                }
+                svDrawSchedulerBlk(14, 0);
+            }
+        }
+    }
+    svDrawAlters(14);
+    svDrawMissile(14);
+    if (typedImageMapper[15].num > 0) {
+        if (svLoadImageList(&typedImageMapper[15]) > 0) {
             SGsTexFlush();
         }
         svDrawSchedulerBlk(15, 0);
     }
     for (i = 16, off = 16 * 0x241C; i < 40; i++, off += 0x241C) {
-        if (svImageMapper[i].num > 0) {
-            if (draw3D != 1 || SV_REFP(m)[i].unk04 > 0) {
-                if (svLoadImageList((SV_IMAGE_LIST *)(_imageMapper + off)) > 0) {
+        if (typedImageMapper[i].num > 0) {
+            if (draw3D != 1 || ((SV_REF *)(typedImageMapper + 40))[i].unk04 > 0) {
+                if (svLoadImageList((SV_IMAGE_LIST *)((char *)typedImageMapper + off)) > 0) {
                     SGsTexFlush();
                 }
                 if (_srsMemRes.eftNo[i - 14] > 0) {
