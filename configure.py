@@ -258,7 +258,10 @@ FILE_FIX_FLAGS = {
                  "--retime-rpc-call-setup sceSifCallRpc:26:88"),
     "sceFs.c": ("--swap-regs sceFsInit:2-3:31,32,37,48,74,76 "
                 "--swap-regs sceOpen:16-17:3-5,7-117 "
-                "--retime-sce-open sceOpen"),
+                "--swap-regs sceLseek:17-18 "
+                "--swap-regs sceLseek:18-19 "
+                "--retime-sce-open sceOpen "
+                "--retime-sce-lseek sceLseek"),
     "sceTty.c": ("--swap-regs sceTtyInit:3-4:16-25 "
                  "--rotate-seq sceTtyInit:19:3,sceTtyInit:20:7,"
                  "sceTtyInit:23:2,sceTtyInit:24:2,sceTtyInit:25:4,"

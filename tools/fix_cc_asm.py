@@ -1370,6 +1370,116 @@ def retime_sce_opens(lines, funcs):
     return out
 
 
+def retime_sce_lseeks(lines, funcs):
+    """Recover sceLseek's peeled async-queue probe schedule.
+
+    After the scoped allocator roles are normalized, the SDK compiler emits
+    the retail instruction set except for its first queue probe.  It fills
+    the ``q[0] != -1`` branch slot with ``i = 0`` and then
+    materializes the RPC client high half independently on both successors.
+    Retail initializes ``i`` before the load, fills the slot with the shared
+    high half, and therefore needs only one copy.  Validate the complete
+    probe and both successor prefixes before reordering and deleting that
+    duplicate.
+    """
+    if funcs is None:
+        return lines
+    unsupported = set(funcs) - {"sceLseek"}
+    if unsupported:
+        raise SystemExit('--retime-sce-lseek: unsupported function(s): ' +
+                         ','.join(sorted(unsupported)))
+    out = list(lines)
+    for func in sorted(funcs):
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if len(pos) != 136:
+            raise SystemExit('--retime-sce-lseek: %s expected 136 compiler '
+                             'instructions, got %d' % (func, len(pos)))
+        frame_expected = {
+            2: '\tsd\t$18,112($sp)',
+            6: '\tsd\t$17,96($sp)',
+            13: '\tsd\t$19,80($sp)',
+            130: '\tld\t$18,112($sp)',
+            131: '\tld\t$17,96($sp)',
+            132: '\tld\t$19,80($sp)',
+        }
+        for n, want in frame_expected.items():
+            if out[pos[n]] != want:
+                raise SystemExit('--retime-sce-lseek: %s frame instruction '
+                                 '%d changed: want %r, got %r' %
+                                 (func, n, want, out[pos[n]]))
+        expected = {
+            55: '\tlui\t$7,%hi(_sceFs_q) # high',
+            56: '\tlw\t$3,%lo(_sceFs_q)($7)',
+            57: '\tli\t$2,-1\t\t\t# 0xffffffffffffffff',
+            59: '\tmove\t$6,$0',
+            60: '\tlw\t$3,%lo(_send_data)($21)',
+            61: '\tlui\t$22,%hi(_cd) # high',
+            62: '\tlui\t$16,%hi(_rcv_data_rpc) # high',
+            67: '\tlui\t$22,%hi(_cd) # high',
+            68: '\tlui\t$16,%hi(_rcv_data_rpc) # high',
+        }
+        for n, want in expected.items():
+            if out[pos[n]] != want:
+                raise SystemExit('--retime-sce-lseek: %s instruction %d '
+                                 'changed: want %r, got %r' %
+                                 (func, n, want, out[pos[n]]))
+        branch = re.match(r'^\tbne\t\$3,\$2,(\$L\d+)$', out[pos[58]])
+        if not branch:
+            raise SystemExit('--retime-sce-lseek: %s probe branch changed: '
+                             '%r' % (func, out[pos[58]]))
+        target = branch.group(1)
+        if target + ':' not in out[pos[66] + 1:pos[67]]:
+            raise SystemExit('--retime-sce-lseek: %s probe target moved: %s' %
+                             (func, target))
+        if (pos[58] < 2 or pos[59] != pos[58] + 1
+                or out[pos[58] - 2].strip().replace('\t', ' ') !=
+                   '.set noreorder'
+                or out[pos[58] - 1].strip().replace('\t', ' ') !=
+                   '.set nomacro'
+                or out[pos[59] + 1].strip().replace('\t', ' ') !=
+                   '.set macro'
+                or out[pos[59] + 2].strip().replace('\t', ' ') !=
+                   '.set reorder'):
+            raise SystemExit('--retime-sce-lseek: %s branch directives '
+                             'changed' % func)
+
+        frame_retail = {
+            2: '\tsd\t$18,96($sp)',
+            6: '\tsd\t$17,80($sp)',
+            13: '\tsd\t$19,112($sp)',
+            130: '\tld\t$19,112($sp)',
+            131: '\tld\t$18,96($sp)',
+            132: '\tld\t$17,80($sp)',
+        }
+        for n, line in frame_retail.items():
+            out[pos[n]] = line
+
+        # Drop the successor-local RPC high half; the surviving copy moves
+        # into the branch slot and dominates both successors.
+        del out[pos[67]]
+
+        start, end = pos[55], pos[62]
+        replacement = [
+            out[pos[55]],
+            out[pos[59]],
+            out[pos[56]],
+            out[pos[57]],
+            '\t.set\tnoreorder',
+            '\t.set\tnomacro',
+            out[pos[58]],
+            out[pos[61]],
+            '\t.set\tmacro',
+            '\t.set\treorder',
+            '',
+            out[pos[60]],
+            out[pos[62]],
+        ]
+        out[start:end + 1] = replacement
+    return out
+
+
 def retime_res_model_file_names(lines, funcs):
     """Recover the retail byte-copy loop in ``RES_GetMdlFileName``.
 
@@ -3992,6 +4102,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_rpc_call_setup=None,
          retime_resource_file_item=None,
          retime_sce_open=None,
+         retime_sce_lseek=None,
          retime_res_model_file_name=None,
          retime_ebattle_window=None,
          retime_gs_zbuffer_address=None,
@@ -4078,6 +4189,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if retime_sce_open is not None:
         lines = retime_sce_opens(lines, retime_sce_open)
+
+    if retime_sce_lseek is not None:
+        lines = retime_sce_lseeks(lines, retime_sce_lseek)
 
     if retime_gs_zbuffer_address:
         lines = retime_gs_zbuffer_addresses(lines, retime_gs_zbuffer_address)
@@ -4756,6 +4870,10 @@ if __name__ == "__main__":
                         metavar="FUNCS",
                         help="comma-separated sceOpen functions with a "
                              "validated saved-register/reply-tail mismatch")
+    parser.add_argument("--retime-sce-lseek", default=None,
+                        metavar="FUNCS",
+                        help="comma-separated sceLseek functions with a "
+                             "validated peeled async-queue probe mismatch")
     parser.add_argument("--retime-res-model-file-name", default=None,
                         metavar="FUNCS",
                         help="comma-separated RES model-name byte-copy "
@@ -4888,6 +5006,7 @@ if __name__ == "__main__":
          [t for t in (args.retime_rpc_call_setup or "").split(',') if t],
          [t for t in (args.retime_resource_file_item or "").split(',') if t],
          scope(args.retime_sce_open),
+         scope(args.retime_sce_lseek),
          scope(args.retime_res_model_file_name),
          scope(args.retime_ebattle_window),
          [t for t in (args.retime_gs_zbuffer_address or "").split(',') if t],

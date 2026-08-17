@@ -156,43 +156,44 @@ extern int CrossCheckMapUnitAt(VECTOR *pPos, void *pOther, MAPUNIT_CC *pUnit);
 /* Line-of-sight scan for an aimed shot: like CrossCheckMapUnit, but it also
    skips the aiming actor's own team and units flagged 0x7000.
 
-   PARKED at 66 of 66 words -- right length, right instruction sequence,
-   but every register is rotated by one.  The cause is a single
-   allocation decision: this loop needs NINE callee-saved values (unit
-   anchor, i, pRef, the i*0x300 byte accumulator, pPos, and the four
-   constants -1 / 0x7000 / 0x10000 / 0x100000), which is exactly $s0-$s8.
-   The original spends all nine on those and rematerialises
-   %hi/%lo(MapUnit) inside the loop for the call's third argument; we
-   hoist that symbol into $s4 instead and then have nowhere to keep -1,
-   so it is rematerialised in the loop and every later register shifts.
-   Swept: the two index tests combined into one `||`, swapped, a cached
-   unit pointer for the call argument, and forming the +0xA0 sub-object
-   pointer first (the giv anchor is already correct at +0xA0 either way).
-   Permuter territory -- the C is semantically right. */
+   The original loop carries both a pointer into the current unit and a byte
+   offset from MapUnit.  Its pointer is initialized through the shape member
+   and then backed up to nTeam; that is why the prologue materializes
+   MapUnit+0x1A0 before subtracting 0x100.  Forming `unit` after the two
+   nUnkA4 tests also lets the compiler keep it in the third argument register
+   while the remaining predicates run. */
 int CrossCheckMapUnitAim(VECTOR *pPos, ACTOR_CC *pRef)
 {
     int i;
+    int offset;
+    MAPUNIT_SHAPE *shape;
+    MAPUNIT_CC *unit;
+    unsigned char *team;
 
-    for (i = 0; i < 64; i++) {
-        if (MapUnit[i].nUnkA4 == -1) {
+    shape = &MapUnit[0].shape;
+    team = (unsigned char *)shape - 0x100;
+    offset = 0;
+    for (i = 0; i < 64; i++, team += sizeof(MAPUNIT_CC), offset += sizeof(MAPUNIT_CC)) {
+        if (*(short *)(team + 4) == -1) {
             continue;
         }
-        if (MapUnit[i].nUnkA4 == 0x7000) {
+        if (*(short *)(team + 4) == 0x7000) {
             continue;
         }
-        if ((MapUnit[i].nFlags & 0x100000) != 0) {
+        unit = (MAPUNIT_CC *)((char *)MapUnit + offset);
+        if ((*(int *)(team - 0xA0) & 0x100000) != 0) {
             continue;
         }
-        if (MapUnit[i].nTeam == pRef->nTeam) {
+        if (*team == pRef->nTeam) {
             continue;
         }
-        if (MapUnit[i].shape.nType == 0) {
+        if (*(signed char *)(team + 0x12D) == 0) {
             continue;
         }
-        if ((MapUnit[i].nFlags & 0x10000) == 0) {
+        if ((*(int *)(team - 0xA0) & 0x10000) == 0) {
             continue;
         }
-        if (CrossCheckMapUnitAt(pPos, &pRef->pos, &MapUnit[i]) != 0) {
+        if (CrossCheckMapUnitAt(pPos, &pRef->pos, unit) != 0) {
             return i;
         }
     }

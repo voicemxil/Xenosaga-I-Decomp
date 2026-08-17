@@ -777,20 +777,11 @@ int sceOpen(char *name, int flags, ...)
  * SIGN FLIPPED in the request block (that is how the IOP side tells a
  * queued request from a synchronous one), and the call returns 0
  * immediately.  gcc peels the i == 0 probe out of the scan loop by
- * itself, so the source must not.
- *
- * PARKED NEAR-MISS (sceLseek), ONE WORD long, 143 vs 142.  Everything
- * else -- the request layout, both `flags & 0x8000` tests, the queue
- * scan, the whole reply tail -- is instruction-for-instruction right.
- * The residue is a delay-slot tie-break in the peeled probe: the
- * original fills the `bne` slot with the `lui %hi(_cd)` it needs later
- * and keeps `move a2,zero` (i = 0) ahead of the `lw`, where we get the
- * `move` in the slot and have to emit the `lui` in the block.  Swept:
- * `i = 0` hoisted above WaitSema (144 words), the `while` spelling (130
- * words -- gcc stops peeling), and a block-local `int *q = &_sceFs_q[i]`
- * (no change).  LAUNDER(flags) between the two 0x8000 tests IS needed
- * and is kept: without it gcc keeps the mask in a callee-saved register
- * instead of recomputing it in the second test's delay slot. */
+ * itself, so the source must not.  Storing offset before whence preserves
+ * the original request-field lifetimes.  LAUNDER(flags) between the two
+ * 0x8000 tests is required so the second test reloads the descriptor state
+ * after the RPC path may have observed it.
+ */
 
 typedef struct t_fs_send_seek {
     int   semid;
@@ -834,8 +825,8 @@ int sceLseek(int fd, int offset, int whence)
         return -9;
     }
     sd->fd = p->fd;
-    sd->whence = whence;
     sd->offset = offset;
+    sd->whence = whence;
     sd->index = p - _iob;
     sema.max_count = 1;
     sema.init_count = 0;
