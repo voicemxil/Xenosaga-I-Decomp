@@ -2620,6 +2620,7 @@ scWaitParseScript = 0x002EBEA0, 0x6C; // sc.c
 scDispatchScript = 0x002EB9D0, 0x80; // sc.c
 GameModeDebugMenu = 0x00245BA8, 0xAC; // Game.c
 CONSTRUCT_MODELSYSTEM = 0x0022E5C8, 0xA0; // nmlModel.c
+FLUSH_MODELSYSTEM = 0x0022E680, 0x90; // nmlModel.c
 scMoveParseScript = 0x002EC2A0, 0x6C; // sc.c
 sefDestroyEffect = 0x002E7010, 0x74; // sef.c
 sefDestroyEffectCf = 0x002E7088, 0x74; // sef.c

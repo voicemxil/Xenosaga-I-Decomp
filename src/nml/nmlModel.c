@@ -3143,13 +3143,9 @@ void CONSTRUCT_MODELSYSTEM(void)
     VEC_ZERO(s_inGblFogPara);
 }
 
-/* Per-frame reset of the model system.
- *
- * TODO: near-miss, 3 diffs, NOT registered. The only difference is that
- * retail issues the final `s_nMainCameraWarp = 0` store BEFORE the
- * epilogue's `ld ra`, where gcc schedules the restore first. Swept:
- * statement order, `if (pCam)` vs `if (pCam != 0)`, struct-assignment vs
- * VEC_COPY for the two camera copies, and a held source pointer. */
+/* Per-frame reset of the model system. The camera-warp flag belongs to the
+ * active-camera arm: retail's null branch skips both camera snapshots and
+ * that store, then lands directly on the epilogue. */
 void FLUSH_MODELSYSTEM(void)
 {
     void *pCam;
@@ -3171,8 +3167,8 @@ void FLUSH_MODELSYSTEM(void)
     if (pCam != 0) {
         VEC_COPY(&s_inMainCameraPos, (char *)pCam + 0xD0);
         VEC_COPY(&s_inMainCameraAng, (char *)pCam + 0xA0);
+        s_nMainCameraWarp = 0;
     }
-    s_nMainCameraWarp = 0;
 }
 
 float s_fSortOffset;
