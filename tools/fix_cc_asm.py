@@ -1396,6 +1396,96 @@ def retime_gs_reset_graphs(lines, specs):
     return out
 
 
+def retime_hdd_full_setups(lines, specs):
+    """Restore the contiguous saved-register setup in ``HddTestHddFull``.
+
+    ``FUNC:N`` identifies the strict prologue/call window.  Retail saves all
+    remaining callee-saved registers before ``sceOpen``, initializes the loop
+    counter in that call's slot, and materializes the two loop string bases
+    after the first printf.  The rebuilt compiler has the identical
+    instructions but interleaves those independent operations.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, start_text = spec.split(':')
+            start = int(start_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--retime-hdd-full-setup: bad spec %r "
+                             "(want FUNC:N)" % spec)
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        expected = [
+            '\tmove\t$18,$0',
+            '\tsd\t$19,24($sp)',
+            '\tlui\t$19,%hi($LC18) # high',
+            '\tsd\t$20,32($sp)',
+            '\tsd\t$16,0($sp)',
+            '\tsd\t$31,40($sp)',
+            '\tjal\tsceOpen',
+            '\tlui\t$20,%hi($LC17) # high',
+            '\tmove\t$17,$2',
+            '\tlui\t$4,%hi($LC16) # high',
+            '\taddiu\t$4,$4,%lo($LC16) # low',
+            '\tjal\tprintf',
+            '\tmove\t$5,$17',
+        ]
+        replacement = [
+            '\tsd\t$16,0($sp)',
+            '\tsd\t$19,24($sp)',
+            '\tsd\t$20,32($sp)',
+            '\tsd\t$31,40($sp)',
+            '\tjal\tsceOpen',
+            '\tmove\t$18,$0',
+            '\tmove\t$17,$2',
+            '\tlui\t$4,%hi($LC16) # high',
+            '\taddiu\t$4,$4,%lo($LC16) # low',
+            '\tjal\tprintf',
+            '\tmove\t$5,$17',
+            '\tlui\t$20,%hi($LC17) # high',
+            '\tlui\t$19,%hi($LC18) # high',
+        ]
+        if start < 0 or start + len(expected) > len(pos):
+            raise SystemExit("--retime-hdd-full-setup: site not found: %s" %
+                             spec)
+        got = [out[pos[start + n]] for n in range(len(expected))]
+        if got != expected:
+            for n, (want, actual) in enumerate(zip(expected, got)):
+                if want != actual:
+                    raise SystemExit(
+                        "--retime-hdd-full-setup: %s instruction %d changed: "
+                        "want %r, got %r" %
+                        (spec, start + n, want, actual))
+
+        old_pairs = ((pos[start + 6], pos[start + 7]),
+                     (pos[start + 11], pos[start + 12]))
+        for call, delay in old_pairs:
+            directives = (out[call - 2], out[call - 1],
+                          out[delay + 1], out[delay + 2])
+            if directives != ('\t.set\tnoreorder', '\t.set\tnomacro',
+                              '\t.set\tmacro', '\t.set\treorder'):
+                raise SystemExit("--retime-hdd-full-setup: %s call "
+                                 "directives changed: %r" %
+                                 (spec, directives))
+        for n, line in enumerate(replacement):
+            out[pos[start + n]] = line
+        for call, delay in old_pairs:
+            out[call - 2] = ''
+            out[call - 1] = ''
+            out[delay + 1] = ''
+            out[delay + 2] = ''
+        for call_n, delay_n in ((start + 4, start + 5),
+                                (start + 9, start + 10)):
+            out[pos[call_n]] = ('\t.set\tnoreorder\n\t.set\tnomacro\n' +
+                                out[pos[call_n]])
+            out[pos[delay_n]] = (out[pos[delay_n]] +
+                                 '\n\t.set\tmacro\n\t.set\treorder')
+    return out
+
+
 def retime_model_entry_clips(lines, scope):
     """Restore the retail entry schedule for ``nmlModelCalcEntryClip``.
 
@@ -3084,6 +3174,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_resource_file_item=None,
          retime_gs_zbuffer_address=None,
          retime_gs_reset_graph=None,
+         retime_hdd_full_setup=None,
          retime_model_entry_clip=None,
          swap_fp_operands=None,
          swap_int_operands=None,
@@ -3161,6 +3252,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if retime_gs_reset_graph:
         lines = retime_gs_reset_graphs(lines, retime_gs_reset_graph)
+
+    if retime_hdd_full_setup:
+        lines = retime_hdd_full_setups(lines, retime_hdd_full_setup)
 
     if retime_model_entry_clip is not None:
         lines = retime_model_entry_clips(lines, retime_model_entry_clip)
@@ -3800,6 +3894,10 @@ if __name__ == "__main__":
                         metavar="SPECS",
                         help="comma-separated FUNC:RESET:FLUSH:CRT GS "
                              "reset-graph schedules")
+    parser.add_argument("--retime-hdd-full-setup", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:N HDD-full prologue/call "
+                             "schedules")
     parser.add_argument("--retime-model-entry-clip", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="retime the validated entry block of named "
@@ -3891,6 +3989,7 @@ if __name__ == "__main__":
          [t for t in (args.retime_resource_file_item or "").split(',') if t],
          [t for t in (args.retime_gs_zbuffer_address or "").split(',') if t],
          [t for t in (args.retime_gs_reset_graph or "").split(',') if t],
+         [t for t in (args.retime_hdd_full_setup or "").split(',') if t],
          scope(args.retime_model_entry_clip),
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),

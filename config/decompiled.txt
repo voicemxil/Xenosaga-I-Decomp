@@ -2963,3 +2963,4 @@ PartyAttackerGet = 0x002B6240, 0x80; // Party.c
 JNT_resetMatrix = 0x003148A8, 0x18C; // JNT.c
 RSRC_loadFileSub = 0x0026DBE8, 0x190; // RSRC.c
 nmlModelCalcEntryClip = 0x00231840, 0x154; // nmlModel.c
+HddTestHddFull = 0x00255BD8, 0xBC; // HddTest.c
