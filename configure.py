@@ -256,7 +256,9 @@ FILE_FIX_FLAGS = {
     "sceSif.c": ("--swap-regs sceSifInitIopHeap:2-3:25,27 "
                  "--swap-adjacent sceSifInitIopHeap:26! "
                  "--retime-rpc-call-setup sceSifCallRpc:26:88"),
-    "sceFs.c": "--swap-regs sceFsInit:2-3:31,32,37,48,74,76",
+    "sceFs.c": ("--swap-regs sceFsInit:2-3:31,32,37,48,74,76 "
+                "--swap-regs sceOpen:16-17:3-5,7-117 "
+                "--retime-sce-open sceOpen"),
     "sceMpegDec.c": "--swap-regs _isOutSizeOK:2-3:17-22",
     "xglMc.c": "--byte-move-andi xglMcSetMapName:0,xglMcSetMapName:1",
     "sceMc.c": "--swap-adjacent sceMcRename:53",

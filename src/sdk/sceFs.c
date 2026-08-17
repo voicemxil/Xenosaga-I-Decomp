@@ -691,24 +691,7 @@ extern int _fs_version(void);
 /* sceOpen: the mode argument is variadic (open(path, flags) is legal),
  * which is what spills a2..t3 into the top of the frame.  The flags
  * word is masked to 0x6fffffff on the way out but stored UNMASKED into
- * the iob slot afterwards.
- *
- * PARKED NEAR-MISS, 30 diffs of 161 words, RIGHT LENGTH.  Everything up
- * to the reply handling is exact.  Two residues:
- *   - `name` and `sd` have swapped callee-saved registers ($s0/$s1).
- *     Moving the `sd = &_send_data` assignment earlier or later, and
- *     reordering the declarations, does not move it (66 diffs when the
- *     assignment sinks past va_arg).
- *   - the two-arm tail.  Written with two `return`s the arms are laid
- *     out exactly right but gcc coalesces `r = idx` away, so the
- *     original's `move s1,s5` is missing and the function is one word
- *     short (50 diffs / 160 words).  Written single-exit as below the
- *     `move` appears and the length is right, but the error arm then
- *     routes its value through $s1 where the original loads it straight
- *     into $v0, and the `lw v0,48(sp)` result reload schedules three
- *     slots late.  Swept: `r = idx` hoisted above the `if`, an
- *     if/else with an early return in the error arm, and LAUNDER(r)
- *     (162 words).  Wants a register tie-break, not a shape. */
+ * the iob slot afterwards. */
 int sceOpen(char *name, int flags, ...)
 {
     va_list ap;

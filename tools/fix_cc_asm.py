@@ -1169,6 +1169,92 @@ def retime_resource_file_items(lines, specs):
     return out
 
 
+def retime_sce_opens(lines, funcs):
+    """Recover the retail saved-register roles and reply tail of ``sceOpen``.
+
+    The public SDK source already emits the exact request construction and
+    control flow.  After the scoped s0/s1 live-range rename, two independent
+    differences remain: this compiler interleaves the two prologue saves and
+    carries the error result through s1, while retail keeps it in v0 and
+    schedules the success-arm iob loads before the semaphore signal.  Every
+    affected instruction and both tail labels are validated before retiming;
+    no call, memory access, or operation is added or removed.
+    """
+    if funcs is None:
+        return lines
+    out = list(lines)
+    unsupported = set(funcs) - {'sceOpen'}
+    if unsupported:
+        raise SystemExit('--retime-sce-open: unsupported function(s): ' +
+                         ','.join(sorted(unsupported)))
+    for func in sorted(funcs):
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if len(pos) != 151:
+            raise SystemExit('--retime-sce-open: %s expected 151 compiler '
+                             'instructions, got %d' % (func, len(pos)))
+        if (out[pos[1]] != '\tsd\t$17,80($sp)' or
+                out[pos[6]] != '\tsd\t$16,64($sp)'):
+            raise SystemExit('--retime-sce-open: %s prologue save shape '
+                             'changed' % func)
+
+        branch = re.match(r'^\tb\t(\$L\d+)$', out[pos[126]])
+        if not branch or out[pos[127]] != '\tlw\t$17,48($sp)':
+            raise SystemExit('--retime-sce-open: %s error-exit shape '
+                             'changed' % func)
+        result_label = branch.group(1)
+        try:
+            result_label_i = out.index(result_label + ':',
+                                       pos[127], pos[138] + 1)
+        except ValueError:
+            raise SystemExit('--retime-sce-open: %s result label moved' %
+                             func)
+        if result_label_i >= pos[138] or out[pos[138]] != '\tmove\t$2,$17':
+            raise SystemExit('--retime-sce-open: %s result merge changed' %
+                             func)
+        epilogue_labels = [line[:-1] for line in
+                           out[pos[138] + 1:pos[139]]
+                           if re.match(r'^\$L\d+:$', line)]
+        if len(epilogue_labels) != 1:
+            raise SystemExit('--retime-sce-open: %s epilogue label changed' %
+                             func)
+        epilogue_label = epilogue_labels[0]
+
+        expected = [
+            '\tlw\t$2,4($19)',
+            '\tlw\t$4,%lo(_fs_iob_semid)($16)',
+            '\tor\t$2,$2,$23',
+            '\tsw\t$2,4($19)',
+            '\tlw\t$3,48($sp)',
+            '\tjal\tSignalSema',
+            '\tsw\t$3,0($19)',
+        ]
+        got = [out[pos[n]] for n in range(131, 138)]
+        if got != expected:
+            for n, (want, actual) in enumerate(zip(expected, got), 131):
+                if want != actual:
+                    raise SystemExit('--retime-sce-open: %s instruction %d '
+                                     'changed: want %r, got %r' %
+                                     (func, n, want, actual))
+
+        out[pos[1]], out[pos[6]] = out[pos[6]], out[pos[1]]
+        out[pos[126]] = '\tb\t%s' % epilogue_label
+        out[pos[127]] = '\tlw\t$2,48($sp)'
+        replacement = [
+            '\tlw\t$3,4($19)',
+            '\tlw\t$2,48($sp)',
+            '\tlw\t$4,%lo(_fs_iob_semid)($16)',
+            '\tor\t$3,$3,$23',
+            '\tsw\t$3,4($19)',
+            '\tjal\tSignalSema',
+            '\tsw\t$2,0($19)',
+        ]
+        for n, line in enumerate(replacement, 131):
+            out[pos[n]] = line
+    return out
+
+
 def retime_res_model_file_names(lines, funcs):
     """Recover the retail byte-copy loop in ``RES_GetMdlFileName``.
 
@@ -3658,6 +3744,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_root_matrix_setup=None,
          retime_rpc_call_setup=None,
          retime_resource_file_item=None,
+         retime_sce_open=None,
          retime_res_model_file_name=None,
          retime_ebattle_window=None,
          retime_gs_zbuffer_address=None,
@@ -3736,6 +3823,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if retime_resource_file_item:
         lines = retime_resource_file_items(lines, retime_resource_file_item)
+
+    if retime_sce_open is not None:
+        lines = retime_sce_opens(lines, retime_sce_open)
 
     if retime_gs_zbuffer_address:
         lines = retime_gs_zbuffer_addresses(lines, retime_gs_zbuffer_address)
@@ -4397,6 +4487,10 @@ if __name__ == "__main__":
                         metavar="SPECS",
                         help="comma-separated FUNC:N resource-file item "
                              "finalization schedules")
+    parser.add_argument("--retime-sce-open", default=None,
+                        metavar="FUNCS",
+                        help="comma-separated sceOpen functions with a "
+                             "validated saved-register/reply-tail mismatch")
     parser.add_argument("--retime-res-model-file-name", default=None,
                         metavar="FUNCS",
                         help="comma-separated RES model-name byte-copy "
@@ -4518,6 +4612,7 @@ if __name__ == "__main__":
          [t for t in (args.retime_root_matrix_setup or "").split(',') if t],
          [t for t in (args.retime_rpc_call_setup or "").split(',') if t],
          [t for t in (args.retime_resource_file_item or "").split(',') if t],
+         scope(args.retime_sce_open),
          scope(args.retime_res_model_file_name),
          scope(args.retime_ebattle_window),
          [t for t in (args.retime_gs_zbuffer_address or "").split(',') if t],
