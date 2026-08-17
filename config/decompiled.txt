@@ -2899,6 +2899,7 @@ xglFlagsGet = 0x00222A50, 0x74; // xglFlags.c
 tskUmnMailExWin = 0x00A082E0, 0x41C; // tskUmn.c
 sceSifInitIopHeap = 0x00207468, 0x88; // sceSif.c
 HitCheckCorner = 0x002C0840, 0x240; // Hit.c
+HitCheckMapUnitWithNyuru = 0x002BFFE8, 0x240; // Hit.c
 UmnDataBaseModel = 0x00A0B028, 0x1B0; // tskUmn.c
 xglMpeg2InfoInit2 = 0x00222748, 0xFC; // xglMovie.c
 UmnPlugin = 0x00A0E6F8, 0x23C; // tskUmn.c

@@ -700,38 +700,32 @@ int HitCheckCorner(void *position, void *map_unit)
     return 0;
 }
 
-/* PARKED at 143 of 144 words. The -1 fill, the collection scan (including
-   the loop-invariant 0x100000/0x10000 masks retail keeps in $s6/$s5), the
-   count dispatch, the save/restore quadword copies, the switch and the
-   position fixup are all the right instructions in the right order; what
-   is left is one word and a callee-saved rotation that follows from it.
-
-   The one word: retail loads `*p` afresh at the top of the slide loop
-   where ee-gcc reuses the copy the loop-bottom test already loaded (a
-   `move` instead of a `lw`, and one fewer nop). Swept: a `do/while` with
-   an explicit `if (list[0] != -1)` guard, a plain `while (*p != -1)`, and
-   reading the index into a local before advancing `p` -- gcc CSEs the two
-   loads in all three, because `list` is a local array that never escapes.
-   The same CSE is what makes the count==1 test a `bnel` (retail: `bne`
-   with the `lw list[0]` unconditional in its delay slot).
-
-   Solved and not to be re-swept: the three exits must be SEPARATE `return
-   0` statements, not one `if (count != 0) { ... }` wrapper -- the wrapper
-   sends the count==0 case to a shared exit block and loses retail's
-   `move v0,zero` in the branch delay slot (worth 2 words), and the two
-   `move.value = 0.0f` stores are written x-then-z because gcc reverses
-   that pair, the same way HitCheckNyuru above does.
-
-   Slide the probe out of every map unit it is standing in. Collect the
+/* Slide the probe out of every map unit it is standing in. Collect the
    units it hits, and if there is more than one, try each unit's own slide
    in turn until one of them leaves the probe clear; if none does, back the
-   probe out along the accumulated offset and give up. */
+   probe out along the accumulated offset and give up.
+
+   The volatile stack list and separate collection/slide cursors recover
+   retail's two distinct aliasing roles. The guard deliberately reads
+   through a non-volatile view: ee-gcc may schedule that speculative load
+   into the preceding branch slot, while the volatile body read remains a
+   separate load at the loop head.
+
+   TODO: find a natural source shape that gives the final map-base/shape
+   constant allocation and four-instruction setup order directly. The
+   current range-scoped --swap-regs/--rotate-seq correction in configure.py
+   is a pure allocator/scheduler permutation and is checked by
+   tools/audit_swaps.py. */
 int HitCheckMapUnitWithNyuru(HitNyuruProbe *probe)
 {
-    int list[64];
+    volatile int list[64];
     HitMapUnit *unit;
-    int *p;
+    volatile int *list_out;
+    volatile int *p;
     int count;
+    int empty_index;
+    int excluded_mask;
+    int active_mask;
     int i;
 
     for (i = 63; i >= 0; i--) {
@@ -739,23 +733,27 @@ int HitCheckMapUnitWithNyuru(HitNyuruProbe *probe)
     }
     count = 0;
     unit = (HitMapUnit *)(D_0047AEC0 - 0x1A0);
-    p = list;
-    for (i = 0; i < 64; i++, unit++) {
-        if (unit->index == -1) {
+    i = 0;
+    empty_index = -1;
+    excluded_mask = 0x100000;
+    active_mask = 0x10000;
+    list_out = list;
+    for (; i < 64; i++, unit++) {
+        if (unit->index == empty_index) {
             continue;
         }
-        if (unit->status & 0x100000) {
+        if (unit->status & excluded_mask) {
             continue;
         }
         if (unit->shape.active == 0) {
             continue;
         }
-        if ((unit->status & 0x10000) == 0) {
+        if ((unit->status & active_mask) == 0) {
             continue;
         }
         if (HitCheckMapUnitAt(probe, unit) != 0) {
-            *p = i;
-            p++;
+            *list_out = i;
+            list_out++;
             count++;
         }
     }
@@ -765,30 +763,35 @@ int HitCheckMapUnitWithNyuru(HitNyuruProbe *probe)
     if (count == 1) {
         return HitCheckNyuru(probe, &MapUnit[list[0]]);
     }
-    p = list;
-    while (*p != -1) {
-        int index = *p;
-        HitMapUnit *u;
-        HitAlignedVector save_pos;
-        HitAlignedVector save_move;
+    if (*(int *)list != -1) {
+        HitMapUnit *map_units = MapUnit;
 
-        p++;
-        u = &MapUnit[index];
-        save_pos = probe->position;
-        save_move = probe->move;
-        switch (u->shape.active) {
-        case 1:
-            NyuruCircle(probe, u);
-            break;
-        case 2:
-            NyuruMatrix(probe, u, 1);
-            break;
-        }
-        if (HitCheckMapUnit(probe) == -1) {
-            return 1;
-        }
-        probe->position = save_pos;
-        probe->move = save_move;
+        p = list;
+        do {
+            int index = *p;
+            HitMapUnit *u;
+            HitAlignedVector save_pos;
+            HitAlignedVector save_move;
+
+            p++;
+            u = (HitMapUnit *)((unsigned int)(index * sizeof(*map_units)) +
+                               (unsigned int)map_units);
+            save_pos = probe->position;
+            save_move = probe->move;
+            switch (u->shape.active) {
+            case 1:
+                NyuruCircle(probe, u);
+                break;
+            case 2:
+                NyuruMatrix(probe, u, 1);
+                break;
+            }
+            if (HitCheckMapUnit(probe) == -1) {
+                return 1;
+            }
+            probe->position = save_pos;
+            probe->move = save_move;
+        } while (*(int *)p != -1);
     }
     probe->position.value.x = probe->position.value.x - probe->move.value.x;
     probe->position.value.z = probe->position.value.z - probe->move.value.z;

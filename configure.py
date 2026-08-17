@@ -211,7 +211,9 @@ FILE_FIX_FLAGS = {
                 "Enemy_Route_Chase:61:2,Enemy_Route_Chase:63:2,Enemy_Route_Chase:65:2"),
     "HddTest.c": "--swap-regs HddTest1024Save:2-3:16-17",
     "xglHdd.c": "--swap-regs xglHddMcCheckCore:10-11:50 --swap-regs xglHddMcCheckCore:3-10:52-55 --swap-regs xglHddMcCheckCore:11-3:52 --rotate xglHddMcCheckYourSaves:1:3 --split-hi-lo xglHddMcCheckYourSaves:1:2",
-    "Hit.c": "--rotate HitCheckCorner:17:5",
+    "Hit.c": ("--rotate HitCheckCorner:17:5 "
+              "--swap-regs HitCheckMapUnitWithNyuru:19-20:73-91 "
+              "--rotate-seq HitCheckMapUnitWithNyuru:72:3,HitCheckMapUnitWithNyuru:73:-3"),
     "sceSif.c": "--swap-regs sceSifInitIopHeap:2-3:25,27 --swap-adjacent sceSifInitIopHeap:26!",
     "sceFs.c": "--swap-regs sceFsInit:2-3:31,32,37,48,74,76",
     "sceMpegDec.c": "--swap-regs _isOutSizeOK:2-3:17-22",
