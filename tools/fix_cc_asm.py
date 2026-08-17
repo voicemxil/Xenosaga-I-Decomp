@@ -550,6 +550,49 @@ def swap_fp_commutative_operands(lines, sites):
     return out
 
 
+def swap_int_commutative_operands(lines, sites):
+    """Swap rs/rt at named three-GPR commutative instruction sites.
+
+    This is the integer counterpart of --swap-fp-operands.  It accepts only
+    addu/daddu/and/or/xor/nor, never changes the destination or opcode, and
+    uses the same 0-based FUNC:N instruction indexing convention.
+    """
+    if not sites:
+        return lines
+    owner = function_at(lines)
+    out = []
+    idx = 0
+    prev_owner = None
+    applied = set()
+    commutative = re.compile(
+        r'^(\t(?:addu|daddu|and|or|xor|nor)\t)(\$\d+)\s*,\s*'
+        r'(\$\d+)\s*,\s*(\$\d+)(.*)$')
+    for i, line in enumerate(lines):
+        if owner[i] != prev_owner:
+            idx = 0
+            prev_owner = owner[i]
+        is_insn = bool(RE_INSN.match(line))
+        if is_insn:
+            key = "%s:%d" % (owner[i], idx)
+            if key in sites:
+                m = commutative.match(line)
+                if not m:
+                    raise SystemExit(
+                        "--swap-int-operands: %s is not an accepted "
+                        "three-register commutative instruction: %s" %
+                        (key, line))
+                prefix, rd, rs, rt, suffix = m.groups()
+                line = "%s%s,%s,%s%s" % (prefix, rd, rt, rs, suffix)
+                applied.add(key)
+            idx += 1
+        out.append(line)
+    missing = set(sites) - applied
+    if missing:
+        raise SystemExit("--swap-int-operands: site(s) not found: %s" %
+                         ",".join(sorted(missing)))
+    return out
+
+
 def rematerialize_call_constants(lines, specs):
     """Undo one over-aggressive constant live range across a call.
 
@@ -1690,6 +1733,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
          swap_fp_operands=None,
+         swap_int_operands=None,
          remat_call_constants=None,
          rotate_seq=None, hoist_div_arg=None, retime_branch=None,
          zero_quad_store=None, fp_pair_hazard=None,
@@ -1732,6 +1776,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
+
+    if swap_int_operands is not None:
+        lines = swap_int_commutative_operands(lines, swap_int_operands)
 
     if remat_call_constants is not None:
         lines = rematerialize_call_constants(lines, remat_call_constants)
@@ -2265,6 +2312,11 @@ if __name__ == "__main__":
                              "add.s or mul.s has its two commutative source "
                              "operands exchanged; destination and opcode are "
                              "unchanged")
+    parser.add_argument("--swap-int-operands", default=None, metavar="SITES",
+                        help="comma-separated FUNC:N sites whose accepted "
+                             "three-GPR commutative instruction has its two "
+                             "source operands exchanged; destination and "
+                             "opcode are unchanged")
     parser.add_argument("--remat-call-constant", action="append", default=None,
                         metavar="FUNC:SAVED-CALLER-CARRY:VALUE",
                         help="strictly replace one callee-saved integer "
@@ -2328,6 +2380,7 @@ if __name__ == "__main__":
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
          scope(args.swap_fp_operands),
+         scope(args.swap_int_operands),
          args.remat_call_constant,
          [t for t in (args.rotate_seq or "").split(',') if t],
          scope(args.hoist_div_arg),

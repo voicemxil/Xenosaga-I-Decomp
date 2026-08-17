@@ -221,6 +221,10 @@ FILE_FIX_FLAGS = {
                "--swap-regs taskItemGet:2-3:35,38 "
                "--swap-adjacent taskItemGet:17 "
                "--rotate taskItemGet:19:4"),
+    "nmlPacket.c": ("--swap-regs nmlPacketAddGifTag:16-17:25,36 "
+                    "--swap-int-operands nmlPacketAddGifTag:25 "
+                    "--rotate-seq nmlPacketAddGifTag:24:4,"
+                    "nmlPacketAddGifTag:26:2,nmlPacketAddGifTag:27:3"),
     "sceSif.c": "--swap-regs sceSifInitIopHeap:2-3:25,27 --swap-adjacent sceSifInitIopHeap:26!",
     "sceFs.c": "--swap-regs sceFsInit:2-3:31,32,37,48,74,76",
     "sceMpegDec.c": "--swap-regs _isOutSizeOK:2-3:17-22",

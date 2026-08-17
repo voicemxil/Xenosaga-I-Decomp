@@ -2442,6 +2442,7 @@ Disp_EnemyMark = 0x002CE7A8, 0x48; // Disp.c
 DispPillar = 0x002C87E8, 0x188; // Disp.c
 tskUmnSimulationList = 0x00A0BEE8, 0x2E0; // tskUmn.c
 taskItemGet = 0x002C6388, 0x334; // task.c
+nmlPacketAddGifTag = 0x00239000, 0x1AC; // nmlPacket.c
 TitleGameInit = 0x00A017A0, 0x50; // Title.c
 UmnEventTextNumberGet = 0x00A0EB28, 0x88; // Umn.c
 Java_xeno_util_Runtime_setPartyData__II = 0x002F7CD0, 0xF4; // Java_util.c

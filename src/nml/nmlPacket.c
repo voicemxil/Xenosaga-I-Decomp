@@ -1015,30 +1015,15 @@ void nmlPacketSendCircleTexture(u_int nAddr, void *pData)
                  0, 0, 0);
 }
 
-/* TODO: near-miss, 6 diffs of 107 words, NOT registered.  Right length,
- * right control flow, right constants, right registers everywhere except
- * one: the original merges the PRIM bits with `or s1,s1,s0` (into
- * nBase's own register) and we get `or s0,s1,s0` (into nOn's).  Because
- * our `or` no longer reads s1 afterwards, the four setup instructions
- * around it (lui 0x8 / lui 0xfff7 / nor / ori) also come out in a
- * different order -- fix the destination and the order follows.
- * Swept and REJECTED (all worse):
- *   `nBase |= nOn << 20;` and `inTag.w[1] |= (nBase |= ...)`  -- 11, and
- *      they rotate the whole constant allocation ($v1/$a0/$t1 -> one
- *      register short: 0x80000 and the or-result get coalesced)
- *   `(nOn << 20) | nBase`, a named nTag temp, `nOn <<= 20` first (13),
- *      `nOn <<= 20` + assign back to nBase (17), nOn shifted at its
- *      definition (17), nMask hoisted to just before its use (69),
- *      nMask written `~(0x80000 | nBase)` / `& ~0x80000` (11),
- *      LAUNDER_V on nOn (23) or on nBase (20) after the merge.
- * The union type IS load-bearing and must stay: with `u_int aTag[4]` +
- * `*(TI *)aTag` gcc hoists the `lw 4(sp)` ABOVE the `sq` that fills the
- * buffer -- 18 diffs and a genuine aliasing miscompile.  This one is
- * good permuter material: it is a pure register tie-break.
- */
 /* Copy the model's GIF tag template, patch its PRIM word for the given
  * primitive and the layout's alpha/blend status bits, and unpack it into
- * the three microprogram tag slots (0x3F3, 0x3F4, 0x3F2). */
+ * the three microprogram tag slots (0x3F3, 0x3F4, 0x3F2).
+ *
+ * The union is load-bearing: it preserves the alias between the quadword
+ * store and subsequent word accesses.  An integer array lets GCC hoist the
+ * word load above the store.  Retail keeps the merged PRIM bits in nBase's
+ * register; the remaining allocator, commutative-or, and setup scheduling
+ * ties are corrected by audited, range-scoped flags. */
 typedef union {
     TI q;
     u_int w[4];
