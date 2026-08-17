@@ -1846,6 +1846,89 @@ def retarget_fp_hazard_nops(lines, funcs):
     return out
 
 
+def retime_sub_pos_set_loops(lines, funcs):
+    """Suppress modern gas's two spurious nops at subPosSet's loop head.
+
+    The natural C emits retail's complete 126-word function, but
+    modern gas treats the last hoisted ``mtc1`` as a blanket COP1 hazard
+    even though the following instruction is an integer load. Together
+    with gcc's loop ``.p2align 3,,7``, that grows the object by two nops.
+    The old assembler emitted neither one. Put only the validated
+    mtc1-to-lw window in noreorder mode and lower that already-aligned loop
+    label to four-byte alignment. The complete constants/loop/backedge
+    fingerprint makes any source, register-allocation, or control-flow
+    drift fail closed instead of silently retiming a different stream.
+    """
+    if funcs is None:
+        return lines
+    if funcs != frozenset(("subPosSet",)):
+        raise SystemExit("--retime-sub-pos-set-loop must be scoped exactly "
+                         "to subPosSet")
+
+    out = list(lines)
+    owner = function_at(out)
+    body_i = [i for i, name in enumerate(owner) if name == "subPosSet"]
+    if not body_i:
+        raise SystemExit("--retime-sub-pos-set-loop: subPosSet not found")
+    start, end = body_i[0], body_i[-1] + 1
+    body = out[start:end]
+
+    if (sum(line.strip() == ".p2align 3,,7" for line in body) != 6 or
+            not any(line.startswith("\t.frame\t$sp,112,$31")
+                    for line in body) or
+            sum(line == "\tjal\tsubPosSet" for line in body) != 1):
+        raise SystemExit("--retime-sub-pos-set-loop: function skeleton "
+                         "changed")
+
+    anchor = [
+        "\tlui\t$1,49808",
+        "\tmtc1\t$1,$f21",
+        "\tlui\t$1,17040",
+        "\tmtc1\t$1,$f20",
+        "\t.p2align 3,,7",
+    ]
+    sites = [i for i in range(len(body) - len(anchor) + 1)
+             if body[i:i + len(anchor)] == anchor]
+    if len(sites) != 1:
+        raise SystemExit("--retime-sub-pos-set-loop: constant/alignment "
+                         "fingerprint changed")
+
+    mtc1_i = start + sites[0] + 3
+    label = out[mtc1_i + 2]
+    if not re.match(r'^\$L\d+:$', label):
+        raise SystemExit("--retime-sub-pos-set-loop: loop label changed")
+    if out[mtc1_i + 3:mtc1_i + 11] != [
+            "\tlw\t$4,0($18)",
+            "\t#nop",
+            "\ts.s\t$f25,32($4)",
+            "\tl.s\t$f0,40($16)",
+            "\tsw\t$0,36($4)",
+            "\tadd.s\t$f0,$f0,$f24",
+            "\t.set\tnoreorder",
+            "\t.set\tnomacro",
+    ]:
+        raise SystemExit("--retime-sub-pos-set-loop: loop head changed")
+    case_branch = re.match(r'^\tbeq\t\$3,\$20,(\$L\d+)$',
+                           out[mtc1_i + 11])
+    if (case_branch is None or
+            body.count(case_branch.group(1) + ":") != 1):
+        raise SystemExit("--retime-sub-pos-set-loop: case branch changed")
+    if not any(out[i] == "\tbne\t$2,$0,%s" % label[:-1]
+               for i in body_i):
+        raise SystemExit("--retime-sub-pos-set-loop: backedge changed")
+
+    out[mtc1_i:mtc1_i + 4] = [
+        "\t.set\tpush",
+        "\t.set\tnoreorder",
+        "\tmtc1\t$1,$f20",
+        "\t.p2align 2",
+        label,
+        "\tlw\t$4,0($18)",
+        "\t.set\tpop",
+    ]
+    return out
+
+
 def retime_ebattle_windows(lines, funcs):
     """Recover two retail battle-window allocator/scheduler decisions.
 
@@ -4318,6 +4401,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          zero_quad_store=None, fp_pair_hazard=None,
          short_loop_pad=None, byte_move=None, split_hi_lo_raw=None,
          rebase_stack_mem=None, retarget_fp_hazard_nop=None,
+         retime_sub_pos_set_loop=None,
          hoist_int_store_before_fp=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
@@ -4846,6 +4930,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = retarget_fp_hazard_nops(flat, retarget_fp_hazard_nop)
 
+    if retime_sub_pos_set_loop is not None:
+        flat = "\n".join(out).split("\n")
+        out = retime_sub_pos_set_loops(flat, retime_sub_pos_set_loop)
+
     if hoist_int_store_before_fp:
         flat = "\n".join(out).split("\n")
         out = hoist_int_stores_before_far_fp(
@@ -5087,6 +5175,10 @@ if __name__ == "__main__":
                         metavar="FUNCS",
                         help="comma-separated functions whose validated "
                              "local branch targets an FP hazard nop")
+    parser.add_argument("--retime-sub-pos-set-loop", default=None,
+                        metavar="FUNCS",
+                        help="suppress the validated modern-gas mtc1 hazard "
+                             "and loop-alignment nops in subPosSet")
     parser.add_argument("--hoist-int-store-before-fp", default=None,
                         metavar="SITES",
                         help="comma-separated FUNC:N wrapped far-FP stores "
@@ -5233,4 +5325,5 @@ if __name__ == "__main__":
          [t for t in (args.short_loop_pad or "").split(',') if t],
          scope(args.byte_move_andi), args.split_hi_lo,
          args.rebase_stack_mem, scope(args.retarget_fp_hazard_nop),
+         scope(args.retime_sub_pos_set_loop),
          [t for t in (args.hoist_int_store_before_fp or "").split(',') if t])

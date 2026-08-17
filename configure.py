@@ -274,7 +274,8 @@ FILE_FIX_FLAGS = {
     "sceMc.c": "--swap-adjacent sceMcRename:53",
     "sceVif1PkRefLoadImage.c": "--swap-regs sceVif1PkRefLoadImage:5-6:89-98 --swap-regs sceVif1PkRefLoadImage:16-20:91,98",
     "xglMenu.c": "--rotate-seq xglMenuDrawType1Sub:11:3,xglMenuDrawType1Sub:12:2",
-    "sub.c": "--swap-adjacent subJoutoPosSet:58",
+    "sub.c": ("--swap-adjacent subJoutoPosSet:58 "
+              "--retime-sub-pos-set-loop subPosSet"),
     "sef.c": "--branch-likely sefAllocLocalData:2",
     "sc.c": ("--branch-likely scDispatchScript:4 "
              "--exchange-slot-prior scInitScript:2:2,scParseScript:0:1 "

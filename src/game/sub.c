@@ -800,13 +800,12 @@ int subLine2_OpenType_0(ETLINE2 *p)
     return 0;
 }
 
-/* PARKED at 128 words vs 126 -- every instruction of the body matches
-   one-for-one and the whole difference is TWO nops the assembler puts
-   between the last hoisted constant (`mtc1 $at,$f20`) and the loop top.
-   gcc emits `.p2align 3,,7` before this loop and gas pads it; the
-   original build has no padding there at all. fix_cc_asm is NOT the
-   source (running it over the .s leaves the site untouched), so this is
-   an assembler alignment/COP1-hazard interaction, not a source shape.
+/* MATCHES, 126 words. Every instruction comes from the natural C body.
+   Modern gas otherwise inserts two extra nops between the last hoisted
+   constant (`mtc1 $at,$f20`) and the loop top: one conservative COP1
+   hazard and one `.p2align 3,,7` pad. The scoped, fully fingerprinted
+   --retime-sub-pos-set-loop pass suppresses only that assembler-version
+   difference; the original object has neither nop at this site.
 
    Everything else here IS solved and should not be re-swept:
      * the fan-out dispatch is a SWITCH, not an if/else-if chain. gcc
