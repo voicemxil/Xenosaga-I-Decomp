@@ -269,9 +269,9 @@ void Enemy_Found(ACTOR *a)
     }
 }
 
-/* Follow the nearest point on the escape route and update movement
-   TODO: near-match - all 147 instructions match as a multiset; gcc schedules
-   eleven call-setup positions differently before the second spline lookup */
+/* Follow the nearest point on the escape route and update movement.
+   Byte-exact: the second spline lookup uses audited scheduling fixes for
+   its independent argument setup around the R5900 divide-zero guard. */
 void Enemy_Escape(ACTOR *a)
 {
     static u16 CoolDown;
@@ -337,9 +337,8 @@ void Enemy_Escape(ACTOR *a)
     }
 }
 
-/* Follow the nearest point on the chase route and update movement
-   TODO: near-match - all 143 instructions match as a multiset; it has the
-   same eleven-position second spline-call schedule as Enemy_Escape */
+/* Follow the nearest point on the chase route and update movement.
+   Byte-exact via the same audited second-call scheduling as Enemy_Escape. */
 void Enemy_Route_Chase(ACTOR *a)
 {
     static u16 CoolDown;

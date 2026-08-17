@@ -31,6 +31,89 @@ extern int retval;           /* 0x00998500, RPC reply word */
 extern int mcRunCmdNo;       /* 0x004AD488, command currently in flight */
 extern int semaidRegFunc;    /* 0x004AD48C, module semaphore id */
 
+typedef struct sceMcSemaParam {
+    int currentCount;
+    int maxCount;
+    int initCount;
+    int numWaitThreads;
+    int attr;
+    int option;
+} sceMcSemaParam;
+
+extern int CreateSema(sceMcSemaParam *param);
+extern int WaitSema(int sid);
+extern int sceSifInitRpc(int mode);
+extern int sceSifBindRpc(void *client, unsigned int sid, int mode);
+extern int sceMcSync(int mode, int *cmd, int *result);
+extern int printf(const char *fmt, ...);
+extern char D_004D5870[];
+extern char D_004D5888[];
+extern char D_004D58B0[];
+
+/* TODO: Ghidra-derived natural-C reconstruction currently emits 103
+ * instructions versus the original 109.  The compiler collapses the
+ * client/send/reply aliases that the original kept in saved registers. */
+int sceMcInit(void)
+{
+    sceMcSemaParam sema;
+    int i;
+    int rpcResult;
+    int *client;
+    int *rpcClient;
+    int *send;
+    int *reply;
+
+    if (semaidRegFunc < 0) {
+        sema.option = 0;
+        sema.initCount = 1;
+        sema.maxCount = 1;
+        semaidRegFunc = CreateSema(&sema);
+    }
+
+    sceMcSync(0, 0, 0);
+    WaitSema(semaidRegFunc);
+    sceSifInitRpc(0);
+    send = sifParamOrd;
+    reply = &retval;
+
+    goto bind;
+
+delay:
+    for (i = 0x100000; i != 0; i--)
+        ;
+
+bind:
+    rpcResult = sceSifBindRpc(mcClientID, 0x80000400, 0);
+    if (rpcResult < 0) {
+        printf(D_004D5870);
+        for (;;)
+            ;
+    }
+    client = mcClientID;
+    if (client[9] == 0)
+        goto delay;
+    rpcClient = client;
+
+    rpcResult = sceSifCallRpc(rpcClient, 0xFE, 0, send, 48,
+                              reply, 12, 0, 0);
+    SignalSema(semaidRegFunc);
+    if (rpcResult < 0) {
+        rpcClient[9] = 0;
+        return rpcResult - 100;
+    }
+    if (reply[1] < 0x20A) {
+        printf(D_004D5888);
+        rpcClient[9] = 0;
+        return -120;
+    }
+    if (reply[2] < 0x20E) {
+        printf(D_004D58B0);
+        client[9] = 0;
+        return -121;
+    }
+    return reply[0];
+}
+
 extern int sceMcOpen(int port, int slot, const char *name, int flags);
 
 /* sceMcMkdir: opens the directory with sceMcOpen (mode 64, i.e.

@@ -429,12 +429,13 @@ int sizeofDescripter(char **ppSig)
     int nSize;
 
     nSize = 0;
-    do {
+    for (;;) {
         n = sizeofDescripterType(ppSig);
         nRet = nSize;
         nSize += n;
-    } while (n >= 0);
-    return nRet;
+        if (n < 0)
+            return nRet;
+    }
 }
 
 /* Split a method descriptor "(args)R" into the argument stack size, the
@@ -500,6 +501,122 @@ void *loadArray(STRENTRY *pName)
     return 0;
 }
 
+extern STRENTRY **constStringTable;
+extern void *NAME_Init;
+extern void *NAME_Constructor;
+extern void *TYPE_Chr_talk;
+extern void *TYPE_Stage_entered;
+extern void *TYPE_Void;
+extern void *ATTR_SourceFile;
+extern void *ATTR_InnerClasses;
+extern void *ATTR_Code;
+extern void *ATTR_Exceptions;
+extern void *ATTR_LineNumberTable;
+extern void *ATTR_ConstantValue;
+extern void *ATTR_LocalVariableTable;
+extern void (*jthreadResetFunc)(void);
+extern void *jthreadTop;
+extern int initVMThread;
+extern short XTK_peerGroup[4];
+
+extern char D_004CD0C0[];
+extern char D_004CD0D0[];
+extern char D_004CD0E0[];
+extern char D_004CD0F0[];
+extern char D_004CD100[];
+extern char D_004CD110[];
+extern char D_004CD120[];
+extern char D_004DBFE0[];
+extern char D_004DBFE8[];
+extern char D_004DBFF0[];
+extern char D_004DBFF8[];
+
+extern int JNI_createThread(int nClass, int nStack, int nSize);
+void initBaseClasses(void);
+
+/* Initialize the interpreter's heap, intern its reserved names and
+ * attribute keys, create the bootstrap thread, and clear the four peer
+ * group halfwords. */
+void initVM(void)
+{
+    short *p;
+    int i;
+    void *pLocalVariableTable;
+
+    xheap_init(1, 0, 0);
+    classEntryPool = 0;
+    constStringTable = 0;
+    NAME_Init = loadConstString(D_004CD0C0, -1);
+    NAME_Constructor = loadConstString(D_004DBFE0, -1);
+    TYPE_Chr_talk = loadConstString(D_004DBFE8, -1);
+    TYPE_Stage_entered = loadConstString(D_004DBFF0, -1);
+    TYPE_Void = loadConstString(D_004DBFE8, -1);
+    ATTR_SourceFile = loadConstString(D_004CD0D0, -1);
+    ATTR_InnerClasses = loadConstString(D_004CD0E0, -1);
+    ATTR_Code = loadConstString(D_004DBFF8, -1);
+    ATTR_Exceptions = loadConstString(D_004CD0F0, -1);
+    ATTR_LineNumberTable = loadConstString(D_004CD100, -1);
+    ATTR_ConstantValue = loadConstString(D_004CD110, -1);
+    pLocalVariableTable = loadConstString(D_004CD120, -1);
+    jthreadResetFunc = 0;
+    ATTR_LocalVariableTable = pLocalVariableTable;
+    jthreadTop = 0;
+    initVMThread = JNI_createThread(0, 8, 0x40);
+    initBaseClasses();
+    i = 3;
+    p = &XTK_peerGroup[3];
+    do {
+        i--;
+        *p = 0;
+        p--;
+    } while (i >= 0);
+}
+
+extern JCLASS *classBoolean;
+extern JCLASS *classByte;
+extern JCLASS *classChar;
+extern JCLASS *classShort;
+extern JCLASS *classInt;
+extern JCLASS *classLong;
+extern JCLASS *classFloat;
+extern JCLASS *classDouble;
+extern JCLASS *primitiveClassTable[12];
+
+extern char D_004DC000[];
+extern char D_004DC008[];
+extern char D_004DC010[];
+extern char D_004DC018[];
+extern char D_004DC020[];
+extern char D_004DC028[];
+extern char D_004DC030[];
+extern char D_004DC038[];
+
+void initWrapperClass(JCLASS **ppOut, char *pName, char cSigChar,
+                      int nElemSize);
+
+/* Build the eight primitive class records and publish them in the VM's
+ * signature-index table.  Source order follows the primitive declarations;
+ * gcc schedules the final double store up behind boolean, matching retail. */
+void initPrimitiveTypes(void)
+{
+    initWrapperClass(&classBoolean, D_004DC000, 'Z', 1);
+    initWrapperClass(&classByte, D_004DC008, 'B', 1);
+    initWrapperClass(&classChar, D_004DC010, 'C', 2);
+    initWrapperClass(&classShort, D_004DC018, 'S', 2);
+    initWrapperClass(&classInt, D_004DC020, 'I', 4);
+    initWrapperClass(&classLong, D_004DC028, 'J', 8);
+    initWrapperClass(&classFloat, D_004DC030, 'F', 4);
+    initWrapperClass(&classDouble, D_004DC038, 'D', 8);
+    primitiveClassTable[4] = classBoolean;
+    primitiveClassTable[8] = classByte;
+    primitiveClassTable[5] = classChar;
+    primitiveClassTable[9] = classShort;
+    primitiveClassTable[10] = classInt;
+    primitiveClassTable[11] = classLong;
+    primitiveClassTable[6] = classFloat;
+    primitiveClassTable[7] = classDouble;
+}
+
 /* Load the three classes the VM itself needs by name. */
 void initBaseClasses(void)
 {
@@ -529,13 +646,17 @@ JMETHOD *findSuperMethod(JMETHOD *pWant, JCLASS *pClass)
     JMETHOD *pM;
     int i;
 
-    for (pSuper = pClass->pSuper; pSuper != 0; pSuper = pSuper->pSuper) {
-        for (i = pSuper->nMethodCount - 1; i >= 0; i--) {
-            pM = pSuper->pMethods;
-            if (pM->pName == pWant->pName && pM->pSig == pWant->pSig) {
+    pSuper = pClass->pSuper;
+    while (pSuper != 0) {
+        i = pSuper->nMethodCount;
+        i--;
+        pM = pSuper->pMethods;
+        while (i >= 0) {
+            if (pM->pName == pWant->pName && pM->pSig == pWant->pSig)
                 return pM;
-            }
+            i--;
         }
+        pSuper = pSuper->pSuper;
     }
     return 0;
 }
@@ -649,24 +770,39 @@ int resolveConstants(JCLASS *pClass)
     int *pConst;
     int *p;
     unsigned char *pTag;
+    int unresolvedTag;
+    int resolvedTag;
     int nCount;
     int i;
 
     i = 0;
+    pConst = pClass->pConst;
     nCount = pClass->nConstCount;
     if (nCount != 0) {
-        pConst = pClass->pConst;
+        unresolvedTag = 8;
+        resolvedTag = 0x18;
         p = pConst;
-        do {
+loop:
             pTag = (unsigned char *) pConst[0] + i;
-            if (*pTag == 8) {
-                *pTag = 0x18;
-                p[0] = (int) Const2JavaString((STRENTRY *) p[0]);
-                nCount = pClass->nConstCount;
-            }
             i++;
+            if (*pTag != unresolvedTag)
+                goto next;
+            *pTag = resolvedTag;
+            {
+                int value;
+
+                value = (int) Const2JavaString((STRENTRY *) p[0]);
+                __builtin_memcpy(p, &value, sizeof(value));
+            }
+next:
             p++;
-        } while (i < nCount);
+            {
+                int nextCount;
+
+                nextCount = pClass->nConstCount;
+                if (i < nextCount)
+                    goto loop;
+            }
     }
     return 1;
 }
@@ -679,14 +815,17 @@ void allocStaticField(JCLASS *pClass)
 {
     JFIELD *p;
     char *pBlock;
-    int nTotal;
-    int nAlign;
     int i;
+    int nAlign;
 
-    if (pClass->nStaticFieldCount != 0) {
-        nTotal = 0;
+    i = pClass->nStaticFieldCount;
+    if (i != 0) {
+        int nTotal;
+
+        i--;
         p = pClass->fields;
-        for (i = pClass->nStaticFieldCount - 1; i >= 0; i--) {
+        nTotal = 0;
+        for (; i >= 0; i--) {
             nAlign = ((p->nSize + 3) >> 2) << 2;
             nTotal += nAlign;
             p->nSize = (nTotal - 1) / nAlign * nAlign;

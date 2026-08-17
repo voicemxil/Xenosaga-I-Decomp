@@ -8,6 +8,25 @@ void sceResetttyinit(void)
     );
 }
 
+typedef struct t_queue {
+    int size;
+    int position;
+    char *read;
+    char *write;
+    char data[0x100];
+} queue_t;
+
+extern queue_t ttyQueue __asm__("q.3");
+
+void *QueueInit(int size)
+{
+    ttyQueue.size = size;
+    ttyQueue.position = 0;
+    ttyQueue.write = ttyQueue.data;
+    ttyQueue.read = ttyQueue.data;
+    return &ttyQueue;
+}
+
 /* ------------------------------------------------------------------
  * sceTtyInit: open the DECI2 TTY protocol channel.
  *

@@ -64,6 +64,49 @@ typedef struct {
     SCEMPEGCTX *pCtx;             /* 0x040 */
 } SCEMPEGHANDLE;
 
+extern int DIntr(void);
+extern int EIntr(void);
+extern void sceIpuInit(void);
+
+void sceMpegInit(void)
+{
+    /* libmpeg keeps these four MMIO cursors in their original ABI scratch
+     * registers across the short critical section. */
+    PIN(volatile unsigned int *pEnableRead, "$8");
+    PIN(volatile unsigned int *pEnableWrite, "$9");
+    PIN(volatile unsigned int *pFromIpu, "$5");
+    PIN(volatile unsigned int *pToIpu, "$4");
+    PIN(unsigned int nChannelEnable, "$7");
+    PIN(unsigned int nDmacEnable, "$6");
+    PIN(unsigned int nValue0, "$2");
+    PIN(unsigned int nValue1, "$3");
+
+    DIntr();
+    pEnableRead = (volatile unsigned int *)0x1000F520;
+    pEnableWrite = (volatile unsigned int *)0x1000F590;
+    pFromIpu = (volatile unsigned int *)0x1000B000;
+    pToIpu = (volatile unsigned int *)0x1000B400;
+    nChannelEnable = 0xFFFFFEFF;
+    nDmacEnable = 0xFFFEFFFF;
+    nValue1 = 0x10000;
+    nValue0 = *pEnableRead;
+    nValue0 |= nValue1;
+    *pEnableWrite = nValue0;
+    nValue1 = *pFromIpu;
+    nValue1 &= nChannelEnable;
+    *pFromIpu = nValue1;
+    nValue0 = *pToIpu;
+    nValue0 &= nChannelEnable;
+    *pToIpu = nValue0;
+    nValue1 = *pEnableRead;
+    nValue1 &= nDmacEnable;
+    *pEnableWrite = nValue1;
+    EIntr();
+    *(volatile unsigned int *)0x1000B020 = 0;
+    *(volatile unsigned int *)0x1000B420 = 0;
+    sceIpuInit();
+}
+
 int sceMpegDelete(void *mp)
 {
     return 1;

@@ -270,6 +270,8 @@ extern int retEffe;
 extern int uwares_tbl[];
 extern int xtxres_tbl[];
 extern char printflg;
+extern int main_param_argc;
+extern char **main_param_argv;
 
 int printf(const char *, ...);
 void xglMatrixStackUnit(void);
@@ -352,6 +354,9 @@ void xglFontInitial(void);
 void xglMovieInit(void);
 void *memset(void *, int, unsigned int);
 void xglMenuInitial(void);
+void BootDisplay(void);
+void xglThreadInitial(void);
+void xglThreadRotate(void);
 void xglFontLoad(int, int);
 void Vibration_Stop(void);
 void xglPadRead(void);
@@ -813,16 +818,26 @@ void InitializeSystem(void)
     xglMenuInitial();
 }
 
+/* Process entry point.  __main is inserted by EE-GCC itself before the
+ * first source statement, so the original C begins with the two argument
+ * saves and then hands control to the boot overlay and system bring-up. */
+int main(int argc, char **argv)
+{
+    main_param_argc = argc;
+    main_param_argv = argv;
+    BootDisplay();
+    InitializeSystem();
+    xglThreadInitial();
+    xglThreadRotate();
+    return 0;
+}
+
 /* Treasure chest: pick the chest model by serial, hang its lid transform
  * off the model's parts table, and register the box in the map-unit list */
-/* TODO: near-miss (10/170 words, REGISTER class) - the two per-serial
- * model/texture temporaries and the 6/57 type constant land in
- * $a1/$a0/$v0 where the original used $a0/$a1 (and $a1 again for the
- * default arm's texture).  Swept: statement order inside and across the
- * three switch arms, an explicit goto-shared tail, direct stores in the
- * default arm, declaration order, and hoisting the scrutinee - every
- * variant is >= 9 words and several are far worse.  Everything else in
- * the function, including the 64-bit MapUnit vector copy, matches. */
+/* Byte-exact.  The switch has two stable value roles: the selected model
+ * remains in $a0, while $a1 carries either the 6/57 box type or, on the
+ * default path, the texture.  Expressing the latter as one branch-local
+ * auxiliary reproduces the original allocation and shared tail. */
 void InitItemBox(MAPUNIT *pUnit)
 {
     MAPUNITSET *pSet;
@@ -832,8 +847,9 @@ void InitItemBox(MAPUNIT *pUnit)
     float *pMatrix;
     float *pPos;
     int *pEffect;
-    int nModel;
+    register int nModel __asm__("$4");
     int nTexture;
+    register int nAux __asm__("$5");
     int i;
 
     pSet = &pUnit->set;
@@ -843,20 +859,22 @@ void InitItemBox(MAPUNIT *pUnit)
         nTexture = xtxres_tbl[4];
         pUnit->pModel[0] = nModel;
         pUnit->pModel[1] = nTexture;
-        pSet->nUnk034 = 6;
+        nAux = 6;
+        pSet->nUnk034 = nAux;
         break;
     case 0x7008:
         nModel = uwares_tbl[7];
         nTexture = xtxres_tbl[7];
         pUnit->pModel[0] = nModel;
         pUnit->pModel[1] = nTexture;
-        pSet->nUnk034 = 57;
+        nAux = 57;
+        pSet->nUnk034 = nAux;
         break;
     default:
         nModel = uwares_tbl[4];
-        nTexture = xtxres_tbl[4];
+        nAux = xtxres_tbl[4];
         pUnit->pModel[0] = nModel;
-        pUnit->pModel[1] = nTexture;
+        pUnit->pModel[1] = nAux;
         break;
     }
     pRes = (MODELRES *)pUnit->pModel[0];
@@ -944,6 +962,7 @@ void InitCfSystem(void)
     char *pLight;
     int *pWork;
     int i;
+    float fDefault;
 
     if ((GameLoopState.nUnk18 & 0xF0000000) == 0) {
         xglFontLoad(1, 0);
@@ -959,7 +978,7 @@ void InitCfSystem(void)
     ACT_init();
     MAP_initUnit();
     GameCameraReset();
-    GameLoopState.fUnk29F44 = 3.0f;
+    fDefault = 3.0f;
     GameLoopState.nFlags &= ~0x10000;
     GameLoopState.nFlags &= ~0x20000;
     GameLoopState.nFlags &= ~0x4000;
@@ -975,6 +994,7 @@ void InitCfSystem(void)
     GameLoopState.nFlags &= ~0x1;
     GameLoopState.nUnk20 |= 0xF;
     GameLoopState.nUnk14 = GameLoopState.nFlags;
+    GameLoopState.fUnk29F44 = fDefault;
     GameLoopState.nFlags |= 0x80000;
     UseVMFlag = 0;
     XTK_setWindowOwner(0);

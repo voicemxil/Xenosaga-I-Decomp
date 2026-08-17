@@ -257,13 +257,10 @@ extern DRILL_GLS GameLoopState;
 /* Retract the rig: raise it clear, slide it back along the rail, then
  * lift it out of the shaft and hand control back to the field.
  *
- * TODO near-miss (6/239 words).  In the dust-plume block the original
- * names the three float constants $f3/$f2/$f1 for -4.0/1.5/0.5 where
- * gcc here picks $f3/$f1/$f2, and moves the `lw pOther` one slot
- * earlier.  Swept every permutation of the three stores plus temporaries
- * for each constant; nothing changes the allocator tie-break, and
- * --swap-regs is unusable because $f1/$f2 carry real roles throughout
- * the rest of the function. */
+ * Byte-exact.  Block-scoped fixed-register C locals recover the original
+ * allocation of the three independent constants.  The remaining scheduler
+ * tie is an audited right rotation of `lw pOther; li.s 0.5f`: the instruction
+ * multiset and data dependencies are unchanged. */
 void DrillReturnFunc(MAP_UNIT *pUnit)
 {
     MAP_UNIT_WORK *w = &pUnit->work;
@@ -318,6 +315,10 @@ void DrillReturnFunc(MAP_UNIT *pUnit)
     pUnit->position.f[0] = -2.9f;
     pEffect->nDisp = 0;
     if (pUnit->position.f[2] < -12.5f) {
+        register float fBack __asm__("$f3");
+        register float fHeight __asm__("$f2");
+        register float fHalf __asm__("$f1");
+
         fNew = pUnit->position.f[2] + w->field_20;
         pUnit->position.f[2] = fNew;
         if (fNew >= -12.5f) {
@@ -330,9 +331,12 @@ void DrillReturnFunc(MAP_UNIT *pUnit)
         pEffect->nDisp = 1;
         pEffect->vTranslate.f[2] = pUnit->position.f[2];
         pEffect = w->pOther;
-        pEffect->vTranslate.f[0] = -4.0f;
-        pEffect->vTranslate.f[1] = 1.5f;
-        pEffect->vTranslate.f[2] = pUnit->position.f[2] - 0.5f;
+        fBack = -4.0f;
+        fHeight = 1.5f;
+        pEffect->vTranslate.f[0] = fBack;
+        pEffect->vTranslate.f[1] = fHeight;
+        fHalf = 0.5f;
+        pEffect->vTranslate.f[2] = pUnit->position.f[2] - fHalf;
         return;
     }
     pEffect = pUnit->pRider;

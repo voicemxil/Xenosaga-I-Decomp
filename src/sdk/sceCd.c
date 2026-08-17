@@ -17,6 +17,146 @@
 
 extern int sceCdLayerSearchFile(int a0, int a1, int a2);
 
+typedef struct sceCdInitRpcClient {
+    char reserved[0x24];
+    int server;
+} sceCdInitRpcClient;
+
+extern sceCdInitRpcClient cdit;
+extern int _i_mode;
+extern int Init_seq;
+extern int _icmd_bind;
+extern int _sf_bind;
+extern int _ncmd_bind;
+extern int _scmd_bind;
+extern int _scmd_dr_bind;
+extern int _sceCd_ee_read_mode;
+extern int _it_bind;
+extern int c_cnt_60 __asm__("c_cnt.60");
+extern int my_thid;
+extern int SCE_CD_debug;
+extern int _sceCd_scmdrdata;
+extern int _sceCd_ncmd_semid;
+extern int _sceCd_scmd_semid;
+extern int cb_semid;
+extern char D_004D5660[];
+extern char D_004D5680[];
+extern int sceCdSyncS(int mode);
+extern int sceSifInitRpc(int mode);
+extern int GetThreadId(void);
+extern int sceSifBindRpc(void *client, unsigned int sid, int mode);
+extern void sceSifWriteBackDCache(void *addr, int size);
+extern int sceSifCallRpc(void *client, int fno, int mode, void *send,
+                         int ssize, void *recv, int rsize, void *end,
+                         void *arg);
+extern int scePrintf(const char *fmt, ...);
+
+/* TODO: Ghidra-derived natural-C reconstruction is structurally complete,
+ * but ee-gcc currently emits 177 instructions versus the original 184.
+ * The remaining gap is concentrated in the bind retry/address-base layout
+ * and the final mode dispatch; recover the original local lifetime shape. */
+int sceCdInit(int mode)
+{
+    int i;
+    int bindResult;
+    int result;
+    int value;
+    int replyCode;
+    int replyMajor;
+    int replyMinor;
+
+    if (sceCdSyncS(1) != 0)
+        return 0;
+
+    sceSifInitRpc(0);
+    my_thid = GetThreadId();
+    Init_seq = 1;
+    c_cnt_60++;
+    _icmd_bind = -1;
+    _sf_bind = -1;
+    _ncmd_bind = -1;
+    _scmd_bind = -1;
+    _scmd_dr_bind = -1;
+    _sceCd_ee_read_mode = 0;
+    _it_bind = -1;
+
+bind:
+    bindResult = sceSifBindRpc(&cdit, 0x80000592, 0);
+    if (bindResult < 0) {
+        if (SCE_CD_debug > 0)
+            scePrintf(D_004D5660, bindResult, c_cnt_60);
+        for (i = 0x100000; i != -1; i--)
+            ;
+        goto bind;
+    }
+    if (cdit.server == 0)
+        goto serverDelay;
+
+    _it_bind = 0;
+    _i_mode = mode;
+    sceSifWriteBackDCache(&_i_mode, 4);
+    if (sceSifCallRpc(&cdit, 0, 0, &_i_mode, 4, &_sceCd_scmdrdata,
+                      16, 0, 0) < 0) {
+        Init_seq = 0;
+        return 0;
+    }
+    goto rpcDone;
+
+serverDelay:
+    for (i = 0x100000; i != -1; i--)
+        ;
+    goto bind;
+
+rpcDone:
+    replyCode = *(volatile int *)(((int)&_sceCd_scmdrdata + 12) |
+                                  0x20000000);
+    replyMajor = *(volatile int *)(((int)&_sceCd_scmdrdata + 4) |
+                                   0x20000000);
+    replyMinor = *(volatile int *)(((int)&_sceCd_scmdrdata + 8) |
+                                   0x20000000);
+    result = 1;
+    if (replyCode != 0xFF) {
+        if (replyCode == 0xFE) {
+            SCE_CD_debug = 1;
+        } else {
+            value = replyMajor + 0xFF;
+            if (replyMajor >= 0)
+                value = replyMajor;
+            if ((value >> 8) < 2) {
+                result = 2;
+            } else {
+                value = replyMinor + 0xFF;
+                if (replyMinor >= 0)
+                    value = replyMinor;
+                if ((value >> 8) < 2)
+                    result = 2;
+            }
+        }
+    }
+
+    Init_seq = 0;
+    if (mode < 0)
+        goto normalInit;
+    if (mode < 2)
+        goto normalInit;
+    if (mode != 5)
+        goto normalInit;
+
+    if (SCE_CD_debug > 0)
+        scePrintf(D_004D5680);
+    cdvd_exit();
+    _sceCd_ncmd_semid = -1;
+    _sceCd_scmd_semid = -1;
+    cb_semid = -1;
+    return result;
+
+normalInit:
+    cmd_sem_init();
+    PowerOffCB();
+
+    return result;
+}
+
 int sceCdSearchFile(int a0, int a1)
 {
     return sceCdLayerSearchFile(a0, a1, 0);

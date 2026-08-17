@@ -60,7 +60,8 @@ def _identity(word):
 
 
 REORDER_FLAGS = ("--swap-adjacent", "--rotate", "--rotate-seq",
-                 "--swap-into-slot", "--swap-slot-target")
+                 "--swap-into-slot", "--swap-slot-target",
+                 "--hoist-div-arg", "--retime-branch-slot")
 
 _TMPDIR = tempfile.mkdtemp(prefix="audit_swaps.")
 atexit.register(shutil.rmtree, _TMPDIR, True)

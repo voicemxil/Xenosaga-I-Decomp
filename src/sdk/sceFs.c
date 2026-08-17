@@ -183,6 +183,81 @@ extern iob_t *new_iob(void);
 extern int _fs_iob_semid;
 extern int _sceCallCode(void *arg0, int code);
 
+typedef struct t_fs_rpc_client {
+    char reserved[0x24];
+    int server;
+} fs_rpc_client_t;
+
+typedef struct __attribute__((packed)) t_fs_version_word {
+    int value;
+} fs_version_word_t;
+
+extern int sceSifInitRpc(int mode);
+extern void sceSifAddCmdHandler(unsigned int cid, void *handler, void *data);
+extern int sceSifBindRpc(void *client, unsigned int sid, int mode);
+extern fs_rpc_client_t _cd;
+extern char _sif_FsRcv_Data[];
+extern int _rcv_data_cmd;
+extern int _rcv_data_rpc;
+extern int *rcv_adr_30 __asm__("rcv_adr.30");
+extern void _sceFs_Rcv_Intr(void);
+
+int sceFsInit(void)
+{
+    PoffCb *poff;
+
+    poff = &_sif_FsPoff_Data;
+    sceSifInitRpc(0);
+    _sif_FsPoff_Data.func = 0;
+    poff->arg = 0;
+    DIntr();
+    sceSifAddCmdHandler(0x80000011, (void *)_sceFs_Rcv_Intr,
+                        _sif_FsRcv_Data);
+    sceSifAddCmdHandler(0x80000013, (void *)_sceFs_Poff_Intr,
+                        poff);
+    EIntr();
+
+    for (;;) {
+        int limit;
+        int i;
+
+        if (sceSifBindRpc(&_cd, 0x80000001, 0) < 0)
+            return -1;
+        i = 0x100000;
+        if (_cd.server != 0)
+            break;
+        limit = -1;
+        do {
+            i--;
+        } while (i != limit);
+    }
+
+    _sceFsIobSemaMK();
+    WaitSema(_fs_iob_semid);
+    {
+        PIN(iob_t *p, "$3");
+        iob_t *end;
+
+        /* Preserve the SDK object's coalesced %hi/%lo descriptor cursor;
+         * the tied pass-through emits no instructions. */
+        PASSTHRU(p, _iob);
+        end = p + 32;
+        for (; p < end; p++)
+            p->used = 0;
+    }
+    SignalSema(_fs_iob_semid);
+
+    rcv_adr_30 = &_rcv_data_cmd;
+    if (sceSifCallRpc(&_cd, 0xFF, 0, &rcv_adr_30, 4,
+                      &_rcv_data_rpc, 4, 0, 0) < 0)
+        return 0xFFFEFFFF;
+
+    *(fs_version_word_t *)_fsversion =
+        *(fs_version_word_t *)((int)&_rcv_data_rpc | 0x20000000);
+    _fs_init = 1;
+    return 0;
+}
+
 /* sceDopen: open a directory.  The two arms of the result test each
  * take the iob lock themselves rather than sharing one WaitSema above
  * the branch -- that duplication is in the original, and hoisting it
@@ -259,7 +334,7 @@ typedef struct t_fs_send {
 
 extern fs_send_t _send_data;
 extern int _rcv_data_rpc;
-extern int _cd;                 /* sceSifClientData for the fs channel */
+extern fs_rpc_client_t _cd;     /* sceSifClientData for the fs channel */
 extern iob_t *get_iob(int fd);
 extern int DeleteSema(int semid);
 extern int sceSifCallRpc(void *cd, unsigned int fno, int mode, void *send,

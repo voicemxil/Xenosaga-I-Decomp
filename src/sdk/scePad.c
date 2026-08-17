@@ -30,7 +30,12 @@
 extern char *ReqStateStr[4];
 extern char *PadStateStr[8];
 extern int   isInit;
-extern int   padsif;
+typedef struct scePadRpcClient {
+    char reserved[0x24];
+    int server;
+} scePadRpcClient;
+
+extern scePadRpcClient padsif[2];
 extern int   buffer_00996C00[32];
 
 /* Per-(port,slot) open/state bookkeeping the RPC wrappers guard on. */
@@ -49,6 +54,52 @@ void *memcpy(void *dst, const void *src, int n);
 char *strcpy(char *dst, const char *src);
 extern int sceSifCallRpc(void *pCd, unsigned int fno, int mode, void *send,
                          int ssize, void *recv, int rsize, void *ef, void *ea);
+extern int sceSifBindRpc(void *pCd, unsigned int sid, int mode);
+extern int scePadGetModVersion(void);
+extern int isWarning;
+extern char D_004D5418[];
+extern char D_004D5440[];
+int printf(const char *fmt, ...);
+
+int scePadInit(int mode)
+{
+    int wait;
+    int version;
+    int result;
+
+    isInit = 1;
+    for (;;) {
+        sceSifBindRpc(&padsif[0], 0x80000100, 0);
+        wait = 0x10000;
+        if (padsif[0].server != 0)
+            break;
+        do {
+            wait--;
+        } while (wait != -1);
+    }
+
+    for (;;) {
+        sceSifBindRpc(&padsif[1], 0x80000101, 0);
+        wait = 0x10000;
+        if (padsif[1].server != 0)
+            break;
+        do {
+            wait--;
+        } while (wait != -1);
+    }
+
+    version = scePadGetModVersion();
+    if ((version >> 8) != 4) {
+        if (isWarning != 0) {
+            printf(D_004D5418);
+            printf(D_004D5440, 4, 0, version >> 8, version & 0xFF);
+        }
+        result = 0;
+    } else {
+        result = scePadInit2(mode);
+    }
+    return result;
+}
 
 /* Copy the name of a pad request code into `str` ("" when out of range).
  * The out-of-range arm is GCC's own inlining of strcpy() of a one-byte

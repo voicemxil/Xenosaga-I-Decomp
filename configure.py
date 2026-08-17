@@ -97,9 +97,16 @@ def cc_for(name):
 # stride stays 8 bytes/reg (2.96), ruling out the SDK 2.9-ee compiler --
 # this is a lone -G threshold difference, not a compiler-family swap.
 FILE_CFLAGS_OVERRIDE = {
+    # InitExecPS2 is its own SDK TU and was built with instruction scheduling
+    # enabled; kernel.c's other SDK units use -fno-schedule-insns.
+    "sceKernelExec.c": "-O2 -G0",
+    "sceKernelTLB.c": "-O2 -G0",
+    "sceKernelAlarm.c": "-O2 -G0",
+    "sceKernelThread.c": "-O2 -G0",
     "sceVif1PkRefLoadImage.c": "-O2 -G0",
     "sceMpegDec.c": "-O2 -G0",
     "sceTty.c": "-O2 -G0",
+    "sceIpu.c": "-O2 -G0",
     "sceFs.c": "-O2 -G0",
     # These SDK translation units were built WITHOUT -fno-schedule-insns:
     # the original pairs independent multiplies onto the R5900's two
@@ -197,9 +204,16 @@ def asflags_for(name):
 # xglVector's original object omits some load-delay nops that are present
 # in other game objects compiled with the same compiler.
 FILE_FIX_FLAGS = {
-    "xglHdd.c": "--swap-regs xglHddMcCheckCore:10-11:50 --swap-regs xglHddMcCheckCore:3-10:52-55 --swap-regs xglHddMcCheckCore:11-3:52",
+    "ssd.c": ("--swap-regs SsdSpuDirectRead:2-3:11,13 "
+              "--swap-regs SsdSpuDirectRead:3-8:12,21"),
+    "Enemy.c": ("--hoist-div-arg Enemy_Escape,Enemy_Route_Chase "
+                "--rotate-seq Enemy_Escape:63:2,Enemy_Escape:65:2,Enemy_Escape:67:2,"
+                "Enemy_Route_Chase:61:2,Enemy_Route_Chase:63:2,Enemy_Route_Chase:65:2"),
+    "HddTest.c": "--swap-regs HddTest1024Save:2-3:16-17",
+    "xglHdd.c": "--swap-regs xglHddMcCheckCore:10-11:50 --swap-regs xglHddMcCheckCore:3-10:52-55 --swap-regs xglHddMcCheckCore:11-3:52 --rotate xglHddMcCheckYourSaves:1:3 --split-hi-lo xglHddMcCheckYourSaves:1:2",
     "Hit.c": "--rotate HitCheckCorner:17:5",
     "sceSif.c": "--swap-regs sceSifInitIopHeap:2-3:25,27 --swap-adjacent sceSifInitIopHeap:26!",
+    "sceFs.c": "--swap-regs sceFsInit:2-3:31,32,37,48,74,76",
     "sceMpegDec.c": "--swap-regs _isOutSizeOK:2-3:17-22",
     "xglMc.c": "--byte-move-andi xglMcSetMapName:0,xglMcSetMapName:1",
     "sceMc.c": "--swap-adjacent sceMcRename:53",
@@ -208,10 +222,10 @@ FILE_FIX_FLAGS = {
     "sub.c": "--swap-adjacent subJoutoPosSet:58",
     "sef.c": "--branch-likely sefAllocLocalData:2",
     "tskUmnBgCube.c": " --as-g0 --fp-pair-hazard tskUmnBgCubeMain",
-    "sdv.c": "--branch-unlikely sdvScheduleSound:1",
+    "sdv.c": "--branch-unlikely sdvScheduleSound:1 --rotate-seq sdvCreateAlter:3:3,sdvCreateAlter:4:2",
     "File.c": "--branch-unlikely FileObjectJpegDecChange:1 --swap-adjacent FileObjectJpegDecChange:3",
     "xglRender.c": "--fp-pair-hazard xglRenderGlobalFadeSet --barrier-branch-move xglRenderInit",
-    "Calc.c": "--mtc1-nop CalcNearCrossPointCircle:0",
+    "Calc.c": "--mtc1-nop CalcNearCrossPointCircle:0 --rotate-seq CalcNearCrossPointBox:24:7,CalcNearCrossPointBox:26:-3",
     "kernel.c": "--swap-adjacent PatchIsNeeded:8,PatchIsNeeded:10",
     "sceMpeg.c": "--swap-adjacent sceMpegReset:3",
     "TCAMERA.c": "--unfill-gcc-slots TCAMERA_mpackGetInterest --swap-regs TCAMERA_mpackGetInterest:2-3",
@@ -222,7 +236,7 @@ FILE_FIX_FLAGS = {
     "xglCd.c": "--swap-adjacent xglCdReadCancel:41! --short-loop-pad FileSelectListReload:3:5,FileSelectListReload:4:0,FileSelectListReload:5:0",
     "xglDma.c": "--barrier-return-store xglDmaMFIFOKick --swap-adjacent xglDmaMFIFOKick:14",
     "Font.c": "--branch-likely FontTestP1:2",
-    "Drill.c": "--mtc1-nop DrillZMoveFunc:1,DrillPowerOffFunc:1",
+    "Drill.c": "--mtc1-nop DrillZMoveFunc:1,DrillPowerOffFunc:1 --rotate DrillReturnFunc:139:3",
     "eMessage.c": "--rotate eMessageNextGyouMaxGet:2:-5",
     "INIT.c": "--rotate InitEvsSymbol:33:-3,InitRetSymbol:33:-3 --rotate-seq InitShopSymbol:39:-4,InitShopSymbol:39:-3,InitSaveSymbol:39:-4,InitSaveSymbol:39:-3 --barrier-lo-load InitItemSymbol,InitItemBox",
     "Get.c": "--swap-adjacent Get_Rnd:5",
@@ -347,7 +361,10 @@ FILE_FIX_FLAGS = {
     "newlib_vfprintf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_reallocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_callocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
-    "newlib_freer.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_freer.c": ("--barrier-return-store --barrier-branch-move --expand-sym-loads "
+                       "--swap-regs _free_r:3-4:33,35,37 "
+                       "--rotate-seq _free_r:30:-6,_free_r:30:-6,_free_r:30:-6,"
+                       "_free_r:34:3,_free_r:36:2 --retime-branch-slot _free_r"),
     "newlib_mallocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_dtoa2.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_signal.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",

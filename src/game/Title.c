@@ -18,6 +18,11 @@ extern void PartyDataInit(void);
 extern int xglFontLoad(int nBank, int nNow);
 extern void WindowTexLoad(int nAddr, int nArg);
 
+/* Retail boot-display hook; intentionally empty in this build. */
+void BootDisplay(void)
+{
+}
+
 /* Bring the game state back to its power-on values before a new game. */
 void TitleGameInit(void)
 {

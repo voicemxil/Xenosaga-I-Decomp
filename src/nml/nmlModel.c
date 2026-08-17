@@ -197,17 +197,13 @@ void CLEAR_MAP_HANDLE(void *pMapHandle)
 extern char s_aMatName[];
 extern char s_aTexName[];
 
-/* TODO: near-miss, 2 diffs, NOT registered.  Identical instruction
- * multiset; only the two `lui %hi` halves for s_aMatName and s_aTexName
- * are issued in the opposite order (the sb's, and every register, are
- * right).  Swapping the two source statements does not move them.
- */
+/* Byte-exact.  The chained zero assignment makes gcc prepare the two
+ * symbol addresses in the retail order while retaining separate stores. */
 /* Reset the per-frame model entry state. */
 void CLEAR_MODEL_ENTRY(void)
 {
     s_nDispVisible = -1;
-    s_aMatName[0] = 0;
-    s_aTexName[0] = 0;
+    s_aMatName[0] = s_aTexName[0] = 0;
     s_nMapShadowParts = 0;
     s_nShadowVec = 0;
     s_nToumeiNum = 0;

@@ -306,19 +306,19 @@ int fptodp(float f);
 int sprintf(char *pBuf, const char *pFmt, ...);
 void xglFontDebugPrintf(int nX, int nY, const char *pFmt, ...);
 
-/* TODO: near-miss (244/244 words, 27 diffs, all schedule/tie-break).
- * Three clusters remain:
- *   1. `cursorMode = -1' after changeCameraMode lands in $v0 where the
- *      original uses $v1 -- gcc reuses the register the dead cursorMode
- *      load was in.
- *   2. The `nTrigger & 0x400' test: the original hoists its `andi' into
+/* TODO: near-miss (244/244 words, 25 diffs, all schedule/tie-break).
+ * Two clusters remain:
+ *   1. The `nTrigger & 0x400' test: the original hoists its `andi' into
  *      the preceding `beqz' delay slot, ours puts the cursor.fPos
  *      address materialisation there instead, because gcc splits that
  *      address as %hi(cursor) + (%lo(cursor) + 16) rather than folding
  *      the +16 into one %hi/%lo pair the way the original does.
- *   3. Both sprintf call sites set up the same five argument registers in
+ *   2. Both sprintf call sites set up the same five argument registers in
  *      a different order: the original leaves `move $a0,$sp' for the
  *      call's delay slot, gcc emits it second and puts $t0 (or $a2) there.
+ *
+ * Resolved here: splitting `cursorMode = -1` through the already-live
+ * `n` local makes gcc use the original $v1 instead of reusing $v0.
  *
  * Swept: nX/nY/nZ camera-reset store order (all six -- (0,1,2) is best);
  * pRot at function scope vs inside the print block; one shared format
@@ -395,7 +395,8 @@ void updateCursor(int nTool)
         if (cursorMode >= 0) {
             cursor.nSel = cursorMode;
             changeCameraMode();
-            cursorMode = -1;
+            n = -1;
+            cursorMode = n;
         }
         if (pKey->nTrigger & 0x1000) {
             CURSOR *p = &cursor;

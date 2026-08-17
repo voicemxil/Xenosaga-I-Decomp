@@ -1,5 +1,14 @@
 /* PS2 SDK sceIpu (Image Processing Unit) synchronization. */
 
+typedef int u128 __attribute__((mode(TI)));
+
+extern void __gnu_compiled_c_00210510(int enable);
+extern const volatile u128 iqval[];
+extern const volatile u128 vqval[];
+
+#define IPU_CMD  (*(volatile unsigned int *)0x10002000)
+#define IPU_FIFO (*(volatile u128 *)0x10007010)
+
 /* IPU_CTRL, read through the uncached KSEG1 window. */
 #define IPU_CTRL (*(volatile unsigned int *)0x10002010)
 
@@ -31,4 +40,53 @@ int sceIpuSync(int mode)
         break;
     }
     return r;
+}
+
+void sceIpuInit(void)
+{
+    __gnu_compiled_c_00210510(1);
+
+    IPU_CTRL = 0x40000000;
+    while ((int)IPU_CTRL < 0)
+        ;
+
+    IPU_CMD = 0;
+    while ((int)IPU_CTRL < 0)
+        ;
+
+    IPU_FIFO = iqval[0];
+    IPU_FIFO = iqval[1];
+    IPU_FIFO = iqval[2];
+    IPU_FIFO = iqval[3];
+    IPU_FIFO = iqval[4];
+    IPU_FIFO = iqval[4];
+    IPU_FIFO = iqval[4];
+    IPU_FIFO = iqval[4];
+
+    IPU_CMD = 0x50000000;
+    while ((int)IPU_CTRL < 0)
+        ;
+
+    IPU_CMD = 0x58000000;
+    while ((int)IPU_CTRL < 0)
+        ;
+
+    IPU_FIFO = vqval[0];
+    IPU_FIFO = vqval[1];
+
+    IPU_CMD = 0x60000000;
+    while ((int)IPU_CTRL < 0)
+        ;
+
+    IPU_CMD = 0x90000000;
+    while ((int)IPU_CTRL < 0)
+        ;
+
+    IPU_CTRL = 0x40000000;
+    while ((int)IPU_CTRL < 0)
+        ;
+
+    IPU_CMD = 0;
+    while ((int)IPU_CTRL < 0)
+        ;
 }

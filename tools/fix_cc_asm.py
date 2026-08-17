@@ -1016,6 +1016,109 @@ def rotate_insns_seq(flat, site_list):
     return flat
 
 
+def hoist_div_call_arg(flat, scope):
+    """Hoist an independent fifth call argument above GCC's div-zero guard.
+
+    GCC 2.96 schedules ``move $t0,$sp`` after the guarded remainder
+    calculation used to form a following five-argument call.  The retail
+    build schedules that call setup before the calculation.  The intervening
+    branch/break/label directives prevent the ordinary short-window rotation
+    pass from expressing the otherwise pure reorder.
+
+    Keep this deliberately narrow: only the exact R5900 signed-remainder
+    guard followed by ``addu $v0,$v0,$s0`` and ``move $t0,$sp`` is eligible,
+    and callers must opt in by function name.  audit_swaps.py recompiles
+    without the pass and verifies an identical instruction multiset.
+    """
+    if not scope:
+        return flat
+    owner = function_at(flat)
+    out = list(flat)
+    i = 7
+    while i < len(out):
+        if owner[i] not in scope or out[i].strip() != "daddu\t$8,$sp,$0":
+            i += 1
+            continue
+        pattern = [
+            r'^\taddu\t\$2,\$2,\$4$',
+            r'^\t\.set\tnoreorder$',
+            r'^\tbeql\t\$4,\$0,1f$',
+            r'^\tbreak\t0,7$',
+            r'^1:$',
+            r'^\t\.set\treorder$',
+            r'^\taddu\t\$2,\$2,\$16$',
+        ]
+        start = i - len(pattern)
+        if all(re.match(rx, out[start + n])
+               for n, rx in enumerate(pattern)):
+            arg = out.pop(i)
+            out.insert(start, arg)
+            # Ownership is unchanged within the function; skip this site.
+            i += 1
+            continue
+        i += 1
+    return out
+
+
+def retime_branch_slot(flat, scope):
+    """Move a pre-branch store into a plain branch's filled delay slot.
+
+    At an opted-in site GCC may emit ``store; bne / move`` while the retail
+    scheduler emitted ``bne / store; lui; move``.  The move is call setup on
+    the fall-through path, so executing it on the taken path is dead; the
+    retail order both avoids that dead work and uses the independent store as
+    the unconditional delay-slot instruction.
+
+    This only accepts the exact GCC noreorder block, a preceding store, a
+    register-copy slot, and a following ``lui`` immediately before another
+    noreorder block.  audit_swaps.py proves the unmodified build has the same
+    instruction multiset.
+    """
+    if not scope:
+        return flat
+    out = list(flat)
+    i = 1
+    while i + 7 < len(out):
+        owner = function_at(out)
+        if owner[i] not in scope:
+            i += 1
+            continue
+        block = [x.strip().replace("\t", " ") for x in out[i:i + 6]]
+        pre = out[i - 1]
+        slot = out[i + 3]
+        if not (block[0] == ".set noreorder"
+                and block[1] == ".set nomacro"
+                and re.match(r'^bne \$\w+,\$0,', block[2])
+                and block[4] == ".set macro"
+                and block[5] == ".set reorder"
+                and RE_STORE.match(pre)
+                and RE_RETURN_MOVE.match(slot)):
+            i += 1
+            continue
+        j = i + 6
+        while j < len(out) and not RE_INSN.match(out[j]):
+            j += 1
+        if (j >= len(out) or not out[j].startswith("\tlui\t")
+                or j + 1 >= len(out)
+                or out[j + 1].strip().replace("\t", " ") != ".set noreorder"):
+            i += 1
+            continue
+        # Drop the pre-branch store, use it as the delay slot, and put the
+        # displaced fall-through call setup immediately after the lui.
+        del out[i - 1]
+        i -= 1
+        out[i + 3] = pre
+        j -= 1
+        out.insert(j + 1, slot)
+        target = block[2].rsplit(',', 1)[-1]
+        for k in range(j + 2, min(len(out), j + 20)):
+            if out[k].strip() == target + ":" and out[k - 1] == slot:
+                out[k - 1], out[k] = out[k], out[k - 1]
+                break
+        i = j + 2
+    return out
+
+
 def swap_adjacent_insns(flat, sites):
     """Swap the two instructions of an explicitly named adjacent pair.
 
@@ -1197,6 +1300,106 @@ RE_FLIP_COND_BRANCH = re.compile(
     r"|bc1tl?|bc1fl?)([ \t])")
 
 
+def split_hi_lo(flat, sites):
+    """Rename one `lui %hi(SYM)`'s destination register, and rewrite the
+    SOURCE (not destination) register of the matching `%lo(SYM)`
+    instruction that folds it, leaving everything else untouched.
+
+    Closes a hazard family found across xglHddMcCheckYourSaves,
+    xglSoundLoadEffect/xglSoundLoadRequestSmd, and Judge_MakeNewFolder,
+    each independently swept to exhaustion with no C source shape
+    reaching it (see the TODOs at each site) and unreachable by
+    --swap-regs, which renames symmetrically everywhere in its window.
+    The original sometimes materialises a symbol's %hi into one
+    register -- often otherwise dead at that point -- and folds %lo
+    into a DIFFERENT register at the point of use:
+
+        lui   $v0, %hi(sym)
+        ...
+        addiu $a0, $v0, %lo(sym)
+
+    while ours computes both halves directly into the register actually
+    used:
+
+        lui   $a0, %hi(sym)
+        ...
+        addiu $a0, $a0, %lo(sym)
+
+    No swap can express this: $a0's role as the addiu's DESTINATION must
+    not change, only the lui's destination and the addiu's READ of it.
+
+    Matching is done by SYMBOL TEXT (the identical %hi(EXPR)/%lo(EXPR)
+    string), not by "next instruction reading this register number" --
+    the first version of this pass used register liveness and silently
+    mis-fired on xglHddMcCheckYourSaves, where an unrelated `move
+    $s0,$a0` (staging the function's own incoming argument, nothing to
+    do with the symbol) sits between the lui and its real %lo partner
+    and also happens to read the same register number. A %lo for a
+    DIFFERENT symbol, or any other instruction, is not a match even if
+    it reads the same register.
+
+    Site: FUNC:IDX:NEWREG, IDX 0-based (same insn-only counting
+    convention as the other site-keyed passes: directives, labels and
+    #-comments are not counted), NEWREG a bare register token ("2" for
+    $2/$v0, matching --swap-regs's token convention). The instruction at
+    IDX must be `lui $orig,%hi(EXPR)`; the pass scans forward for the
+    first later instruction containing the literal text `%lo(EXPR)` for
+    the SAME EXPR (stopping at the function's `.end`) and rewrites only
+    that instruction's occurrence of $orig, leaving its own destination
+    register untouched. A site that doesn't match either expectation is
+    left untouched with a stderr warning -- silent no-ops here are
+    exactly what let --short-loop-pad ship broken twice with passing
+    unit tests (see that pass's history); this one is meant to fail
+    loud on the CLI instead."""
+    if not sites:
+        return flat
+    out = list(flat)
+    cur = None
+    idx = 0
+    positions = []
+    for i, line in enumerate(out):
+        if line.startswith("\t.ent\t"):
+            cur = line.split("\t")[-1]
+            idx = 0
+        if RE_INSN.match(line):
+            positions.append((i, idx, cur))
+            idx += 1
+    for line_i, insn_idx, func in positions:
+        for site_idx, newreg in sites.get(func, []):
+            if site_idx != insn_idx:
+                continue
+            line = out[line_i]
+            m = re.match(r'^\tlui\t\$(\w+),%hi\(([^)]*)\)(.*)$', line)
+            if not m:
+                sys.stderr.write("--split-hi-lo: %s:%d is not a "
+                                 "`lui $reg,%%hi(EXPR)`, site ignored: "
+                                 "%r\n" % (func, insn_idx, line))
+                continue
+            orig, expr = m.group(1), m.group(2)
+            out[line_i] = "\tlui\t$%s,%%hi(%s)%s" % (newreg, expr, m.group(3))
+            lo_needle = "%%lo(%s)" % expr
+            found = False
+            for j in range(line_i + 1, len(out)):
+                l2 = out[j]
+                if l2.startswith("\t.end\t"):
+                    break
+                if not RE_INSN.match(l2) or lo_needle not in l2:
+                    continue
+                m2 = re.match(r'^\t([a-z0-9.]+)\t(.*)$', l2)
+                mnem, rest = m2.group(1), m2.group(2)
+                ops = rest.split(',')
+                ops[1:] = [re.sub(r'\$%s\b' % re.escape(orig),
+                                  '$%s' % newreg, o) for o in ops[1:]]
+                out[j] = "\t%s\t%s" % (mnem, ','.join(ops))
+                found = True
+                break
+            if not found:
+                sys.stderr.write("--split-hi-lo: %s:%d -- no later "
+                                 "`%%lo(%s)` found before function end, "
+                                 "site ignored\n" % (func, insn_idx, expr))
+    return out
+
+
 def flip_branch_likely(flat, likely_sites, plain_sites):
     """Flip the branch-likely (annul) bit on explicitly named sites.
 
@@ -1242,8 +1445,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
          war_restore=None, pin_slot=None, lis_hazard_nop=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
-         rotate_seq=None, zero_quad_store=None, fp_pair_hazard=None,
-         short_loop_pad=None, byte_move=None):
+         rotate_seq=None, hoist_div_arg=None, retime_branch=None,
+         zero_quad_store=None, fp_pair_hazard=None,
+         short_loop_pad=None, byte_move=None, split_hi_lo_raw=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
     with open(path) as f:
@@ -1562,6 +1766,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = pin_slot_nops(flat, pin_slot)
 
+    if hoist_div_arg:
+        flat = "\n".join(out).split("\n")
+        out = hoist_div_call_arg(flat, hoist_div_arg)
+
     if swap_adjacent:
         flat = "\n".join(out).split("\n")
         out = swap_adjacent_insns(flat, swap_adjacent)
@@ -1574,6 +1782,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = rotate_insns_seq(flat, rotate_seq)
 
+    if retime_branch:
+        flat = "\n".join(out).split("\n")
+        out = retime_branch_slot(flat, retime_branch)
+
     if zero_quad_store:
         flat = "\n".join(out).split("\n")
         out = zero_quad_stores(flat, zero_quad_store)
@@ -1585,6 +1797,25 @@ def main(path, omitted_hazards, barrier_return_store=None,
     if byte_move is not None:
         flat = "\n".join(out).split("\n")
         out = byte_move_andi(flat, byte_move)
+
+    if split_hi_lo_raw:
+        spec = {}
+        for tok in split_hi_lo_raw:
+            parts = tok.split(':')
+            if len(parts) != 3:
+                raise SystemExit("--split-hi-lo: bad site %r (want "
+                                 "FUNC:IDX:NEWREG)" % tok)
+            fn, idx_s, reg = parts
+            if not idx_s.isdigit():
+                raise SystemExit("--split-hi-lo: bad site %r (IDX must be "
+                                 "a plain integer)" % tok)
+            reg = reg.lstrip('$')
+            if not re.match(r'^f?\d+$', reg):
+                raise SystemExit("--split-hi-lo: bad register token %r in "
+                                 "%r (want 2, $2, f4 or $f4)" % (reg, tok))
+            spec.setdefault(fn, []).append((int(idx_s), reg))
+        flat = "\n".join(out).split("\n")
+        out = split_hi_lo(flat, spec)
 
     if swap_slot:
         flat = "\n".join(out).split("\n")
@@ -1663,6 +1894,14 @@ if __name__ == "__main__":
                              "are applied ONE AT A TIME with indices "
                              "re-resolved after each, so overlapping "
                              "windows can both fire (order matters)")
+    parser.add_argument("--hoist-div-arg", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="hoist an independent $t0 fifth-call argument "
+                             "above the R5900 signed-divide zero guard")
+    parser.add_argument("--retime-branch-slot", nargs="?", const="",
+                        default=None, metavar="FUNCS",
+                        help="move a pre-branch store into a filled plain "
+                             "branch slot and sink its dead call-arg move")
     parser.add_argument("--short-loop-pad", default=None, metavar="SITES",
                         help="set a gcc R5900 short-loop pad's nop count: "
                              "FUNC:N:COUNT, N being the 0-based pad index "
@@ -1676,6 +1915,17 @@ if __name__ == "__main__":
                              "to the explicit `andi $x,$y,0xff` zero-extend "
                              "the original build emitted; optionally a "
                              "comma-separated function-name list")
+    parser.add_argument("--split-hi-lo", action="append", default=None,
+                        metavar="FUNC:IDX:NEWREG",
+                        help="rename one `lui`'s destination register and "
+                             "the SOURCE (not destination) occurrence in "
+                             "the next instruction reading it -- for a "
+                             "%%hi materialised into a different register "
+                             "than the %%lo fold uses, which --swap-regs "
+                             "cannot express since it renames symmetrically. "
+                             "IDX is the 0-based instruction index of the "
+                             "`lui` (insn-only counting convention); "
+                             "repeatable for multiple sites")
     parser.add_argument("--zero-quad-store", nargs="?", const="",
                         default=None, metavar="FUNCS",
                         help="rewrite gcc's `por $X,$0,$0` + `sq $X` "
@@ -1815,6 +2065,8 @@ if __name__ == "__main__":
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
          [t for t in (args.rotate_seq or "").split(',') if t],
+         scope(args.hoist_div_arg),
+         scope(args.retime_branch_slot),
          scope(args.zero_quad_store), scope(args.fp_pair_hazard),
          [t for t in (args.short_loop_pad or "").split(',') if t],
-         scope(args.byte_move_andi))
+         scope(args.byte_move_andi), args.split_hi_lo)

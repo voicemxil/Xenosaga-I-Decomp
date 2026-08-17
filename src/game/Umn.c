@@ -614,20 +614,16 @@ void *UmnTextLoad(void *pRaw, int nMode)
     return pNext;
 }
 
-/* TODO: near-miss (SCHEDULING, 3 of 33 words, length exact). Only the
-   placement of `sw v0,0(s0)` (the UmnWorkEnd write-back) differs: the
-   original sinks it to the last slot before the first xglCdReadFile jal,
-   after the `addiu a0,%lo(name)` and `move a2,zero`; we emit it first in
-   that window. Swept: direct `UmnWorkEnd = UmnTextLoad(UmnWorkEnd, 0)` and
-   a separate local for the result -- identical RTL either way. Would take
-   --rotate + --swap-adjacent to force; not worth two fixer flags. */
+/* Byte-exact.  A four-byte builtin copy preserves the source assignment's
+   alias ordering while still lowering to the original single `sw`; this
+   keeps the UmnWorkEnd write-back in the last slot before the first read. */
 /* One-shot load of everything the menu overlay needs off the disc */
 void UmnFirstLoad(void)
 {
     void *pEnd;
 
     pEnd = UmnTextLoad(UmnWorkEnd, 0);
-    UmnWorkEnd = pEnd;
+    __builtin_memcpy(&UmnWorkEnd, &pEnd, sizeof(pEnd));
     xglCdReadFile("data\\endou\\umn\\cube.xtx", UmnBgCubeXtx, 0, 1);
     xglCdReadFile("data\\endou\\umn\\cube.lex", UmnBgCubeLex, 0, 1);
     xglCdReadFile("data\\endou\\umn\\umn00.xtx", UmnTexAddr, 0, 1);

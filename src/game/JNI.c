@@ -26,7 +26,6 @@ void (*jthreadResetFunc)(void);
 extern int VMRegister[32];
 extern void *classDB[8];
 
-void initClassDB(void);
 int xheap_init(int nHeap, int pStart, int nSize);
 int xheap_push(void);
 int xheap_pop(void);
@@ -57,6 +56,22 @@ void PDB_getEntry(int nId, void **ppEntry, int *pnCount);
 char *getStrIndex(char *pStr, int nChar);
 int checkClass(DataBuffer *pBuf, char *pName, void *pArg);
 void loadStaticClass(int *pOut, int nClass);
+
+/* Clear all eight class-database slots from the end toward the front. */
+void initClassDB(void)
+{
+    void **p;
+    int i;
+
+    i = 7;
+    p = classDB;
+    p += 7;
+    do {
+        i--;
+        *p = 0;
+        p--;
+    } while (i >= 0);
+}
 
 /* Initialize the class database and the VM object heap */
 int JNI_initSystem(int pStart, int nSize)

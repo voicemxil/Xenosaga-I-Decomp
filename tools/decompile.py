@@ -73,6 +73,26 @@ def find_function(name):
     return None, None
 
 
+def find_data_block(name):
+    """Return the body of one dlabel/enddlabel block from asm/data."""
+    want = re.compile(r'^\s*dlabel\s+%s\s*$' % re.escape(name))
+    end = re.compile(r'^\s*enddlabel\s+%s\s*$' % re.escape(name))
+    data_root = os.path.join(ROOT, "asm", "data")
+    for base, _, files in os.walk(data_root):
+        for fn in sorted(files):
+            if not fn.endswith(".s"):
+                continue
+            path = os.path.join(base, fn)
+            with open(path, errors="ignore") as fh:
+                lines = fh.readlines()
+            for i, line in enumerate(lines):
+                if want.match(line):
+                    for j in range(i + 1, len(lines)):
+                        if end.match(lines[j]):
+                            return lines[i + 1:j]
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -85,6 +105,12 @@ def main():
                     help="print the sliced assembly too")
     ap.add_argument("--output", "-o",
                     help="write the generated C draft to this file")
+    ap.add_argument("--valid-syntax", action="store_true",
+                    help="ask m2c to emit compilable placeholder macros")
+    ap.add_argument("--no-switches", action="store_true",
+                    help="disable m2c's inferred irregular switches")
+    ap.add_argument("--stack-structs", action="store_true",
+                    help="emit a template struct for recovered stack slots")
     args = ap.parse_args()
 
     path, block = find_function(args.function)
@@ -94,12 +120,20 @@ def main():
 
     # `endlabel` is a splat macro; m2c does not know it.
     body = [l for l in block if not re.match(r'^\s*endlabel\s', l)]
+    jump_tables = sorted(set(re.findall(r'\b(jtbl_[0-9A-Fa-f]+)\b',
+                                        "".join(body))))
     scratch = os.environ.get("TMPDIR", "/tmp")
     asm_path = os.path.join(scratch, "_m2c_%s.s" % args.function)
     with open(asm_path, "w") as fh:
         fh.write(".set noat\n.set noreorder\n\n")
         fh.write(".section .text, \"ax\"\n\n")
         fh.writelines(body)
+        for table in jump_tables:
+            table_body = find_data_block(table)
+            if table_body:
+                fh.write("\n.section .rodata\n")
+                fh.write(table + ":\n")
+                fh.writelines(table_body)
         fh.write("\n")
 
     if args.keep_asm:
@@ -107,6 +141,12 @@ def main():
 
     cmd = [M2C_PY, M2C, "--target", "mipsel-gcc-c",
            "--function", args.function]
+    if args.valid_syntax:
+        cmd.append("--valid-syntax")
+    if args.no_switches:
+        cmd.append("--no-switches")
+    if args.stack_structs:
+        cmd.append("--stack-structs")
     if args.passes:
         cmd += ["--passes", str(args.passes)]
     if not args.no_context and os.path.exists(CONTEXT):

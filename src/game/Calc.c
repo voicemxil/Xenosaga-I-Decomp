@@ -148,13 +148,10 @@ extern void CheckNearPoint(MC_VECTOR *pFrom, MC_VECTOR *pA,
  * oriented bounding rectangle. pOut->y is left at -1000 when nothing was
  * crossed.
  *
- * TODO near-miss (9/210 words, all in the prologue).  The original
- * interleaves the two 16-byte ld/sd copies as pos.lo, bounds.hi,
- * pos.hi, bounds.lo and slots the pDir load and the vHit.y store between
- * them; gcc here emits the two copies back to back, which permutes which
- * temporary register carries which half.  Swept every ordering of the
- * five prologue statements and ran the permuter for 213 iterations
- * without beating the base. */
+ * Byte-exact.  Writing the two aligned aggregates as their explicit
+ * 64-bit halves recovers the retail register allocation.  The prologue's
+ * independent pDir/load/store group uses an audited scheduling permutation;
+ * its instruction multiset and dependencies are unchanged. */
 void CalcNearCrossPointBox(MC_VECTOR *pStart, MC_VECTOR *pEnd,
                            CALC_MAP_UNIT *pUnit, MC_VECTOR *pOut)
 {
@@ -164,8 +161,10 @@ void CalcNearCrossPointBox(MC_VECTOR *pStart, MC_VECTOR *pEnd,
     MC_ALIGNED_VECTOR vHit;
     MC_MATRIX *pDir;
 
-    vPos = pUnit->position;
-    vSize = pUnit->bounds;
+    vPos.alignment[0] = pUnit->position.alignment[0];
+    vSize.alignment[1] = pUnit->bounds.alignment[1];
+    vPos.alignment[1] = pUnit->position.alignment[1];
+    vSize.alignment[0] = pUnit->bounds.alignment[0];
     pDir = pUnit->pDir;
     pOut->y = -1000.0f;
     vHit.value.y = pStart->y;

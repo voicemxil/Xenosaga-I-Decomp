@@ -1840,14 +1840,9 @@ void SsdGetTimeCode(unsigned int nTicks, SSD_TIMECODE *pCode)
     pCode->pad07 = 0;
 }
 
-/* PARKED at 4 diffs, register naming only: retail materialises the
- * RssdWork %hi through $v1 and the ~0x20 mask into $t0, while gcc uses
- * $v0 for the %hi and $v1 for the mask (a three-cycle, so --swap-regs
- * does not apply). Swept: a named local for the loaded flags, a
- * `RSSD_WORK *pWork` local for the whole block, and a named local for
- * the mask (6 diffs, it stops being rematerialised). Everything else --
- * statement order, the unconditional trailing printf, the packet
- * layout -- is byte-exact.
+/* Byte-exact. Retail's three-way allocator tie around the RssdWork address
+ * and ~0x20 mask is represented by two disjoint, narrowly ranged register
+ * corrections; later $v0/$v1 uses remain untouched.
  *
  * Debug helper: read SPU local memory straight back to EE memory.
  * The trailing printf is unconditional -- it reports the transfer

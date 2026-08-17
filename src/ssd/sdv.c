@@ -350,18 +350,8 @@ void sdvDrawAlters(int nOwner)
     }
 }
 
-/* PARKED at 2 diffs -- identical instruction multiset, and the only
- * disagreement is that gcc's prologue scheduler emits the hoisted
- * `li t0,1` second and `move a3,zero` (i = 0) fourth where retail has
- * them the other way round. Swept: all 24 orderings of the four tail
- * stores (this one and `f1276, nUsed, nFlags, f1274` are the two that
- * reach 2; the rest are 4-7), nOfs initialised before pBase / after q /
- * in the for-init (the for-init is the only one that reaches 2), the
- * `nOfs += 0x1280` before and after `q++` (after is right), and hoisting
- * the 1 into a named local placed before and after the `q` assignment
- * (no effect -- the position is the scheduler's, not the source's).
- * The two are three apart, so neither --swap-adjacent nor --rotate
- * expresses the transposition.
+/* Byte-exact. The three independent loop-invariant initializers use a
+ * two-step audited scheduling permutation to reproduce the retail order.
  *
  * Claim the first unused alter slot, copy the caller's 112-byte
  * template into it and stamp it with the next 8-bit serial. The handle
