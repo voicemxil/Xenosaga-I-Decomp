@@ -370,25 +370,26 @@ void _pictureDisplayExtension(MPEGSTREAM *pStream)
     int nOffs;
     int i;
 
-    /* PARKED at 13 differing words.  The original shares ONE `nOffs = 1`
-     * block between both arms (the frame-structure test's beql jumps over
-     * it), while gcc gives us a second copy in an annulled delay slot.
-     * Swept: ternary and if/else forms of each arm, `!= 3` vs `== 3`
-     * inversion, else-if vs fully nested, and a `nOffs = 1` default
-     * pre-assignment (16 diffs). */
-    if (pStream->nUnk13C != 0) {
-        if (pStream->nUnk184 != 0) {
-            nOffs = pStream->nUnk178 ? 3 : 2;
-        } else {
-            nOffs = 1;
-        }
-    } else {
-        if (pStream->nUnk174 == 3) {
-            nOffs = pStream->nUnk184 ? 3 : 2;
-        } else {
-            nOffs = 1;
-        }
+    if (pStream->nUnk13C == 0) {
+        goto progressive;
     }
+    if (pStream->nUnk184 == 0) {
+        goto one_offset;
+    }
+    nOffs = pStream->nUnk178 ? 3 : 2;
+    goto have_count;
+
+progressive:
+    if (pStream->nUnk174 == 3) {
+        goto progressive_count;
+    }
+one_offset:
+    nOffs = 1;
+    goto have_count;
+
+progressive_count:
+    nOffs = pStream->nUnk184 ? 3 : 2;
+have_count:
     for (i = 0; i < nOffs; i++) {
         pStream->anUnk18C[i] = _nextBit(pStream, 16);
         _nextBit(pStream, 1);

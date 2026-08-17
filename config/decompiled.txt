@@ -2978,5 +2978,6 @@ InitCfSystem = 0x002439E0, 0x200; // INIT.c
 sceLseek = 0x00204AD0, 0x238; // sceFs.c
 sceRead = 0x00204D08, 0x270; // sceFs.c
 _mbAddressIncrement = 0x002128B8, 0x110; // sceMpegDec.c
+_pictureDisplayExtension = 0x00214518, 0xF4; // sceMpegDec.c
 HddTestDummySave = 0x00255FD0, 0x194; // HddTest.c
 subPosSet = 0x002BA158, 0x1F8; // sub.c
