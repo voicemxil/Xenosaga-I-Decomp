@@ -772,6 +772,70 @@ def coalesce_symbol_addresses(lines, specs):
     return out
 
 
+def split_indexed_scan_bases(lines, specs):
+    """Split a folded symbol+offset and shorten a temporary scan lifetime.
+
+    FUNC:N:OFFSET:STRIDE accepts the strict sequence used by reverse table
+    scans: `lui/addiu SYM+OFFSET; lw VALUE; branch/VALUE; li; move WALK,BASE;
+    addiu WALK,-STRIDE`.  Retail may materialize SYM first, add OFFSET as a
+    separate instruction, load VALUE through the former base register, and
+    then reuse that register as WALK.  Every symbol, offset, register link,
+    branch input, and stride is validated before rewriting.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, start_text, off_text, stride_text = spec.split(':')
+            start = int(start_text)
+            want_off = int(off_text, 0)
+            want_stride = int(stride_text, 0)
+        except (ValueError, TypeError):
+            raise SystemExit("--split-indexed-scan-base: bad spec %r "
+                             "(want FUNC:N:OFFSET:STRIDE)" % spec)
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if start < 0 or start + 6 >= len(pos):
+            raise SystemExit("--split-indexed-scan-base: site not found: %s" %
+                             spec)
+        hi, lo, load, branch, slot, move, step = pos[start:start + 7]
+        mh = re.match(r'^\tlui\t(\$\d+),%hi\(([^)]+)\)(.*)$', out[hi])
+        ml = re.match(r'^\taddiu\t(\$\d+),(\$\d+),%lo\(([^)]+)\)(.*)$',
+                      out[lo])
+        mw = re.match(r'^\tlw\t(\$\d+),0\((\$\d+)\)$', out[load])
+        mb = re.match(r'^\tbne\t(\$\d+),\$0,(.+)$', out[branch])
+        mm = re.match(r'^\tmove\t(\$\d+),(\$\d+)$', out[move])
+        ms = re.match(r'^\t(addu|addiu)\t(\$\d+),(\$\d+),(-?\d+)$',
+                      out[step])
+        symoff = re.match(r'^(.+)\+([0-9]+)$', mh.group(2)) if mh else None
+        if (not mh or not ml or not mw or not mb or not mm or not ms
+                or not symoff or ml.group(1) != mh.group(1)
+                or ml.group(2) != mh.group(1) or ml.group(3) != mh.group(2)
+                or mw.group(2) != mh.group(1) or mb.group(1) != mw.group(1)
+                or mm.group(2) != mh.group(1) or ms.group(2) != mm.group(1)
+                or ms.group(3) != mm.group(1)
+                or int(symoff.group(2)) != want_off
+                or int(ms.group(4)) != -want_stride):
+            raise SystemExit("--split-indexed-scan-base: %s shape changed" %
+                             spec)
+        old_base = mh.group(1)
+        new_base = mw.group(1)
+        symbol = symoff.group(1)
+        out[hi] = "\tlui\t%s,%%hi(%s)%s" % (new_base, symbol, mh.group(3))
+        out[lo] = "\taddiu\t%s,%s,%%lo(%s)%s" % (new_base, new_base,
+                                                   symbol, ml.group(4))
+        out[load] = "\tlw\t%s,0(%s)" % (old_base, new_base)
+        out[branch] = "\tbne\t%s,$0,%s" % (old_base, mb.group(2))
+        out[move] = "\tmove\t%s,%s" % (old_base, new_base)
+        out[step] = "\t%s\t%s,%s,-%d" % (ms.group(1), old_base, old_base,
+                                           want_stride)
+        out.insert(lo + 1, "\taddiu\t%s,%s,%d" %
+                   (new_base, new_base, want_off))
+    return out
+
+
 def swap_fp_commutative_operands(lines, sites):
     """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
 
@@ -2363,6 +2427,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          exchange_derived=None,
          retime_byte_guard=None, split_loop_byte=None,
          coalesce_symbol_address=None,
+         split_indexed_scan_base=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
@@ -2421,6 +2486,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if coalesce_symbol_address:
         lines = coalesce_symbol_addresses(lines, coalesce_symbol_address)
+
+    if split_indexed_scan_base:
+        lines = split_indexed_scan_bases(lines, split_indexed_scan_base)
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
@@ -3032,6 +3100,11 @@ if __name__ == "__main__":
                         metavar="SPECS",
                         help="comma-separated FUNC:HI:LO:REG sites whose "
                              "%hi/%lo symbol address must use one GPR")
+    parser.add_argument("--split-indexed-scan-base", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:N:OFFSET:STRIDE reverse-"
+                             "scan sites whose folded symbol offset and "
+                             "walker lifetime must be split")
     parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose three-FPR "
                              "add.s or mul.s has its two commutative source "
@@ -3113,6 +3186,7 @@ if __name__ == "__main__":
          scope(args.retime_byte_copy_guard),
          [t for t in (args.split_loop_byte_load or "").split(',') if t],
          [t for t in (args.coalesce_symbol_address or "").split(',') if t],
+         [t for t in (args.split_indexed_scan_base or "").split(',') if t],
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,

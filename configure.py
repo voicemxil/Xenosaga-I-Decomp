@@ -262,7 +262,13 @@ FILE_FIX_FLAGS = {
              "--swap-mem-into-slot scMISSILE3Script:2 "
              "--swap-adjacent scDestroyScript2:10,scDestroyScript2:13 "
              "--retime-branch-args scDestroyScript2:0"),
-    "Game.c": "--rotate-seq GameModeDebugMenu:10:-2,GameModeDebugMenu:12:3,GameModeDebugMenu:12:2",
+    "Game.c": (
+        "--rotate-seq GameModeDebugMenu:10:-2,GameModeDebugMenu:12:3,"
+        "GameModeDebugMenu:12:2,GameResourceDump:26:5,"
+        "GameResourceDump:27:2,GameResourceDump:29:2 "
+        "--swap-regs GameResourceDump:3-16:15-23 "
+        "--split-indexed-scan-base GameResourceDump:8:2032:16 "
+        "--branch-likely GameResourceDump:3"),
     "tskUmnBgCube.c": " --as-g0 --fp-pair-hazard tskUmnBgCubeMain",
     "sdv.c": "--branch-unlikely sdvScheduleSound:1 --rotate-seq sdvCreateAlter:3:3,sdvCreateAlter:4:2",
     "File.c": "--branch-unlikely FileObjectJpegDecChange:1 --swap-adjacent FileObjectJpegDecChange:3",

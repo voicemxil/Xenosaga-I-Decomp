@@ -1049,15 +1049,6 @@ int GameModePause(void)
 extern void xglFontDebugPrintf(int x, int y, const char *pFmt, ...);
 extern char D_004C01B0[];
 
-/* TODO: near-miss, 14 diffs of the right 58 words. The pointer form of
- * the backward scan (a `q = &GameResource[127]` local, walked with `p--`)
- * is what gets the length right -- the array-index forms are 34-40. What
- * is left: the original materialises the scan base as %hi/%lo(GameResource)
- * plus a SEPARATE `addiu +2032` (an LSR giv initial value) where gcc folds
- * 2032 into the addiu, and its bottom test is `bnezl` where gcc emits a
- * plain `bnez` with the same (unannulled) delay slot. Swept: GameResource
- * + 127, a (char *) byte offset, a variable index, and re-using p before
- * the loop (49). LAUNDER(q) gets to 13 and is not worth the steering. */
 /* Debug overlay: list sixteen resource-table entries ending at the last
  * used one. */
 void GameResourceDump(int nEnable)
