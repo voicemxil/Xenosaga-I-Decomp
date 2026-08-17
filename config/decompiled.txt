@@ -1645,7 +1645,7 @@ vprintf = 0x00333C80, 0x28; // newlib_vprintf
 vsprintf = 0x00333CA8, 0x54; // newlib_vsprintf
 vsprintf_r = 0x00333D00, 0x54; // newlib_vsprintf
 
-// _vfprintf_r = 0x003315F0, 0x1660; // newlib_vfprintf -- TODO, now at 369 diff words (was 1394). The TU is newlib CVS rev 5bacbf109 (2000-08-16, the `if(ndig)` %g fix) compiled against ITS OWN ERA's headers (git archive 5bacbf109 newlib/libc/{include,stdio} -- the 1.9.0-tarball headers blow up BUF to long-double size and re-macro isnan). Recipe: 2.96 -O2 -G0, gccinc va_arg override, --barrier-return-store --barrier-branch-move --expand-sym-loads. With that, vfprintf/cvt/exponent/__sprint/__sbprintf are ALL byte-exact from the same compile; only _vfprintf_r itself remains. Remaining classes: (1) gcc's own -fdelayed-branch pass fills a handful of noreorder branch slots (isinf/isnan result tests) that the original leaves as nop. fix_cc_asm now has --unfill-gcc-slots, but BLANKET unfill is far worse (orig fills most slots, declines a few) -- it needs per-SITE selection, e.g. an address- or label-keyed site list; (2) a few register-allocation differences (slt a1-vs-v0 class) around the %g block at word ~1020. _free_r (11d) and _strtod_r (674d, a ~56-word duplicated tail block) are the same hard-tail category. Era tree: git mirror github.com/mirror/newlib-cygwin, worktree in the dev container at /opt/newlib-2000.
+_vfprintf_r = 0x003315F0, 0x1660; // newlib_vfprintf.c
 
 _realloc_r = 0x00337F58, 0x5A0; // newlib_reallocr
 _calloc_r = 0x00337D28, 0xB4; // newlib_callocr

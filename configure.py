@@ -358,7 +358,7 @@ FILE_FIX_FLAGS = {
     "newlib_strtod.c": "--barrier-return-store --barrier-branch-move",
     "newlib_strtoul.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_vfscanf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
-    "newlib_vfprintf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
+    "newlib_vfprintf.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads --pin-slot-nop _vfprintf_r:4",
     "newlib_reallocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_callocr.c": "--barrier-return-store --barrier-branch-move --expand-sym-loads",
     "newlib_freer.c": ("--barrier-return-store --barrier-branch-move --expand-sym-loads "

@@ -355,6 +355,20 @@ _DEFUN (_VFPRINTF_R, (data, fp, fmt0, ap),
 		iovp = iov; \
 	} \
 }
+
+/* Floating conversion fragments initialize the independent length first.
+ * This keeps both conversion values live across the surrounding branches. */
+#define PRINT_FLOAT_FRAGMENT(ptr, len) { \
+	iovp->iov_len = (len); \
+	iovp->iov_base = (ptr); \
+	uio.uio_resid += (len); \
+	iovp++; \
+	if (++uio.uio_iovcnt >= NIOV) { \
+		if (__sprint(fp, &uio)) \
+			goto error; \
+		iovp = iov; \
+	} \
+}
 #define	PAD(howmany, with) { \
 	if ((n = (howmany)) > 0) { \
 		while (n > PADSIZE) { \
@@ -808,18 +822,18 @@ number:			if ((dprec = prec) >= 0)
 					if(ndig) {
 						PRINT(decimal_point, 1);
 						PAD(-expt, zeroes);
-						PRINT(cp, ndig);
+						PRINT_FLOAT_FRAGMENT(cp, ndig);
 					}
 				} else if (expt >= ndig) {
-					PRINT(cp, ndig);
+					PRINT_FLOAT_FRAGMENT(cp, ndig);
 					PAD(expt - ndig, zeroes);
 					if (flags & ALT)
 						PRINT(".", 1);
 				} else {
-					PRINT(cp, expt);
+					PRINT_FLOAT_FRAGMENT(cp, expt);
 					cp += expt;
 					PRINT(".", 1);
-					PRINT(cp, ndig-expt);
+					PRINT_FLOAT_FRAGMENT(cp, ndig-expt);
 				}
 			} else {	/* 'e' or 'E' */
 				if (ndig > 1 || flags & ALT) {
@@ -827,7 +841,7 @@ number:			if ((dprec = prec) >= 0)
 					ox[1] = '.';
 					PRINT(ox, 2);
                                        if (_double) {
-						PRINT(cp, ndig-1);
+						PRINT_FLOAT_FRAGMENT(cp, ndig-1);
 					} else	/* 0.[0..] */
 						/* __dtoa irregularity */
 						PAD(ndig - 1, zeroes);
