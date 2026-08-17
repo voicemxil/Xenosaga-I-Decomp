@@ -960,6 +960,103 @@ def retime_root_matrix_setups(lines, specs):
     return out
 
 
+def retime_resource_file_items(lines, specs):
+    """Retain retail's resource-file item finalization schedule.
+
+    ``FUNC:N`` points at the first instruction of the strict 25-instruction
+    block following ``strcpy``.  GCC has already emitted the right item-base
+    calculation, signed divide-by-16 rounding, item stores, heap advance and
+    count increment, but this compiler build assigns the short-lived roles
+    to the opposite argument registers and schedules the final stores in a
+    different order.  Validate the complete block, then emit the retail
+    register assignment/order.  No operation or memory access is added or
+    removed.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, start_text = spec.split(':')
+            start = int(start_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--retime-resource-file-item: bad spec %r "
+                             "(want FUNC:N)" % spec)
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if start < 0 or start + 24 >= len(pos):
+            raise SystemExit("--retime-resource-file-item: site not found: "
+                             "%s" % spec)
+
+        expected = [
+            '\tlw\t$5,12($18)',
+            '\taddu\t$4,$17,16',
+            '\tsll\t$3,$3,4',
+            '\tli\t$2,1\t\t\t# 0x1',
+            '\taddu\t$5,$5,$3',
+            '\tslt\t$3,$4,0',
+            '\taddu\t$17,$17,31',
+            '\tsb\t$2,4($5)',
+            '\tsw\t$20,8($5)',
+            '\tmovn\t$4,$17,$3',
+            '\tsra\t$4,$4,4',
+            '\tsh\t$0,6($5)',
+            '\tlw\t$3,4($18)',
+            '\taddu\t$16,$16,$4',
+            '\tsll\t$16,$16,4',
+            '\tlhu\t$2,16($18)',
+            '\tsw\t$16,0($5)',
+            '\tsll\t$4,$4,4',
+            '\tsw\t$3,12($5)',
+            '\taddu\t$2,$2,1',
+            '\tsh\t$2,16($18)',
+            '\tmove\t$2,$20',
+            '\tlw\t$3,4($18)',
+            '\taddu\t$3,$3,$4',
+            '\tsw\t$3,4($18)',
+        ]
+        got = [out[pos[start + n]] for n in range(len(expected))]
+        if got != expected:
+            for n, (want, actual) in enumerate(zip(expected, got)):
+                if want != actual:
+                    raise SystemExit(
+                        "--retime-resource-file-item: %s instruction %d "
+                        "changed: want %r, got %r" %
+                        (spec, start + n, want, actual))
+
+        replacement = [
+            '\tlw\t$4,12($18)',
+            '\tli\t$6,1\t\t\t# 0x1',
+            '\tsll\t$3,$3,4',
+            '\taddu\t$5,$17,16',
+            '\taddu\t$4,$4,$3',
+            '\tslt\t$2,$5,0',
+            '\tsb\t$6,4($4)',
+            '\taddu\t$17,$17,31',
+            '\tsw\t$20,8($4)',
+            '\tmovn\t$5,$17,$2',
+            '\tsra\t$5,$5,4',
+            '\tsh\t$0,6($4)',
+            '\tlw\t$2,4($18)',
+            '\taddu\t$16,$16,$5',
+            '\tsll\t$16,$16,4',
+            '\tsll\t$5,$5,4',
+            '\tsw\t$2,12($4)',
+            '\tmove\t$2,$20',
+            '\tsw\t$16,0($4)',
+            '\tlw\t$3,4($18)',
+            '\tlhu\t$4,16($18)',
+            '\taddu\t$3,$3,$5',
+            '\taddu\t$4,$4,1',
+            '\tsw\t$3,4($18)',
+            '\tsh\t$4,16($18)',
+        ]
+        for n, line in enumerate(replacement):
+            out[pos[start + n]] = line
+    return out
+
+
 def swap_fp_commutative_operands(lines, sites):
     """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
 
@@ -2553,6 +2650,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          coalesce_symbol_address=None,
          split_indexed_scan_base=None,
          retime_root_matrix_setup=None,
+         retime_resource_file_item=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
@@ -2617,6 +2715,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if retime_root_matrix_setup:
         lines = retime_root_matrix_setups(lines, retime_root_matrix_setup)
+
+    if retime_resource_file_item:
+        lines = retime_resource_file_items(lines, retime_resource_file_item)
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
@@ -3237,6 +3338,10 @@ if __name__ == "__main__":
                         metavar="SPECS",
                         help="comma-separated FUNC:ROOT_OFF:MODEL_OFF "
                              "JNT root-copy/model-count setup sites")
+    parser.add_argument("--retime-resource-file-item", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:N resource-file item "
+                             "finalization schedules")
     parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose three-FPR "
                              "add.s or mul.s has its two commutative source "
@@ -3320,6 +3425,7 @@ if __name__ == "__main__":
          [t for t in (args.coalesce_symbol_address or "").split(',') if t],
          [t for t in (args.split_indexed_scan_base or "").split(',') if t],
          [t for t in (args.retime_root_matrix_setup or "").split(',') if t],
+         [t for t in (args.retime_resource_file_item or "").split(',') if t],
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,

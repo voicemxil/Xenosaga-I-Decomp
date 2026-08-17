@@ -308,17 +308,6 @@ extern int sceLseek(int fd, int nOffset, int nWhence);
 extern int sceRead(int fd, void *pBuf, int nSize);
 extern int sceClose(int fd);
 
-/* TODO: near-miss, 23 diffs at the right 100 words. Early returns (rather
-   than a single `pData` result local) are what get the length right -- a
-   result variable costs an extra callee-saved register and four words.
-   Residue is entirely in the block that fills the new item: the original
-   holds the item pointer in $a0 and the name's block count in $a1, and
-   stores .pName before .nSize, where gcc mirrors the pair and sinks the
-   name-block shift past the .nSize store. Swept: four placements of the
-   name-block rounding relative to the item stores (23-26), and a full
-   24-ordering tools/permute.py run over the name-block rounding plus the
-   .nState/.pName/.nSize stores -- 5 distinct schedules, floor 23. The
-   residue is therefore a register tie-break, not a store order. */
 /* Load pFile from pPath into the top of the heap and append a type-1 item
    describing it. The file's name is copied in immediately behind the data
    and the item's size covers both. Returns the data address, or 0 when the

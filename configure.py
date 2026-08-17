@@ -328,6 +328,10 @@ FILE_FIX_FLAGS = {
               "--exchange-derived-results MAP_updateUnitEnemy:14 "
               "--swap-regs MAP_updateUnitEnemy:2-5:16,18"),
     "Party.c": "--retime-branch-call PartyAttackerGet:2",
+    # The file-item tail has the same operations as retail, but GCC assigns
+    # its short-lived item/name roles to the opposite argument registers and
+    # schedules the independent stores differently.
+    "RSRC.c": "--retime-resource-file-item RSRC_loadFileSub:64",
     # ACT_setArms: gcc annuls the arm-slot compare's branch because it
     # filled the delay slot with a copy of the merge point's instruction;
     # the original executes that copy unconditionally and re-does it at the
