@@ -238,7 +238,9 @@ FILE_FIX_FLAGS = {
     "nmlPacket.c": ("--swap-regs nmlPacketAddGifTag:16-17:25,36 "
                     "--swap-int-operands nmlPacketAddGifTag:25 "
                     "--rotate-seq nmlPacketAddGifTag:24:4,"
-                    "nmlPacketAddGifTag:26:2,nmlPacketAddGifTag:27:3"),
+                    "nmlPacketAddGifTag:26:2,nmlPacketAddGifTag:27:3 "
+                    "--mtc1-nop nmlPacketAddGsFogCol:0,"
+                    "nmlPacketAddGsFogCol:1"),
     "update.c": ("--branch-unlikely updateCursor:22 "
                  "--rotate-seq updateCursor:169:2,updateCursor:170:2,"
                  "updateCursor:189:2,updateCursor:190:2,"
