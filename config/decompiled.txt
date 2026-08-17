@@ -2982,3 +2982,4 @@ _pictureDisplayExtension = 0x00214518, 0xF4; // sceMpegDec.c
 HddTestDummySave = 0x00255FD0, 0x194; // HddTest.c
 subPosSet = 0x002BA158, 0x1F8; // sub.c
 svDrawSchedulerParticle = 0x002E0910, 0x344; // sv.c
+svAddImage = 0x002DE168, 0x160; // sv.c

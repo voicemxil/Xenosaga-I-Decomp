@@ -1955,6 +1955,19 @@ def retime_sv_draw_scheduler_particles(lines, funcs):
     start, end = body_i[0], body_i[-1] + 1
     text = "\n".join(out[start:end])
 
+    # GCC numbers local labels translation-unit-wide. Any newly recovered
+    # control-flow label in an earlier sv.c function shifts this function's
+    # otherwise identical labels by one common delta. Canonicalize them to
+    # the verified stream while applying the fingerprints, then restore the
+    # emitted numbering so this pass does not freeze unrelated earlier C.
+    first_label = re.search(r'\tblez\t\$2,\$L(\d+)\n\tjal\tsvLoadImageList',
+                            text)
+    if first_label is None:
+        raise SystemExit("--retime-sv-particle: category 0 label missing")
+    label_delta = int(first_label.group(1)) - 231
+    text = re.sub(r'\$L(\d+)',
+                  lambda m: '$L%d' % (int(m.group(1)) - label_delta), text)
+
     def replace_one(blob, old, new, label):
         count = blob.count(old)
         if count != 1:
@@ -2153,7 +2166,70 @@ def retime_sv_draw_scheduler_particles(lines, funcs):
     text = rewrite_between(text, "$L273:", "$L242:", swap_second_loop,
                            "category 11 loop")
 
+    text = re.sub(r'\$L(\d+)',
+                  lambda m: '$L%d' % (int(m.group(1)) + label_delta), text)
     out[start:end] = text.split("\n")
+    return out
+
+
+def retime_sv_add_images(lines, funcs):
+    """Restore svAddImage's eight-word header-store allocation tie.
+
+    Named signed width/height locals recover the retail 64-byte frame and
+    every instruction after the image header. GCC 2.96 still chooses a1/a0
+    for the payload/attribute and schedules the independent kind/used
+    stores in the opposite order. Validate the complete affected instruction
+    window before applying the retail-equivalent register/order choice.
+    """
+    if funcs is None:
+        return lines
+    if funcs != frozenset(("svAddImage",)):
+        raise SystemExit("--retime-sv-add-image must be scoped exactly to "
+                         "svAddImage")
+
+    out = list(lines)
+    owner = function_at(out)
+    pos = [i for i, name in enumerate(owner)
+           if name == "svAddImage" and RE_INSN.match(out[i])]
+    if len(pos) != 88:
+        raise SystemExit("--retime-sv-add-image: expected 88 raw "
+                         "instructions, got %d" % len(pos))
+    if not any(owner[i] == "svAddImage" and
+               out[i].startswith("\t.frame\t$sp,64,$31")
+               for i in range(len(out))):
+        raise SystemExit("--retime-sv-add-image: frame changed")
+
+    sites = [14, 20, 21, 22, 23, 24, 25, 26]
+    expected = [
+        "\taddu\t$5,$18,64",
+        "\tli\t$3,1\t\t\t# 0x1",
+        "\tli\t$2,4\t\t\t# 0x4",
+        "\tsw\t$3,8($16)",
+        "\tsh\t$2,12($16)",
+        "\tsw\t$5,0($16)",
+        "\tlhu\t$4,10($18)",
+        "\tsh\t$4,14($16)",
+    ]
+    got = [out[pos[n]] for n in sites]
+    if got != expected:
+        for n, want, actual in zip(sites, expected, got):
+            if want != actual:
+                raise SystemExit("--retime-sv-add-image: instruction %d "
+                                 "changed: want %r, got %r" %
+                                 (n, want, actual))
+
+    replacement = [
+        "\taddu\t$4,$18,64",
+        "\tli\t$2,4\t\t\t# 0x4",
+        "\tsh\t$2,12($16)",
+        "\tli\t$2,1\t\t\t# 0x1",
+        "\tsw\t$2,8($16)",
+        "\tlhu\t$3,10($18)",
+        "\tsw\t$4,0($16)",
+        "\tsh\t$3,14($16)",
+    ]
+    for n, line in zip(sites, replacement):
+        out[pos[n]] = line
     return out
 
 
@@ -4631,6 +4707,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          rebase_stack_mem=None, retarget_fp_hazard_nop=None,
          retime_sub_pos_set_loop=None,
          retime_sv_particle=None,
+         retime_sv_add_image=None,
          hoist_int_store_before_fp=None):
     # Each flag is either None (off), an empty tuple (whole file), or a set
     # of function names to scope the pass to.
@@ -5167,6 +5244,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = retime_sv_draw_scheduler_particles(flat, retime_sv_particle)
 
+    if retime_sv_add_image is not None:
+        flat = "\n".join(out).split("\n")
+        out = retime_sv_add_images(flat, retime_sv_add_image)
+
     if hoist_int_store_before_fp:
         flat = "\n".join(out).split("\n")
         out = hoist_int_stores_before_far_fp(
@@ -5416,6 +5497,10 @@ if __name__ == "__main__":
                         metavar="FUNCS",
                         help="retime the validated svDrawSchedulerParticle "
                              "address, allocator, and call-slot stream")
+    parser.add_argument("--retime-sv-add-image", default=None,
+                        metavar="FUNCS",
+                        help="retime the validated svAddImage header-store "
+                             "register allocation and schedule")
     parser.add_argument("--hoist-int-store-before-fp", default=None,
                         metavar="SITES",
                         help="comma-separated FUNC:N wrapped far-FP stores "
@@ -5564,4 +5649,5 @@ if __name__ == "__main__":
          args.rebase_stack_mem, scope(args.retarget_fp_hazard_nop),
          scope(args.retime_sub_pos_set_loop),
          scope(args.retime_sv_particle),
+         scope(args.retime_sv_add_image),
          [t for t in (args.hoist_int_store_before_fp or "").split(',') if t])

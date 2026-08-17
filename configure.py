@@ -300,7 +300,8 @@ FILE_FIX_FLAGS = {
     "sceMpeg.c": "--swap-adjacent sceMpegReset:3",
     "TCAMERA.c": "--unfill-gcc-slots TCAMERA_mpackGetInterest --swap-regs TCAMERA_mpackGetInterest:2-3",
     "mpeg.c": "--swap-adjacent _sequenceHeader:26 --swap-into-slot _sequenceHeader:7,_sequenceHeader:12",
-    "sv.c": "--retime-sv-particle svDrawSchedulerParticle",
+    "sv.c": ("--retime-sv-particle svDrawSchedulerParticle "
+             "--retime-sv-add-image svAddImage"),
     "xglPacket.c": "--rotate-seq xglPacketInterpolate:26:2,xglPacketInterpolate:26:5",
     "tskMenuPausePage.c": "--swap-adjacent PauseMenuPage0:12 --rotate PauseMenuPage0:21:3",
     "xglCd.c": "--swap-adjacent xglCdReadCancel:41! --short-loop-pad FileSelectListReload:3:5,FileSelectListReload:4:0,FileSelectListReload:5:0",

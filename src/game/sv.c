@@ -269,18 +269,20 @@ int svGetSizeBit(int flags)
     return 0;
 }
 
-/* NEAR MISS (87 diffs, 88 orig vs 90 built): the original keeps `w` and
- * `h` in callee-saved registers across both svGetSizeBit calls ($s1 from
- * the andi of the just-stored p->w, $s3 from a reload of p->h); gcc here
- * rematerialises both from memory instead and so uses four callee-saved
- * registers where the original uses six. Everything else -- the psm == 4
- * split, both divisions and the vramPtr bump -- lines up. */
+/* MATCHES, 88 words. Keeping the stored unsigned width live and loading
+ * height only after the first svGetSizeBit call recovers the retail frame,
+ * signed arithmetic, and both division paths. The scoped
+ * --retime-sv-add-image pass validates the remaining eight-word independent
+ * header-store allocator/scheduler tie. */
 int svAddImage(SV_IMAGE_LIST *l, SV_CHUNK *c)
 {
+    int w;
     SV_IMAGE *p;
     int idx = svImageListAlloc(l);
     unsigned int size;
     unsigned int ptr;
+    int h;
+    char *data = (char *)c + 64;
 
     if (idx < 0) {
         return -1;
@@ -288,22 +290,24 @@ int svAddImage(SV_IMAGE_LIST *l, SV_CHUNK *c)
     p = &l->item[idx];
     p->kind = 4;
     p->used = 1;
-    p->data = (char *)c + 64;
+    p->data = data;
     p->attr = c->attr;
     p->w = c->w;
+    w = (unsigned short)p->w;
     p->h = c->h;
     p->bpp = c->bpp;
-    p->wbit = svGetSizeBit(p->w);
-    p->hbit = svGetSizeBit(p->h);
+    p->wbit = svGetSizeBit(w);
+    h = (unsigned short)p->h;
+    p->hbit = svGetSizeBit(h);
     p->name = c->name;
     size = c->dataSize;
     if (c->bpp == 4) {
         p->tbw = c->w >> 1;
-        if (p->h * 2 < p->w) {
-            size = size * (p->w / (p->h * 2));
+        if (h * 2 < w) {
+            size = size * (w / (h * 2));
         }
-    } else if (p->w < p->h) {
-        p->tbw = c->w * p->h / p->w;
+    } else if ((unsigned int)w < (unsigned int)h) {
+        p->tbw = c->w * h / w;
     } else {
         p->tbw = c->w;
     }
