@@ -390,7 +390,20 @@ FILE_FIX_FLAGS = {
     "tskUmn.c": "--rotate tskUmnSimulationInfo:100 --swap-adjacent tskUmnSimulationList:5,tskUmnDataBaseName:353,tskUmnDataBaseName:358 --fp-pair-hazard UmnDataBaseModel --short-loop-pad tskUmnDataBaseName:0:3,tskUmnDataBaseName:1:0 --swap-regs tskUmnDataBaseName:18-21:230-299 --remat-call-constant tskUmnSimulationList:18-2-4:20",
     # JNT root accessors: TI-mode quadword copies whose allocator
     # tie-break lands the pair backwards (JVM subagent, verified).
-    "JNT.c": ("--hoist-return-store JNT_getRootTrans,JNT_getRootRotate,JNT_getRootScale --swap-regs JNT_getRootTrans:2-3 --swap-regs JNT_getRootRotate:2-3 --swap-regs JNT_getRootScale:2-3 --branch-unlikely JNT_setModel:1"),
+    "JNT.c": (
+        "--hoist-return-store JNT_getRootTrans,JNT_getRootRotate,JNT_getRootScale "
+        "--swap-regs JNT_getRootTrans:2-3 "
+        "--swap-regs JNT_getRootRotate:2-3 "
+        "--swap-regs JNT_getRootScale:2-3 "
+        "--retime-root-matrix-setup JNT_resetMatrix:1952:40 "
+        "--swap-regs JNT_resetMatrix:17-20:60-71 "
+        "--swap-regs JNT_resetMatrix:2-3:72,74-75,77,80-81,86-87 "
+        "--swap-regs JNT_resetMatrix:3-4:76-77,79,81,83,86 "
+        "--swap-regs JNT_resetMatrix:2-4:76,84-85,88 "
+        "--swap-adjacent JNT_resetMatrix:59 "
+        "--rebase-stack-mem JNT_resetMatrix:73,77,79,81:17:64 "
+        "--rotate-seq JNT_resetMatrix:73:-3 "
+        "--branch-unlikely JNT_setModel:1"),
     # Each flag may appear ONCE per entry: argparse stores rather than
     # appends, so a repeated flag silently drops the earlier sites --
     # that regressed three matched functions before fix_cc_asm.py

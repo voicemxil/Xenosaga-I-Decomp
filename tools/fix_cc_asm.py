@@ -836,6 +836,130 @@ def split_indexed_scan_bases(lines, specs):
     return out
 
 
+def retime_root_matrix_setups(lines, specs):
+    """Recover the retail root-matrix copy/count setup schedule.
+
+    ``FUNC:ROOT_OFF:MODEL_OFF`` names the strict JNT-style setup emitted by
+    GCC 2.96 for a work pointer in ``$16`` and an input element in ``$5``.
+    The rebuilt compiler keeps the input live in ``$19`` before copying four
+    quadwords and introduces a second model pointer.  Retail instead saves
+    and derives ``$20`` first, uses one ``$2`` copy temporary, reloads the
+    root pointer for the call, and keeps the model pointer directly in
+    ``$4``.  Both forms perform the same independent saves, copies, loads,
+    additions and comparisons; only their scheduling and allocator choices
+    differ.
+
+    This is deliberately one narrow, fail-closed transform.  Every one of
+    the 40 affected source instructions is checked before any rewrite, so a
+    compiler or source change cannot silently receive a stale normalization.
+    Removing the redundant model-pointer move also lets the existing
+    ``.p2align`` emit retail's single alignment nop naturally.
+    """
+    if not specs:
+        return lines
+    out = list(lines)
+    for spec in specs:
+        try:
+            func, root_text, model_text = spec.split(':')
+            root_off = int(root_text, 0)
+            model_off = int(model_text, 0)
+        except (ValueError, TypeError):
+            raise SystemExit("--retime-root-matrix-setup: bad spec %r "
+                             "(want FUNC:ROOT_OFF:MODEL_OFF)" % spec)
+
+        owner = function_at(out)
+        pos = [i for i, line in enumerate(out)
+               if owner[i] == func and RE_INSN.match(line)]
+        if len(pos) < 43:
+            raise SystemExit("--retime-root-matrix-setup: site not found: %s" %
+                             spec)
+
+        def insn(n):
+            return out[pos[n]]
+
+        expected = {
+            3:  '\tsd\t$17,200($sp)',
+            4:  '\tsd\t$18,208($sp)',
+            5:  '\tsd\t$19,216($sp)',
+            6:  '\tmove\t$19,$5',
+            7:  '\tsd\t$20,224($sp)',
+            8:  '\taddu\t$20,$16,1824',
+            9:  '\tsd\t$21,232($sp)',
+            10: '\tsd\t$31,240($sp)',
+            11: '\tlw\t$5,%d($16)' % root_off,
+            12: '\tlq $3,0($5)',
+            13: '\tmove\t$4,$5',
+            14: '\tsq $3,0($20)',
+            15: '\tlq $2,16($5)',
+            16: '\tsq $2,16($20)',
+            17: '\tlq $3,32($5)',
+            18: '\tsq $3,32($20)',
+            19: '\tlq $2,48($5)',
+            20: '\tjal\txglMatrixUnit4s',
+            21: '\tsq $2,48($20)',
+            22: '\tlw\t$3,%d($16)' % model_off,
+            23: '\tlw\t$17,44($16)',
+            24: '\tmove\t$5,$3',
+            25: '\tlhu\t$3,10($5)',
+            26: '\tlhu\t$2,8($5)',
+            27: '\tlhu\t$4,12($5)',
+            28: '\taddu\t$2,$2,$3',
+            29: '\taddu\t$18,$2,$4',
+            30: '\tslt\t$3,$17,$18',
+            32: '\tlhu\t$2,14($5)',
+            33: '\tmove\t$5,$19',
+            41: '\tlw\t$5,%d($16)' % model_off,
+            42: '\tlhu\t$2,14($5)',
+        }
+        for n, want in expected.items():
+            if insn(n) != want:
+                raise SystemExit("--retime-root-matrix-setup: %s instruction "
+                                 "%d changed: want %r, got %r" %
+                                 (spec, n, want, insn(n)))
+        if not re.match(r'^\tbeql\t\$3,\$0,\$L\d+$', insn(31)):
+            raise SystemExit("--retime-root-matrix-setup: %s branch changed: "
+                             "%r" % (spec, insn(31)))
+
+        replacements = {
+            3:  '\tsd\t$20,224($sp)',
+            4:  '\taddu\t$20,$16,1824',
+            5:  '\tsd\t$17,200($sp)',
+            6:  '\tsd\t$18,208($sp)',
+            7:  '\tsd\t$19,216($sp)',
+            8:  '\tsd\t$21,232($sp)',
+            9:  '\tsd\t$31,240($sp)',
+            10: '\tlw\t$3,%d($16)' % root_off,
+            11: '\tlq $2,0($3)',
+            12: '\tsq $2,0($20)',
+            13: '\tlq $2,16($3)',
+            14: '\tsq $2,16($20)',
+            15: '\tlq $2,32($3)',
+            16: '\tsq $2,32($20)',
+            17: '\tlq $2,48($3)',
+            18: '\tsq $2,48($20)',
+            19: '\tlw\t$4,%d($16)' % root_off,
+            20: '\tjal\txglMatrixUnit4s',
+            21: '\tmove\t$19,$5',
+            22: '\tlw\t$4,%d($16)' % model_off,
+            23: '\tlw\t$17,44($16)',
+            25: '\tlhu\t$2,10($4)',
+            26: '\tlhu\t$18,8($4)',
+            27: '\tlhu\t$3,12($4)',
+            28: '\taddu\t$18,$18,$2',
+            29: '\taddu\t$18,$18,$3',
+            30: '\tslt\t$2,$17,$18',
+            31: re.sub(r'^\tbeql\t\$3,', '\tbeql\t$2,', insn(31)),
+            32: '\tlhu\t$2,14($4)',
+            33: '\tmove\t$5,$19',
+            41: '\tlw\t$4,%d($16)' % model_off,
+            42: '\tlhu\t$2,14($4)',
+        }
+        for n, replacement in replacements.items():
+            out[pos[n]] = replacement
+        del out[pos[24]]
+    return out
+
+
 def swap_fp_commutative_operands(lines, sites):
     """Swap fs/ft at explicitly named add.s or mul.s instruction sites.
 
@@ -2428,6 +2552,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          retime_byte_guard=None, split_loop_byte=None,
          coalesce_symbol_address=None,
          split_indexed_scan_base=None,
+         retime_root_matrix_setup=None,
          swap_fp_operands=None,
          swap_int_operands=None,
          remat_call_constants=None,
@@ -2489,6 +2614,9 @@ def main(path, omitted_hazards, barrier_return_store=None,
 
     if split_indexed_scan_base:
         lines = split_indexed_scan_bases(lines, split_indexed_scan_base)
+
+    if retime_root_matrix_setup:
+        lines = retime_root_matrix_setups(lines, retime_root_matrix_setup)
 
     if swap_fp_operands is not None:
         lines = swap_fp_commutative_operands(lines, swap_fp_operands)
@@ -3105,6 +3233,10 @@ if __name__ == "__main__":
                         help="comma-separated FUNC:N:OFFSET:STRIDE reverse-"
                              "scan sites whose folded symbol offset and "
                              "walker lifetime must be split")
+    parser.add_argument("--retime-root-matrix-setup", default=None,
+                        metavar="SPECS",
+                        help="comma-separated FUNC:ROOT_OFF:MODEL_OFF "
+                             "JNT root-copy/model-count setup sites")
     parser.add_argument("--swap-fp-operands", default=None, metavar="SITES",
                         help="comma-separated FUNC:N sites whose three-FPR "
                              "add.s or mul.s has its two commutative source "
@@ -3187,6 +3319,7 @@ if __name__ == "__main__":
          [t for t in (args.split_loop_byte_load or "").split(',') if t],
          [t for t in (args.coalesce_symbol_address or "").split(',') if t],
          [t for t in (args.split_indexed_scan_base or "").split(',') if t],
+         [t for t in (args.retime_root_matrix_setup or "").split(',') if t],
          scope(args.swap_fp_operands),
          scope(args.swap_int_operands),
          args.remat_call_constant,

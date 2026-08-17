@@ -2957,3 +2957,4 @@ GameResourceAlloc = 0x0024A9D8, 0xB4; // GameResource.c
 GameResourceRealloc = 0x0024AA90, 0xA8; // GameResource.c
 MAP_updateUnitEnemy = 0x002BF8B0, 0xC4; // MAP.c
 PartyAttackerGet = 0x002B6240, 0x80; // Party.c
+JNT_resetMatrix = 0x003148A8, 0x18C; // JNT.c

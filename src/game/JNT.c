@@ -744,47 +744,7 @@ int JNT_startProduction(JNT_PRODUCER *pProducer, void *pUnit, float fFrame)
 }
 
 
-/* TODO: near-miss (100 built vs 99 original words).  Every block is
- * structurally right -- the quadword save of the root matrix, both element
- * walks, the two JNT_getStaticVal2 loops and the palette re-multiply -- and
- * the whole difference is one CSE inside the last loop.
- *
- * The original reads pWork->nIndex THREE times per iteration: once for the
- * MATRIX_convert4 source, once for the destination address, and once for
- * the increment.  The first two survive here because there are calls
- * between them, but gcc 2.96 folds the third into the second: the only
- * thing separating them is the four TI-mode quadword stores, and
- * -fstrict-aliasing says a `mode(TI)` store cannot touch an `int` load.
- *
- * The LAUNDER_V below is what restores that third read, and it is worth
- * exactly one word plus 19 instructions: with it the function is the
- * original's length (99 words) and 52 diffs, without it 100 words and 71.
- * It introduces no new differing word -- the two diff sets are nested.
- *
- * Everything else tried does NOT reach the CSE: the JVAL/JSVALUE union
- * trick that fixes this class in Java_Chr.c and JS.c (both wrapping the
- * quadword in a union so the stores take the union's alias set, and
- * reading nIndex through a union with a JNT_QUAD member); three copy
- * shapes (a JNT_QUAD* source cursor, the fully inlined form, and a char*
- * cursor with byte offsets); reading the index through a
- * `volatile int *`, in both cast-in-place and named-local form; and
- * building the whole file with -fno-strict-aliasing, which is strictly
- * worse -- it costs three other functions in JNT.c and leaves this one
- * at 51 diffs.
- *
- * WHAT IS LEFT (52 diffs, all in two clumps, indices 3-33 and 60-88) is a
- * register tie-break, not an aliasing problem: gcc puts pWork->pMatrix in
- * $a1 where the original uses $v1, which forces `move $4,$5` for the
- * xglMatrixUnit4s argument and pushes `move s3,a1` out of that call's
- * delay slot into the prologue.  Fencing before the call does not move
- * it (swept: LAUNDER/LAUNDER_V on pWork, on pSrc, a named pMat local,
- * and the fully direct copy form -- all 52).
- *
- * Also worth keeping: pWork->pModel has to be re-read after the first walk
- * (the `nTotal += pModel->nHairNum` line) or gcc parks it in a callee-saved
- * register and the whole register assignment shifts.
- *
- * Rebuild the palette from the current static pose.
+/* Rebuild the palette from the current static pose.
  *
  * The root matrix is saved off to the work area's 0x720 slot and the live
  * one reset to identity, then the element walk is run twice: once over the
