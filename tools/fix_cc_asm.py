@@ -1719,6 +1719,106 @@ def exchange_slot_with_prior(flat, specs):
     return out
 
 
+def retime_branch_to_call(flat, sites):
+    """Move a pre-branch update into the following call's delay slot.
+
+    At FUNC:N (N uses the gcc-filled branch/jump count), accept the strict
+    shape `UPDATE; plain branch / ARG; jal / NEXT`. UPDATE moves into the
+    jal delay slot and NEXT moves just after the call.  This is the retail
+    schedule for loops where GCC hoists UPDATE over an exit test to fill a
+    load-use gap, then uses NEXT as call-slot filler.
+    """
+    if not sites:
+        return flat
+    out = list(flat)
+    applied = set()
+    likely = re.compile(
+        r'^\t(?:beql|bnel|beqzl|bnezl|bgezl|bgtzl|blezl|bltzl|'
+        r'bc1tl|bc1fl)[ \t]')
+    for spec in sites:
+        try:
+            func, site_text = spec.split(':')
+            want = int(site_text)
+        except (ValueError, TypeError):
+            raise SystemExit("--retime-branch-call: bad site %r "
+                             "(want FUNC:N)" % spec)
+        cur = None
+        branch_idx = 0
+        branch_i = None
+        for i, line in enumerate(out):
+            if line.startswith("\t.ent\t"):
+                cur = line.split("\t")[-1]
+                branch_idx = 0
+            if (not RE_ANY_JUMP_OR_BRANCH.match(line) or i < 2
+                    or i + 1 >= len(out)
+                    or out[i - 2].strip().replace("\t", " ") != ".set noreorder"
+                    or out[i - 1].strip().replace("\t", " ") != ".set nomacro"
+                    or not RE_INSN.match(out[i + 1])):
+                continue
+            if cur == func and branch_idx == want:
+                branch_i = i
+                break
+            if cur == func:
+                branch_idx += 1
+        if branch_i is None:
+            raise SystemExit("--retime-branch-call: site not found: %s" % spec)
+        branch = out[branch_i]
+        if likely.match(branch) or branch.startswith(("\tjal\t", "\tj\t")):
+            raise SystemExit("--retime-branch-call: %s is not a plain "
+                             "conditional branch" % spec)
+        prior_i = branch_i - 3
+        while prior_i >= 0 and not RE_INSN.match(out[prior_i]):
+            if out[prior_i].endswith(":"):
+                prior_i = -1
+                break
+            prior_i -= 1
+        if prior_i < 0:
+            raise SystemExit("--retime-branch-call: %s has no pre-branch "
+                             "instruction" % spec)
+        call_i = branch_i + 2
+        while call_i < len(out) and not RE_INSN.match(out[call_i]):
+            if out[call_i].endswith(":"):
+                call_i = len(out)
+                break
+            call_i += 1
+        if (call_i >= len(out) or not out[call_i].startswith("\tjal\t")
+                or call_i + 1 >= len(out)
+                or not RE_INSN.match(out[call_i + 1])):
+            raise SystemExit("--retime-branch-call: %s is not followed by a "
+                             "filled jal" % spec)
+        update = out[prior_i]
+        branch_slot = out[branch_i + 1]
+        next_update = out[call_i + 1]
+        branch_reads = insn_regs(branch)[1]
+        if (not swap_ok(update, branch_slot)
+                or not swap_ok(update, next_update)
+                or insn_regs(update)[0] & branch_reads):
+            raise SystemExit("--retime-branch-call: %s dependency check "
+                             "failed" % spec)
+
+        out[call_i + 1] = update
+        del out[prior_i]
+        call_i -= 1
+        reorder_i = call_i + 2
+        while reorder_i < len(out):
+            if out[reorder_i].strip().replace("\t", " ") == ".set reorder":
+                break
+            if RE_INSN.match(out[reorder_i]):
+                reorder_i = len(out)
+                break
+            reorder_i += 1
+        if reorder_i >= len(out):
+            raise SystemExit("--retime-branch-call: %s missing call reorder "
+                             "boundary" % spec)
+        out.insert(reorder_i + 1, next_update)
+        applied.add(spec)
+    missing = set(sites) - applied
+    if missing:
+        raise SystemExit("--retime-branch-call: site(s) not found: %s" %
+                         ",".join(sorted(missing)))
+    return out
+
+
 def rebase_stack_memory(flat, specs):
     """Express a stack access through an already-computed stack pointer.
 
@@ -2029,6 +2129,7 @@ def main(path, omitted_hazards, barrier_return_store=None,
          swap_adjacent=None, swap_slot=None, mtc1_nop=None,
          swap_mem_slot=None,
          exchange_slot_prior=None,
+         retime_branch_call=None,
          swap_slot_tgt=None, rotate=None, swap_regs=None,
          swap_reg_sources=None,
          exchange_derived=None,
@@ -2445,6 +2546,10 @@ def main(path, omitted_hazards, barrier_return_store=None,
         flat = "\n".join(out).split("\n")
         out = exchange_slot_with_prior(flat, exchange_slot_prior)
 
+    if retime_branch_call:
+        flat = "\n".join(out).split("\n")
+        out = retime_branch_to_call(flat, retime_branch_call)
+
     if swap_slot_tgt:
         flat = "\n".join(out).split("\n")
         out = swap_slot_target(flat, swap_slot_tgt)
@@ -2622,6 +2727,11 @@ if __name__ == "__main__":
                         help="exchange a gcc-filled delay slot with its "
                              "BACK-th preceding independent instruction; "
                              "comma-separated FUNC:N:BACK specs")
+    parser.add_argument("--retime-branch-call", default=None,
+                        metavar="SITES",
+                        help="retime UPDATE; branch/ARG; jal/NEXT to "
+                             "branch/ARG; jal/UPDATE; NEXT at named "
+                             "gcc-filled branch sites")
     parser.add_argument("--rebase-stack-mem", action="append", default=None,
                         metavar="FUNC:SITES:BASE:BIAS",
                         help="rewrite named OFF($sp) memory sites through an "
@@ -2731,6 +2841,7 @@ if __name__ == "__main__":
          scope(args.swap_into_slot), scope(args.mtc1_nop),
          scope(args.swap_mem_into_slot),
          [t for t in (args.exchange_slot_prior or "").split(',') if t],
+         scope(args.retime_branch_call),
          scope(args.swap_slot_target), scope(args.rotate),
          args.swap_regs,
          [t for t in (args.swap_reg_sources or "").split(',') if t],

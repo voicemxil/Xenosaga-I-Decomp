@@ -310,6 +310,7 @@ FILE_FIX_FLAGS = {
     "MAP.c": ("--omit-hazard mov.s "
               "--exchange-derived-results MAP_updateUnitEnemy:14 "
               "--swap-regs MAP_updateUnitEnemy:2-5:16,18"),
+    "Party.c": "--retime-branch-call PartyAttackerGet:2",
     # ACT_setArms: gcc annuls the arm-slot compare's branch because it
     # filled the delay slot with a copy of the merge point's instruction;
     # the original executes that copy unconditionally and re-does it at the

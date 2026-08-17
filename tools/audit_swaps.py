@@ -84,6 +84,7 @@ REORDER_FLAGS = ("--swap-adjacent", "--rotate", "--rotate-seq",
                  "--post-rotate-seq",
                  "--swap-into-slot", "--swap-mem-into-slot",
                  "--exchange-slot-prior",
+                 "--retime-branch-call",
                  "--swap-slot-target",
                  "--hoist-div-arg", "--retime-branch-slot",
                  "--swap-fp-operands", "--swap-int-operands")
